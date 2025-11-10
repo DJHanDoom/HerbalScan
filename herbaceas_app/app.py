@@ -1422,12 +1422,29 @@ def analyze_parcela(parcela):
             try:
                 # Obter apelidos existentes para padronização
                 existing_apelidos = list(analysis_data['especies_unificadas'].keys())
-                if len(existing_apelidos) > 0:
-                    print(f"Apelidos existentes para referência: {existing_apelidos}")
+                
+                # Carregar espécies de referência
+                reference_apelidos = []
+                try:
+                    ref_file = os.path.join(os.path.dirname(__file__), 'reference_species.json')
+                    if os.path.exists(ref_file):
+                        with open(ref_file, 'r', encoding='utf-8') as f:
+                            ref_species = json.load(f)
+                            reference_apelidos = [sp['apelido'] for sp in ref_species if sp.get('apelido')]
+                            if reference_apelidos:
+                                print(f"📚 Espécies de referência carregadas: {reference_apelidos}")
+                except Exception as e:
+                    print(f"⚠️ Erro ao carregar espécies de referência: {e}")
+                
+                # Combinar apelidos existentes + referências (sem duplicatas)
+                all_apelidos = list(set(existing_apelidos + reference_apelidos))
+                
+                if len(all_apelidos) > 0:
+                    print(f"Apelidos para padronização: {all_apelidos}")
                     # Adicionar aos parâmetros do template
                     if template_config.get('params') is None:
                         template_config['params'] = {}
-                    template_config['params']['existing_species'] = existing_apelidos
+                    template_config['params']['existing_species'] = all_apelidos
                 
                 # Analisar imagem com IA selecionada (com retry se retornar vazio)
                 max_retries = 2
@@ -1677,11 +1694,28 @@ def analyze_additional_images():
     
     # Obter apelidos existentes para padronização
     existing_apelidos = list(analysis_data['especies_unificadas'].keys())
-    if len(existing_apelidos) > 0 and prompt_config.get('params') is None:
-        prompt_config['params'] = {}
     
-    if existing_apelidos:
-        prompt_config['params']['existing_apelidos'] = existing_apelidos
+    # Carregar espécies de referência
+    reference_apelidos = []
+    try:
+        ref_file = os.path.join(os.path.dirname(__file__), 'reference_species.json')
+        if os.path.exists(ref_file):
+            with open(ref_file, 'r', encoding='utf-8') as f:
+                ref_species = json.load(f)
+                reference_apelidos = [sp['apelido'] for sp in ref_species if sp.get('apelido')]
+                if reference_apelidos:
+                    print(f"📚 Espécies de referência carregadas: {reference_apelidos}")
+    except Exception as e:
+        print(f"⚠️ Erro ao carregar espécies de referência: {e}")
+    
+    # Combinar apelidos existentes + referências (sem duplicatas)
+    all_apelidos = list(set(existing_apelidos + reference_apelidos))
+    
+    if len(all_apelidos) > 0:
+        if prompt_config.get('params') is None:
+            prompt_config['params'] = {}
+        prompt_config['params']['existing_species'] = all_apelidos
+        print(f"Apelidos para padronização: {all_apelidos}")
 
     novas_subparcelas = []
     
@@ -2768,17 +2802,38 @@ def restore_analysis():
                 'subparcelas': {}
             }
         
-        # Restaurar imagens
-        images = [img_info['path'] for img_info in saved_data.get('images', []) if os.path.exists(img_info['path'])]
-        analysis_data['parcelas'][parcela_name]['images'] = images
+        # Restaurar imagens com estrutura correta
+        images_list = []
+        for img_info in saved_data.get('images', []):
+            if isinstance(img_info, dict):
+                if os.path.exists(img_info.get('path', '')):
+                    images_list.append(img_info)
+            elif isinstance(img_info, str) and os.path.exists(img_info):
+                # Reconstruir estrutura se for apenas string
+                images_list.append({
+                    'filename': os.path.basename(img_info),
+                    'path': img_info,
+                    'subparcela': len(images_list) + 1
+                })
+        
+        analysis_data['parcelas'][parcela_name]['images'] = images_list
         
         # Restaurar subparcelas e espécies
         analysis_data['parcelas'][parcela_name]['subparcelas'] = saved_data.get('subparcelas', {})
         
-        # Restaurar espécies unificadas
-        if parcela_name not in analysis_data['especies_unificadas']:
-            analysis_data['especies_unificadas'][parcela_name] = {}
-        analysis_data['especies_unificadas'][parcela_name] = saved_data.get('especies_unificadas', {}).get(parcela_name, {})
+        # Restaurar espécies unificadas (corrigir aninhamento duplo)
+        especies_data = saved_data.get('especies_unificadas', {})
+        if parcela_name in especies_data:
+            # Já está aninhado por parcela no arquivo salvo
+            analysis_data['especies_unificadas'][parcela_name] = especies_data[parcela_name]
+        else:
+            # Dados diretos (formato antigo)
+            analysis_data['especies_unificadas'][parcela_name] = especies_data
+        
+        print(f"✓ Análise restaurada: {parcela_name}")
+        print(f"✓ Images: {len(images_list)}")
+        print(f"✓ Subparcelas: {len(saved_data.get('subparcelas', {}))}")
+        print(f"✓ Espécies: {len(analysis_data['especies_unificadas'][parcela_name])}")
         
         return jsonify({
             'success': True,
@@ -3040,6 +3095,15 @@ def import_complete_analysis():
                 if filename in image_mapping:
                     subparcela['image_path'] = image_mapping[filename]
             
+            # Reconstruir lista de images com estrutura correta
+            images_list = []
+            for idx, (filename, new_path) in enumerate(sorted(image_mapping.items()), 1):
+                images_list.append({
+                    'filename': filename,
+                    'path': new_path,
+                    'subparcela': idx
+                })
+            
             # Restaurar dados na memória
             if parcela_name not in analysis_data['parcelas']:
                 analysis_data['parcelas'][parcela_name] = {
@@ -3048,13 +3112,14 @@ def import_complete_analysis():
                 }
             
             analysis_data['parcelas'][parcela_name]['subparcelas'] = imported_data['subparcelas']
-            analysis_data['parcelas'][parcela_name]['images'] = list(image_mapping.values())
+            analysis_data['parcelas'][parcela_name]['images'] = images_list
             
-            # Restaurar espécies unificadas
-            if parcela_name not in analysis_data['especies_unificadas']:
-                analysis_data['especies_unificadas'][parcela_name] = {}
-            
+            # Restaurar espécies unificadas (já vem no formato correto, sem nível extra de aninhamento)
             analysis_data['especies_unificadas'][parcela_name] = imported_data.get('especies_unificadas', {})
+            
+            print(f"✓ Análise importada: {parcela_name}")
+            print(f"✓ Subparcelas: {len(imported_data['subparcelas'])}")
+            print(f"✓ Espécies: {len(imported_data.get('especies_unificadas', {}))}")
             
             # Limpar diretório temporário
             shutil.rmtree(temp_dir, ignore_errors=True)

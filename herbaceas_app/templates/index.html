@@ -22,9 +22,14 @@
                     <h2>📂 Análise Salva</h2>
                     <p class="info-text">Continue uma análise anterior ou inicie uma nova abaixo.</p>
                 </div>
-                <button id="load-analysis-initial-btn" class="btn btn-secondary" onclick="AnalysisManager.showLoadDialog()">
-                    📂 Carregar Análise
-                </button>
+                <div style="display: flex; gap: 10px;">
+                    <button id="load-analysis-initial-btn" class="btn btn-secondary" onclick="AnalysisManager.showLoadDialog()">
+                        📂 Carregar Análise
+                    </button>
+                    <button id="import-zip-initial-btn" class="btn btn-info" onclick="AnalysisManager.importCompleteZip()">
+                        📥 Importar ZIP
+                    </button>
+                </div>
             </div>
         </section>
 
