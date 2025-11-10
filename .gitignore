@@ -62,6 +62,17 @@ herbaceas_app/saved_analyses/
 # KML files (podem ser grandes)
 *.kml
 
+# Pasta cymi e seus arquivos (incluídos por engano)
+cymi/
+Imagem do WhatsApp de*.jpg
+TimePhoto_*.jpg
+Nota*.pdf
+nota.pdf
+uber*.pdf
+Parcela*_Herbaceas_*.xlsx
+Planilha_Custos_*.xlsx
+subparcelasHerbaceas*.xlsx
+
 # Excel temporários
 ~$*.xlsx
 
