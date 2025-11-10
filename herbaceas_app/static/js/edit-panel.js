@@ -94,6 +94,13 @@ function editSpecies(apelidoOriginal) {
                         <input type="text" id="edit-familia" value="${especie.familia || ''}"
                                placeholder="Ex: Poaceae">
                     </div>
+
+                    <div class="especie-edit-field full-width">
+                        <label>🔗 Link das Fotos (URL)</label>
+                        <input type="url" id="edit-link-fotos" value="${especie.link_fotos || ''}"
+                               placeholder="https://exemplo.com/fotos-da-especie">
+                        <small style="color: #718096; margin-top: 4px;">Cole o link para fotos de referência da espécie</small>
+                    </div>
                 </div>
 
                 <div style="margin-top: 20px; padding: 15px; background: #f7fafc; border-radius: 8px;">
@@ -113,6 +120,7 @@ function editSpecies(apelidoOriginal) {
         const genero = document.getElementById('edit-genero').value.trim();
         const especieNome = document.getElementById('edit-especie').value.trim();
         const familia = document.getElementById('edit-familia').value.trim();
+        const linkFotos = document.getElementById('edit-link-fotos').value.trim();
 
         if (!apelidoUsuario) {
             showAlert('error', 'Apelido personalizado é obrigatório');
@@ -127,7 +135,8 @@ function editSpecies(apelidoOriginal) {
                     apelido_usuario: apelidoUsuario,
                     genero,
                     especie: especieNome,
-                    familia
+                    familia,
+                    link_fotos: linkFotos
                 })
             });
 
@@ -137,7 +146,7 @@ function editSpecies(apelidoOriginal) {
                 // Atualizar appState.especies
                 appState.especies[apelidoOriginal] = result.especie;
                 
-                // 🔧 FIX: Propagar TODAS as alterações (incluindo apelido_usuario) para subparcelas
+                // 🔧 FIX: Propagar TODAS as alterações (incluindo apelido_usuario e link_fotos) para subparcelas
                 appState.analysisResults.forEach(subparcela => {
                     subparcela.especies.forEach(esp => {
                         if (esp.apelido === apelidoOriginal) {
@@ -147,6 +156,7 @@ function editSpecies(apelidoOriginal) {
                             esp.genero = genero;
                             esp.especie = especieNome;
                             esp.familia = familia;
+                            esp.link_fotos = linkFotos;
                         }
                     });
                 });
@@ -242,6 +252,13 @@ function editSubparcelaEspeciePanel(subparcela, apelido) {
                             <option value="-" ${especie.forma_vida === '-' ? 'selected' : ''}>Outro</option>
                         </select>
                     </div>
+
+                    <div class="especie-edit-field full-width">
+                        <label>🔗 Link das Fotos (URL)</label>
+                        <input type="url" id="edit-link-fotos" value="${especie.link_fotos || ''}"
+                               placeholder="https://exemplo.com/fotos-da-especie">
+                        <small style="color: #718096; margin-top: 4px;">Cole o link para fotos de referência da espécie</small>
+                    </div>
                 </div>
 
                 <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px;">
@@ -263,6 +280,7 @@ function editSubparcelaEspeciePanel(subparcela, apelido) {
         const cobertura = parseFloat(document.getElementById('edit-cobertura').value);
         const altura = parseFloat(document.getElementById('edit-altura').value);
         const formaVida = document.getElementById('edit-forma-vida').value;
+        const linkFotos = document.getElementById('edit-link-fotos').value.trim();
 
         if (isNaN(cobertura) || isNaN(altura) || cobertura < 0 || cobertura > 100 || altura < 0) {
             showAlert('error', 'Valores inválidos. Verifique cobertura (0-100) e altura (≥0)');
@@ -280,7 +298,8 @@ function editSubparcelaEspeciePanel(subparcela, apelido) {
                     observacoes,
                     cobertura,
                     altura,
-                    forma_vida: formaVida
+                    forma_vida: formaVida,
+                    link_fotos: linkFotos
                 })
             });
 
@@ -360,6 +379,12 @@ function addEspecieToSubparcelaPanel(subparcela) {
                         <label>Família (opcional)</label>
                         <input type="text" id="new-familia" placeholder="Ex: Fabaceae">
                     </div>
+
+                    <div class="especie-edit-field full-width">
+                        <label>🔗 Link das Fotos (URL)</label>
+                        <input type="url" id="new-link-fotos" placeholder="https://exemplo.com/fotos-da-especie">
+                        <small style="color: #718096; margin-top: 4px;">Cole o link para fotos de referência da espécie</small>
+                    </div>
                 </div>
             </div>
         </div>
@@ -373,6 +398,7 @@ function addEspecieToSubparcelaPanel(subparcela) {
         const genero = document.getElementById('new-genero').value.trim();
         const especieNome = document.getElementById('new-especie').value.trim();
         const familia = document.getElementById('new-familia').value.trim();
+        const linkFotos = document.getElementById('new-link-fotos').value.trim();
 
         if (!apelido || isNaN(cobertura) || isNaN(altura) || !formaVida) {
             showAlert('error', 'Preencha todos os campos obrigatórios');
@@ -398,7 +424,8 @@ function addEspecieToSubparcelaPanel(subparcela) {
                         forma_vida: formaVida,
                         genero,
                         especie: especieNome,
-                        familia
+                        familia,
+                        link_fotos: linkFotos
                     }
                 })
             });

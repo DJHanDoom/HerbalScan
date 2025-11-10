@@ -1915,6 +1915,8 @@ def update_especie(apelido_original):
         especie['especie'] = data['especie']
     if 'familia' in data:
         especie['familia'] = data['familia']
+    if 'link_fotos' in data:
+        especie['link_fotos'] = data['link_fotos']
     
     # CRÍTICO: Propagar mudanças para todas as subparcelas que contenham esta espécie
     for parcela_nome, parcela in analysis_data['parcelas'].items():
@@ -1932,8 +1934,10 @@ def update_especie(apelido_original):
                         esp['especie'] = data['especie']
                     if 'familia' in data:
                         esp['familia'] = data['familia']
+                    if 'link_fotos' in data:
+                        esp['link_fotos'] = data['link_fotos']
 
-    print(f"✓ Espécie '{apelido_original}' atualizada em especies_unificadas e propagada para subparcelas (incluindo apelido exibido)")
+    print(f"✓ Espécie '{apelido_original}' atualizada em especies_unificadas e propagada para subparcelas (incluindo apelido exibido e link fotos)")
 
     return jsonify({
         'success': True,
@@ -2121,6 +2125,7 @@ def add_especie():
             'genero': nova_especie.get('genero', ''),
             'especie': nova_especie.get('especie', ''),
             'familia': nova_especie.get('familia', ''),
+            'link_fotos': nova_especie.get('link_fotos', ''),
             'ocorrencias': 0
         }
 
@@ -2132,7 +2137,11 @@ def add_especie():
         'apelido': apelido,
         'cobertura': nova_especie['cobertura'],
         'altura': nova_especie['altura'],
-        'forma_vida': nova_especie['forma_vida']
+        'forma_vida': nova_especie['forma_vida'],
+        'genero': nova_especie.get('genero', ''),
+        'especie': nova_especie.get('especie', ''),
+        'familia': nova_especie.get('familia', ''),
+        'link_fotos': nova_especie.get('link_fotos', '')
     })
 
     return jsonify({
@@ -2216,6 +2225,8 @@ def update_especie_subparcela(parcela, subparcela, apelido):
                 esp['altura'] = data['altura']
             if 'forma_vida' in data:
                 esp['forma_vida'] = data['forma_vida']
+            if 'link_fotos' in data:
+                esp['link_fotos'] = data['link_fotos']
             especie_encontrada = True
             break
 
@@ -2223,15 +2234,17 @@ def update_especie_subparcela(parcela, subparcela, apelido):
         return jsonify({'error': 'Espécie não encontrada nesta subparcela'}), 404
 
     # Atualizar especies_unificadas se campos taxonômicos foram alterados
-    if apelido in analysis_data['especies_unificadas']:
-        especie_unificada = analysis_data['especies_unificadas'][apelido]
+    if parcela in analysis_data['especies_unificadas'] and apelido in analysis_data['especies_unificadas'][parcela]:
+        especie_unificada = analysis_data['especies_unificadas'][parcela][apelido]
         if 'familia' in data:
             especie_unificada['familia'] = data['familia']
         if 'genero' in data:
             especie_unificada['genero'] = data['genero']
         if 'especie' in data:
             especie_unificada['especie'] = data['especie']
-        print(f"✓ Espécie '{apelido}' também atualizada em especies_unificadas")
+        if 'link_fotos' in data:
+            especie_unificada['link_fotos'] = data['link_fotos']
+        print(f"✓ Espécie '{apelido}' também atualizada em especies_unificadas (incluindo link fotos)")
 
     return jsonify({
         'success': True,
@@ -2578,7 +2591,7 @@ def export_excel():
 
     # Cabeçalho
     headers = ['Parcela', 'Subparcela', 'Índice', 'Apelido Original', 'Apelido Usuário',
-               'Gênero', 'Espécie', 'Família', 'Cobertura (%)', 'Altura (cm)', 'Forma de Vida']
+               'Gênero', 'Espécie', 'Família', 'Cobertura (%)', 'Altura (cm)', 'Forma de Vida', '🔗 Link Fotos']
     ws.append(headers)
 
     # Formatação do cabeçalho
@@ -2610,19 +2623,20 @@ def export_excel():
                 esp_info.get('familia', ''),
                 esp_data['cobertura'],
                 esp_data['altura'],
-                esp_data['forma_vida']
+                esp_data['forma_vida'],
+                esp_info.get('link_fotos', '')
             ]
             ws.append(row_data)
 
     # Ajustar largura das colunas
-    column_widths = [10, 12, 8, 25, 25, 15, 20, 20, 12, 12, 14]
+    column_widths = [10, 12, 8, 25, 25, 15, 20, 20, 12, 12, 14, 40]
     for idx, width in enumerate(column_widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
 
     # Criar aba de resumo
     ws_resumo = wb.create_sheet("Resumo por Espécie")
     resumo_headers = ['Apelido Original', 'Apelido Usuário', 'Gênero', 'Espécie',
-                      'Família', 'Nº Ocorrências', 'Forma de Vida']
+                      'Família', 'Nº Ocorrências', 'Forma de Vida', '🔗 Link Fotos']
     ws_resumo.append(resumo_headers)
 
     # Formatação do cabeçalho do resumo
@@ -2642,11 +2656,12 @@ def export_excel():
             info['familia'],
             info['ocorrencias'],
             # Determinar forma de vida (pegar da primeira ocorrência)
-            '-'
+            '-',
+            info.get('link_fotos', '')
         ])
 
     # Ajustar largura das colunas do resumo
-    resumo_widths = [25, 25, 15, 20, 20, 14, 14]
+    resumo_widths = [25, 25, 15, 20, 20, 14, 14, 40]
     for idx, width in enumerate(resumo_widths, 1):
         ws_resumo.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
 

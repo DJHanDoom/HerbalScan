@@ -1262,7 +1262,10 @@ function displaySubparcelas() {
             return `
                 <div class="especie-item">
                     <div class="especie-info">
-                        <div class="especie-nome">${getDisplayName(esp.apelido)}</div>
+                        <div class="especie-nome">
+                            ${getDisplayName(esp.apelido)}
+                            ${esp.link_fotos ? `<a href="${esp.link_fotos}" target="_blank" class="btn btn-small btn-info" style="margin-left: 8px; padding: 2px 8px; font-size: 0.85rem;" title="Ver fotos de referência">🔗 Fotos</a>` : ''}
+                        </div>
                         <div class="especie-dados">
                             ${getDisplayTaxonomy(esp.apelido)}<br>
                             Cobertura: ${esp.cobertura}% | Altura: ${esp.altura}cm | ${esp.forma_vida}
@@ -2509,7 +2512,10 @@ function loadViewerSpecies() {
     speciesList.innerHTML = result.especies.map((esp, index) => `
         <div class="viewer-species-item" id="viewer-species-${index}">
             <div class="viewer-species-view" id="viewer-species-view-${index}">
-                <div class="viewer-species-name">🌿 ${esp.apelido}</div>
+                <div class="viewer-species-name">
+                    🌿 ${esp.apelido}
+                    ${esp.link_fotos ? `<a href="${esp.link_fotos}" target="_blank" class="viewer-photo-link" title="Ver fotos de referência">🔗 Ver Fotos</a>` : ''}
+                </div>
                 ${esp.genero || esp.familia ? `
                     <div style="color: #a0aec0; font-size: 0.9rem; margin: 8px 0; font-style: italic;">
                         ${esp.genero ? `<strong>${esp.genero}</strong>` : ''}
@@ -2593,6 +2599,13 @@ function loadViewerSpecies() {
                         <option value="Subarbusto" ${esp.forma_vida === 'Subarbusto' ? 'selected' : ''}>Subarbusto</option>
                     </select>
                 </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: #cbd5e0; font-size: 0.85rem; margin-bottom: 5px;">🔗 Link das Fotos (URL)</label>
+                    <input type="url" id="viewer-edit-link-fotos-${index}" value="${esp.link_fotos || ''}" 
+                           placeholder="https://exemplo.com/fotos-da-especie"
+                           style="width: 100%; padding: 10px; background: #1a202c; border: 2px solid #4a5568; border-radius: 6px; color: white; font-size: 0.95rem;">
+                    <small style="color: #a0aec0; font-size: 0.8rem; display: block; margin-top: 4px;">Cole o link para fotos de referência da espécie</small>
+                </div>
                 <div style="display: flex; gap: 8px;">
                     <button class="viewer-edit-btn" onclick="saveEditSpeciesInViewer(${index})" style="flex: 1;">
                         ✓ Salvar
@@ -2638,6 +2651,7 @@ async function saveEditSpeciesInViewer(especieIndex) {
     const cobertura = parseInt(document.getElementById(`viewer-edit-cobertura-${especieIndex}`).value) || 0;
     const altura = parseInt(document.getElementById(`viewer-edit-altura-${especieIndex}`).value) || 0;
     const forma_vida = document.getElementById(`viewer-edit-forma-${especieIndex}`).value;
+    const link_fotos = document.getElementById(`viewer-edit-link-fotos-${especieIndex}`).value.trim();
     
     if (!apelido) {
         showAlert('error', 'Nome da espécie é obrigatório');
@@ -2651,7 +2665,8 @@ async function saveEditSpeciesInViewer(especieIndex) {
         observacoes, 
         cobertura, 
         altura, 
-        forma_vida 
+        forma_vida,
+        link_fotos
     };
     
     try {
