@@ -15,19 +15,19 @@
             <p>Sistema de análise automatizada de cobertura vegetal em quadrados de 1x1m</p>
         </header>
 
-        <!-- Seção 0: Carregar Análise Existente -->
+        <!-- Seção 0: Importar ou Nova Análise -->
         <section class="card" id="load-analysis-section">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
-                    <h2>📂 Análise Salva</h2>
-                    <p class="info-text">Continue uma análise anterior ou inicie uma nova abaixo.</p>
+                    <h2>📂 Análise</h2>
+                    <p class="info-text">Importe uma análise anterior ou inicie uma nova abaixo.</p>
                 </div>
                 <div style="display: flex; gap: 10px;">
-                    <button id="load-analysis-initial-btn" class="btn btn-secondary" onclick="AnalysisManager.showLoadDialog()">
-                        📂 Carregar Análise
-                    </button>
                     <button id="import-zip-initial-btn" class="btn btn-info" onclick="AnalysisManager.importCompleteZip()">
-                        📥 Importar ZIP
+                        � Importar ZIP
+                    </button>
+                    <button id="new-analysis-btn" class="btn btn-success" onclick="startNewAnalysis()">
+                        ✨ Nova Análise
                     </button>
                 </div>
             </div>
@@ -144,7 +144,12 @@
             <h2>4. Visualização e Exportação</h2>
             <div class="results-summary" id="results-summary"></div>
             <div class="subparcelas-grid" id="subparcelas-grid"></div>
-            <button id="export-btn" class="btn btn-primary">Exportar para Excel</button>
+            <div style="display: flex; gap: 12px; margin-top: 20px;">
+                <button id="export-btn" class="btn btn-primary" style="flex: 1;">Exportar para Excel</button>
+                <button id="new-analysis-footer-btn" class="btn btn-success" onclick="startNewAnalysis()" style="flex: 1;">
+                    ✨ Nova Análise
+                </button>
+            </div>
             <div id="export-status"></div>
         </section>
     </div>

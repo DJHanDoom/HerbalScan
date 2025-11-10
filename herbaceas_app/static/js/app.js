@@ -1293,7 +1293,7 @@ function displaySubparcelas() {
             <div class="subparcela-header">
                 <span>Subparcela ${result.subparcela}</span>
                 <div style="display: flex; gap: 5px;">
-                    <button class="btn btn-small btn-secondary" onclick="openImageViewer(${result.subparcela}, '${result.image}')" title="Ver e editar">
+                    <button class="btn btn-small btn-secondary" onclick="openImageViewer(${result.subparcela}, '${result.image || result.filename}')" title="Ver e editar">
                         🖼️ Ver e Editar
                     </button>
                     <button class="btn btn-small btn-warning" onclick="reanalyzeSubparcela(event, ${result.subparcela})" title="Reanalisar com IA">
@@ -1302,7 +1302,7 @@ function displaySubparcelas() {
                     <button class="btn btn-small btn-success" onclick="addEspecieToSubparcela(${result.subparcela})">+ Adicionar</button>
                 </div>
             </div>
-            <img src="/static/uploads/${appState.parcelaNome}/${result.image}" class="subparcela-image" alt="Subparcela ${result.subparcela}" onclick="openImageViewer(${result.subparcela}, '${result.image}')" style="cursor: pointer;">
+            <img src="${result.image_path || '/static/uploads/' + appState.parcelaNome + '/' + (result.image || result.filename)}" class="subparcela-image" alt="Subparcela ${result.subparcela}" onclick="openImageViewer(${result.subparcela}, '${result.image || result.filename}')" style="cursor: pointer;">
             <div class="subparcela-content">
                 ${errorBanner}
                 ${especiesHTML}
@@ -2872,6 +2872,63 @@ function addViewerButtons() {
         card.appendChild(viewBtn);
         card.dataset.viewerBtnAdded = 'true';
     });
+}
+
+// Nova Análise - Limpa todo o sistema
+function startNewAnalysis() {
+    if (!confirm('⚠️ Tem certeza que deseja iniciar uma nova análise?\n\nTodos os dados da análise atual serão perdidos (espécies, subparcelas, configurações).\n\nRecomendamos exportar um ZIP antes de continuar.')) {
+        return;
+    }
+    
+    try {
+        // Limpar estado do backend
+        fetch('/api/clear-analysis', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('✓ Backend limpo');
+                }
+            })
+            .catch(err => console.log('Aviso: não foi possível limpar backend:', err));
+        
+        // Limpar estado do frontend
+        appState.parcelaNome = '';
+        appState.uploadedFiles = [];
+        appState.analysisResults = [];
+        appState.especies = {};
+        appState.especiesUnificadas = {};
+        appState.pendingNewImages = null;
+        
+        // Limpar elementos da interface
+        elements.parcelaName.value = 'Parcela_1';
+        elements.fileCount.textContent = 'Nenhum arquivo selecionado';
+        elements.previewContainer.innerHTML = '';
+        elements.uploadBtn.disabled = true;
+        elements.imageUpload.value = '';
+        elements.analysisResults.innerHTML = '';
+        elements.speciesTbody.innerHTML = '';
+        elements.resultsSummary.innerHTML = '';
+        elements.subparcelasGrid.innerHTML = '';
+        
+        // Ocultar todas as seções exceto upload
+        elements.analysisSection.style.display = 'none';
+        elements.speciesSection.style.display = 'none';
+        elements.exportSection.style.display = 'none';
+        elements.addImagesBtn.style.display = 'none';
+        elements.manualModeBtn.style.display = 'none';
+        
+        // Mostrar botões de análise novamente
+        elements.analyzeBtn.style.display = 'inline-block';
+        
+        // Scroll para o topo
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        
+        showAlert('success', '✨ Nova análise iniciada! Sistema limpo e pronto para uso.');
+        
+    } catch (error) {
+        console.error('Erro ao iniciar nova análise:', error);
+        showAlert('error', 'Erro ao limpar sistema: ' + error.message);
+    }
 }
 
 function showAlert(type, message) {

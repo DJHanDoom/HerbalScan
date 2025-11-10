@@ -2734,6 +2734,31 @@ def get_parcela_images(parcela_nome):
         'total': len(images_list)
     })
 
+@app.route('/api/clear-analysis', methods=['POST'])
+def clear_analysis():
+    """Limpa todos os dados de análise do backend para iniciar uma nova"""
+    global analysis_data
+    
+    try:
+        # Resetar estrutura de dados global
+        analysis_data = {
+            'parcelas': {},
+            'especies_unificadas': {}
+        }
+        
+        print("✓ Dados de análise limpos no backend")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Análise limpa com sucesso'
+        })
+    except Exception as e:
+        print(f"Erro ao limpar análise: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/analysis/save', methods=['POST'])
 def save_analysis():
     """Salva uma análise em progresso para continuar depois"""
