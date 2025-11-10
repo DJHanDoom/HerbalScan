@@ -1,0 +1,14 @@
+Flask==3.0.0
+openpyxl==3.1.2
+Werkzeug==3.0.1
+
+# IAs Premium - Instale apenas as que você vai usar
+anthropic>=0.72.0          # Para Claude
+openai>=1.52.0,<2.0.0      # Para GPT-4 Vision (também usado para DeepSeek)
+google-generativeai==0.8.0 # Para Gemini
+
+# IAs Gratuitas
+requests                   # Para Qwen e HuggingFace API calls
+
+# Dependências de compatibilidade
+httpx>=0.23.0,<1.0.0       # Requerido pelo openai e anthropic

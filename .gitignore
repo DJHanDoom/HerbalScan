@@ -1,0 +1,85 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Application specific
+herbaceas_app/static/uploads/*
+!herbaceas_app/static/uploads/.gitkeep
+herbaceas_app/exports/*
+!herbaceas_app/exports/.gitkeep
+herbaceas_app/custom_templates/
+herbaceas_app/saved_analyses/
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.bak
+
+# KML files (podem ser grandes)
+*.kml
+
+# Excel temporários
+~$*.xlsx
+
+# Arquivos de análise temporários
+analisar_parcela*.py
+atualizar_planilha*.py
+criar_planilha_custos.py
+test_gemini_direct.py
+
+# Documentação de troubleshooting (mantida localmente)
+CONFIGURAR_GEMINI_API.md
+CORRECAO_APIS.md
+CORREÇÃO_*.md
+FREE_AI_MODELS.md
+GPT4_TROUBLESHOOTING.md
+MELHORIAS_IMPLEMENTADAS.md
+MODAL_VER_E_EDITAR.md
+SOLUCAO_EMERGENCIA.md
+TROUBLESHOOTING.md
+USAR_GEMINI_GRATIS.md
+VERSAO_CORRIGIDA.md

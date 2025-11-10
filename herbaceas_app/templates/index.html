@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Análise de Vegetação Herbácea</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/edit-panel.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/prompt-config.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🌿 Análise de Vegetação Herbácea</h1>
+            <p>Sistema de análise automatizada de cobertura vegetal em quadrados de 1x1m</p>
+        </header>
+
+        <!-- Seção 0: Carregar Análise Existente -->
+        <section class="card" id="load-analysis-section">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h2>📂 Análise Salva</h2>
+                    <p class="info-text">Continue uma análise anterior ou inicie uma nova abaixo.</p>
+                </div>
+                <button id="load-analysis-initial-btn" class="btn btn-secondary" onclick="AnalysisManager.showLoadDialog()">
+                    📂 Carregar Análise
+                </button>
+            </div>
+        </section>
+
+        <!-- Seção 1: Upload de Imagens -->
+        <section class="card" id="upload-section">
+            <h2>1. Upload de Imagens</h2>
+            <div class="form-group">
+                <label for="parcela-name">Nome da Parcela:</label>
+                <input type="text" id="parcela-name" placeholder="Ex: Parcela_9" value="Parcela_9">
+            </div>
+            <div class="form-group">
+                <label for="image-upload" class="file-label">
+                    <span class="file-button">Selecionar Imagens</span>
+                    <span id="file-count">Nenhum arquivo selecionado</span>
+                </label>
+                <input type="file" id="image-upload" multiple accept="image/*" style="display: none;">
+            </div>
+            <div id="preview-container" class="preview-grid"></div>
+            <button id="upload-btn" class="btn btn-primary" disabled>Enviar Imagens</button>
+        </section>
+
+        <!-- Seção 2: Análise -->
+        <section class="card" id="analysis-section" style="display: none;">
+            <h2>2. Análise das Subparcelas</h2>
+            <p class="info-text">Selecione o modelo de IA e inicie a análise automática das imagens.</p>
+
+            <div class="form-group">
+                <label for="ai-model">Modelo de IA:</label>
+                <select id="ai-model" class="ai-select">
+                    <option value="claude">Carregando modelos disponíveis...</option>
+                </select>
+                <p class="ai-info" id="ai-info"></p>
+            </div>
+
+            <!-- Seletor de versão do modelo Gemini -->
+            <div class="form-group" id="gemini-model-group" style="display: none;">
+                <label for="gemini-version">Versão do Gemini:</label>
+                <select id="gemini-version" class="ai-select">
+                    <option value="gemini-flash-latest">Flash Latest (Rápido, Recomendado)</option>
+                    <option value="gemini-2.5-flash">2.5 Flash (Rápido)</option>
+                    <option value="gemini-2.5-pro">2.5 Pro (Mais Poderoso) 🔥</option>
+                    <option value="gemini-pro-latest">Pro Latest (Mais Poderoso) 🔥</option>
+                    <option value="gemini-2.0-flash">2.0 Flash (Estável)</option>
+                </select>
+                <p class="ai-info-small">💡 Modelos "Pro" são mais precisos mas mais lentos</p>
+            </div>
+
+            <!-- Seletor de versão do modelo Claude -->
+            <div class="form-group" id="claude-model-group" style="display: none;">
+                <label for="claude-version">Versão do Claude:</label>
+                <select id="claude-version" class="ai-select">
+                    <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Set/2025 - Recomendado) 🔥</option>
+                    <option value="claude-opus-4-1-20250805">Claude Opus 4.1 (Ago/2025 - Mais Poderoso) 💎</option>
+                    <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Out/2025 - Mais Rápido) ⚡</option>
+                    <option value="claude-opus-4-20250514">Claude Opus 4 (Mai/2025)</option>
+                    <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Mai/2025)</option>
+                    <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (Out/2024)</option>
+                    <option value="claude-3-haiku-20240307">Claude 3 Haiku (Mar/2024)</option>
+                </select>
+                <p class="ai-info-small">💡 Sonnet 4.5 é o melhor custo-benefício! Opus 4.1 é o mais preciso. Haiku 4.5 é o mais rápido.</p>
+            </div>
+
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button id="config-prompt-btn" class="btn btn-secondary" onclick="PromptConfig.open()" style="flex: 0 0 auto;">
+                    ⚙️ Configurar Prompt
+                </button>
+                <button id="add-images-btn" class="btn btn-info" style="flex: 0 0 auto; display: none;">
+                    ➕ Adicionar Fotos
+                </button>
+                <button id="analyze-btn" class="btn btn-success" style="flex: 1;">
+                    Analisar Imagens
+                </button>
+            </div>
+            <input type="file" id="add-images-input" multiple accept="image/*" style="display: none;">
+            <div id="analysis-progress" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <p id="progress-text">Analisando...</p>
+            </div>
+            <div id="analysis-results"></div>
+        </section>
+
+        <!-- Seção 3: Gerenciamento de Espécies -->
+        <section class="card" id="species-section" style="display: none;">
+            <h2>3. Gerenciamento de Espécies</h2>
+            <p class="info-text">Edite os apelidos e adicione informações científicas às espécies identificadas.</p>
+            <div class="table-container">
+                <table id="species-table">
+                    <thead>
+                        <tr>
+                            <th>Apelido Original</th>
+                            <th>Apelido Personalizado</th>
+                            <th>Gênero</th>
+                            <th>Espécie</th>
+                            <th>Família</th>
+                            <th>Ocorrências</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="species-tbody">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Seção 4: Visualização e Exportação -->
+        <section class="card" id="export-section" style="display: none;">
+            <h2>4. Visualização e Exportação</h2>
+            <div class="results-summary" id="results-summary"></div>
+            <div class="subparcelas-grid" id="subparcelas-grid"></div>
+            <button id="export-btn" class="btn btn-primary">Exportar para Excel</button>
+            <div id="export-status"></div>
+        </section>
+    </div>
+
+    <!-- Overlay do Painel Lateral -->
+    <div id="edit-panel-overlay" class="edit-panel-overlay"></div>
+
+    <!-- Painel Lateral de Edição -->
+    <div id="edit-panel" class="edit-panel">
+        <div class="edit-panel-header">
+            <h2 id="edit-panel-title">Editar Espécie</h2>
+            <button class="edit-panel-close" onclick="closeEditPanel()">×</button>
+        </div>
+        <div class="edit-panel-content" id="edit-panel-body">
+            <!-- Conteúdo dinâmico -->
+        </div>
+        <div class="edit-panel-footer">
+            <button class="btn btn-secondary" onclick="closeEditPanel()">Cancelar</button>
+            <button class="btn btn-success" id="edit-panel-save">Salvar</button>
+        </div>
+    </div>
+
+    <!-- Modal de Subdivisão de Espécies -->
+    <div id="split-modal" class="split-modal">
+        <div class="split-overlay" onclick="closeSplitModal()"></div>
+        <div class="split-content">
+            <div class="split-header">
+                <h2>Subdividir Espécie</h2>
+                <button onclick="closeSplitModal()">×</button>
+            </div>
+            <div class="split-body" id="split-body">
+                <!-- Conteúdo dinâmico -->
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/edit-panel.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/prompt-config.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/analysis-manager.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/reference-species.js') }}"></script>
+</body>
+</html>

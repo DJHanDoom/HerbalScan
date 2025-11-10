@@ -1,0 +1,369 @@
+/* Painel Lateral de Edição */
+.edit-panel {
+    position: fixed;
+    right: -500px;
+    top: 0;
+    width: 500px;
+    height: 100vh;
+    background: white;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
+    transition: right 0.3s ease;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.edit-panel.active {
+    right: 0;
+}
+
+.edit-panel-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1999;
+    display: none;
+}
+
+.edit-panel-overlay.active {
+    display: block;
+}
+
+.edit-panel-header {
+    padding: 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.edit-panel-header h2 {
+    margin: 0;
+    font-size: 1.3rem;
+}
+
+.edit-panel-close {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: white;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.3s;
+}
+
+.edit-panel-close:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.edit-panel-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+}
+
+.edit-panel-footer {
+    padding: 15px 20px;
+    border-top: 1px solid #e2e8f0;
+    background: #f7fafc;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    flex-shrink: 0;
+}
+
+/* Edição Inline nas Subparcelas */
+.especie-item-inline-edit {
+    background: #fff;
+    border: 2px solid #667eea;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+}
+
+.inline-edit-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.inline-edit-field {
+    display: flex;
+    flex-direction: column;
+}
+
+.inline-edit-field label {
+    font-size: 0.85rem;
+    color: #4a5568;
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+
+.inline-edit-field input,
+.inline-edit-field select {
+    padding: 8px;
+    border: 1px solid #cbd5e0;
+    border-radius: 4px;
+    font-size: 0.95rem;
+}
+
+.inline-edit-field input:focus,
+.inline-edit-field select:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.inline-edit-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #e2e8f0;
+}
+
+/* Cards de Espécie Expandíveis */
+.especie-card {
+    background: white;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    margin-bottom: 12px;
+    overflow: hidden;
+    transition: all 0.3s;
+}
+
+.especie-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.especie-card-header {
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.especie-card-header:hover {
+    background: #f7fafc;
+}
+
+.especie-card-title {
+    flex: 1;
+}
+
+.especie-card-title h4 {
+    margin: 0 0 4px 0;
+    color: #2d3748;
+    font-size: 1.05rem;
+}
+
+.especie-card-subtitle {
+    font-size: 0.85rem;
+    color: #718096;
+}
+
+.especie-card-toggle {
+    color: #667eea;
+    font-size: 1.2rem;
+    transition: transform 0.3s;
+}
+
+.especie-card.expanded .especie-card-toggle {
+    transform: rotate(180deg);
+}
+
+.especie-card-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+
+.especie-card.expanded .especie-card-body {
+    max-height: 600px;
+}
+
+.especie-card-content {
+    padding: 0 15px 15px 15px;
+}
+
+.especie-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.especie-edit-field {
+    display: flex;
+    flex-direction: column;
+}
+
+.especie-edit-field label {
+    font-size: 0.85rem;
+    color: #4a5568;
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.especie-edit-field input,
+.especie-edit-field select,
+.especie-edit-field textarea {
+    padding: 10px;
+    border: 2px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    transition: border-color 0.3s;
+}
+
+.especie-edit-field input:focus,
+.especie-edit-field select:focus,
+.especie-edit-field textarea:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.especie-edit-field.full-width {
+    grid-column: 1 / -1;
+}
+
+.especie-card-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid #e2e8f0;
+}
+
+/* Tabela de Espécies com Edição Inline */
+.species-table-editable {
+    width: 100%;
+}
+
+.species-table-editable tr.editing {
+    background: #f0f4ff;
+}
+
+.species-table-editable td.editable {
+    padding: 4px;
+}
+
+.species-table-editable td.editable input {
+    width: 100%;
+    padding: 6px;
+    border: 1px solid #cbd5e0;
+    border-radius: 4px;
+}
+
+.edit-mode-indicator {
+    background: #667eea;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: inline-block;
+}
+
+/* Badges e Tags */
+.tag {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-right: 6px;
+}
+
+.tag-erva {
+    background: #c6f6d5;
+    color: #22543d;
+}
+
+.tag-arbusto {
+    background: #feebc8;
+    color: #7c2d12;
+}
+
+.tag-liana {
+    background: #e9d8fd;
+    color: #44337a;
+}
+
+.tag-bromelia {
+    background: #fbb6ce;
+    color: #702459;
+}
+
+.tag-cacto {
+    background: #fed7d7;
+    color: #742a2a;
+}
+
+.tag-plantula {
+    background: #bee3f8;
+    color: #2c5282;
+}
+
+/* Quick Edit Toolbar */
+.quick-edit-toolbar {
+    position: sticky;
+    top: 0;
+    background: white;
+    border-bottom: 2px solid #e2e8f0;
+    padding: 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    z-index: 10;
+}
+
+.quick-edit-toolbar-label {
+    font-weight: 600;
+    color: #4a5568;
+    margin-right: 8px;
+}
+
+/* Animações */
+@keyframes slideInRight {
+    from {
+        right: -500px;
+    }
+    to {
+        right: 0;
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* Responsivo */
+@media (max-width: 768px) {
+    .edit-panel {
+        width: 100%;
+        right: -100%;
+    }
+
+    .inline-edit-grid,
+    .especie-edit-grid {
+        grid-template-columns: 1fr;
+    }
+}

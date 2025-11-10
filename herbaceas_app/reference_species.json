@@ -1,0 +1,40 @@
+{
+  "species": [
+    {
+      "apelido": "flechinha",
+      "familia": "Poaceae",
+      "genero": "",
+      "especie": "",
+      "observacoes": "graminea esqualida, ereta, com folhas curtas lanceoladas e pilosas"
+    },
+    {
+      "apelido": "baginha braba",
+      "familia": "Fabaceae",
+      "genero": "",
+      "especie": "",
+      "observacoes": "leguminosa subarbustiva com folhas pinadas e foliolos arredondados"
+    },
+    {
+      "apelido": "erva de ouro",
+      "familia": "",
+      "genero": "",
+      "especie": "",
+      "observacoes": "erva com folhas simples pilosas - pelos longos eretos e dourados"
+    },
+    {
+      "apelido": "capim palito",
+      "familia": "",
+      "genero": "",
+      "especie": "",
+      "observacoes": "graminea com folhas cilindricas muito finas e longas, formando moitas densas"
+    },
+    {
+      "apelido": "capim russo",
+      "familia": "Poaceae",
+      "genero": "",
+      "especie": "",
+      "observacoes": "graminea com folhas mais largas, verde claro-esbranquiçado (glaucas) - com pilosidade densa, de pelos compridos e esbranquiçados"
+    }
+  ],
+  "updated_at": "2025-11-10T13:31:41.988168"
+}
