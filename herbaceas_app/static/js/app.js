@@ -162,7 +162,6 @@ async function checkLoadedAnalysis() {
                 
                 // Mostrar todas as seções necessárias
                 elements.analysisSection.style.display = 'block';
-                elements.resultsSection.style.display = 'block';
                 elements.speciesSection.style.display = 'block';
                 elements.exportSection.style.display = 'block';
                 
@@ -221,7 +220,7 @@ async function loadAvailableAIs() {
         });
 
         updateAIInfo();
-        handleAIChange(); // Mostrar dropdown do modelo selecionado
+        handleAIModelChange(); // Mostrar dropdown do modelo selecionado
 
     } catch (error) {
         console.error('Erro ao carregar IAs:', error);
@@ -789,7 +788,7 @@ async function startManualMode() {
         appState.especiesUnificadas = {};
         
         // Mostrar seções necessárias
-        elements.resultsSection.style.display = 'block';
+        elements.analysisSection.style.display = 'block';
         elements.speciesSection.style.display = 'block';
         elements.exportSection.style.display = 'block';
         elements.addImagesBtn.style.display = 'inline-block';
@@ -803,8 +802,8 @@ async function startManualMode() {
         
         showAlert('success', `Modo manual ativado! ${data.images.length} subparcelas prontas para edição. Clique em cada imagem para adicionar espécies.`);
         
-        // Scroll para resultados
-        elements.resultsSection.scrollIntoView({ behavior: 'smooth' });
+        // Scroll para análise
+        elements.analysisSection.scrollIntoView({ behavior: 'smooth' });
         
     } catch (error) {
         console.error('Erro ao iniciar modo manual:', error);
