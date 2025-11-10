@@ -65,6 +65,7 @@ const elements = {
     aiModel: document.getElementById('ai-model'),
     aiInfo: document.getElementById('ai-info'),
     analyzeBtn: document.getElementById('analyze-btn'),
+    manualModeBtn: document.getElementById('manual-mode-btn'),
     addImagesBtn: document.getElementById('add-images-btn'),
     addImagesInput: document.getElementById('add-images-input'),
     analysisSection: document.getElementById('analysis-section'),
@@ -86,6 +87,7 @@ elements.imageUpload.addEventListener('change', handleImageSelection);
 elements.uploadBtn.addEventListener('click', uploadImages);
 elements.aiModel.addEventListener('change', handleAIModelChange);
 elements.analyzeBtn.addEventListener('click', analyzeImages);
+elements.manualModeBtn.addEventListener('click', startManualMode);
 elements.addImagesBtn.addEventListener('click', () => elements.addImagesInput.click());
 elements.addImagesInput.addEventListener('change', handleAddImages);
 elements.exportBtn.addEventListener('click', exportToExcel);
@@ -138,21 +140,20 @@ async function checkLoadedAnalysis() {
                 
                 console.log(`✓ ${appState.analysisResults.length} subparcelas restauradas`);
                 
-                // Restaurar espécies unificadas no formato correto
-                if (especiesData.especies && especiesData.especies[parcela.nome]) {
-                    appState.especiesUnificadas = especiesData.especies[parcela.nome];
+                // Restaurar espécies unificadas (backend já retorna flat)
+                if (especiesData.especies) {
+                    appState.especiesUnificadas = especiesData.especies;
                     
                     // Converter para formato appState.especies (usado pela interface)
                     appState.especies = {};
                     Object.entries(appState.especiesUnificadas).forEach(([apelido, espData]) => {
                         appState.especies[apelido] = {
                             apelido_original: apelido,
-                            apelido_usuario: espData.apelido || apelido,
+                            apelido_usuario: espData.apelido_usuario || apelido,
                             genero: espData.genero || '',
                             especie: espData.especie || '',
                             familia: espData.familia || '',
-                            ocorrencias: espData.ocorrencias || [],
-                            cobertura_total: espData.cobertura_total || 0
+                            ocorrencias: espData.ocorrencias || 0
                         };
                     });
                     
@@ -741,6 +742,9 @@ async function uploadImages() {
             showAlert('success', data.message);
             elements.analysisSection.style.display = 'block';
             elements.analysisSection.scrollIntoView({ behavior: 'smooth' });
+            
+            // Mostrar botão de modo manual
+            elements.manualModeBtn.style.display = 'inline-block';
         } else {
             showAlert('error', data.error || 'Erro ao enviar imagens');
         }
@@ -749,6 +753,62 @@ async function uploadImages() {
     } finally {
         elements.uploadBtn.disabled = false;
         elements.uploadBtn.textContent = 'Enviar Imagens';
+    }
+}
+
+// Função para iniciar modo manual (sem IA)
+async function startManualMode() {
+    if (!appState.parcelaNome) {
+        showAlert('error', 'Nenhuma parcela definida');
+        return;
+    }
+    
+    try {
+        showAlert('info', 'Iniciando modo manual...');
+        
+        // Buscar lista de imagens enviadas
+        const response = await fetch(`/api/parcela/${appState.parcelaNome}/images`);
+        const data = await response.json();
+        
+        if (!data.success || !data.images || data.images.length === 0) {
+            showAlert('error', 'Nenhuma imagem encontrada para esta parcela');
+            return;
+        }
+        
+        // Criar subparcelas vazias para cada imagem
+        appState.analysisResults = data.images.map((img, idx) => ({
+            subparcela_id: idx + 1,
+            image_path: img.path,
+            especies: [],
+            analise_completa: false,  // Marcar como incompleta inicialmente
+            manual_mode: true  // Flag para indicar modo manual
+        }));
+        
+        // Inicializar espécies vazias
+        appState.especies = {};
+        appState.especiesUnificadas = {};
+        
+        // Mostrar seções necessárias
+        elements.resultsSection.style.display = 'block';
+        elements.speciesSection.style.display = 'block';
+        elements.exportSection.style.display = 'block';
+        elements.addImagesBtn.style.display = 'inline-block';
+        
+        // Ocultar botão de análise com IA e modo manual
+        elements.analyzeBtn.style.display = 'none';
+        elements.manualModeBtn.style.display = 'none';
+        
+        // Renderizar subparcelas vazias
+        displayResults();
+        
+        showAlert('success', `Modo manual ativado! ${data.images.length} subparcelas prontas para edição. Clique em cada imagem para adicionar espécies.`);
+        
+        // Scroll para resultados
+        elements.resultsSection.scrollIntoView({ behavior: 'smooth' });
+        
+    } catch (error) {
+        console.error('Erro ao iniciar modo manual:', error);
+        showAlert('error', 'Erro ao iniciar modo manual: ' + error.message);
     }
 }
 
@@ -833,21 +893,20 @@ async function addImagesToExistingAnalysis(files, promptConfig) {
             appState.analysisResults.push(novaSub);
         });
         
-        // Atualizar espécies unificadas
+        // Atualizar espécies unificadas (agora já vem no formato correto do backend)
         if (analyzeData.especies_atualizadas) {
             appState.especiesUnificadas = analyzeData.especies_atualizadas;
             
-            // Converter para formato da interface
+            // Converter para formato da interface (especies_atualizadas já está flat)
             appState.especies = {};
             Object.entries(appState.especiesUnificadas).forEach(([apelido, espData]) => {
                 appState.especies[apelido] = {
                     apelido_original: apelido,
-                    apelido_usuario: espData.apelido || apelido,
+                    apelido_usuario: espData.apelido_usuario || apelido,
                     genero: espData.genero || '',
                     especie: espData.especie || '',
                     familia: espData.familia || '',
-                    ocorrencias: espData.ocorrencias || [],
-                    cobertura_total: espData.cobertura_total || 0
+                    ocorrencias: espData.ocorrencias || 0
                 };
             });
         }

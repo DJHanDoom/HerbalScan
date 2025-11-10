@@ -1420,8 +1420,8 @@ def analyze_parcela(parcela):
             print(f"Arquivo: {filepath}")
 
             try:
-                # Obter apelidos existentes para padronização
-                existing_apelidos = list(analysis_data['especies_unificadas'].keys())
+                # Obter apelidos existentes para padronização (aninhado por parcela)
+                existing_apelidos = list(analysis_data['especies_unificadas'].get(parcela, {}).keys())
                 
                 # Carregar espécies de referência
                 reference_apelidos = []
@@ -1429,8 +1429,23 @@ def analyze_parcela(parcela):
                     ref_file = os.path.join(os.path.dirname(__file__), 'reference_species.json')
                     if os.path.exists(ref_file):
                         with open(ref_file, 'r', encoding='utf-8') as f:
-                            ref_species = json.load(f)
-                            reference_apelidos = [sp['apelido'] for sp in ref_species if sp.get('apelido')]
+                            ref_data = json.load(f)
+                            
+                            # Suportar ambos os formatos: {species: [...]} ou [...]
+                            if isinstance(ref_data, dict):
+                                ref_species = ref_data.get('species', [])
+                            elif isinstance(ref_data, list):
+                                ref_species = ref_data
+                            else:
+                                ref_species = []
+                            
+                            # Extrair apelidos
+                            for sp in ref_species:
+                                if isinstance(sp, dict) and sp.get('apelido'):
+                                    reference_apelidos.append(sp['apelido'])
+                                elif isinstance(sp, str):
+                                    reference_apelidos.append(sp)
+                            
                             if reference_apelidos:
                                 print(f"📚 Espécies de referência carregadas: {reference_apelidos}")
                 except Exception as e:
@@ -1543,9 +1558,13 @@ def analyze_parcela(parcela):
                     print(f"⚠️  IGNORANDO mensagem de erro: {apelido}")
                     continue
 
+                # Garantir que especies_unificadas está aninhado por parcela
+                if parcela not in analysis_data['especies_unificadas']:
+                    analysis_data['especies_unificadas'][parcela] = {}
+                
                 # Adicionar à lista unificada de espécies
-                if apelido not in analysis_data['especies_unificadas']:
-                    analysis_data['especies_unificadas'][apelido] = {
+                if apelido not in analysis_data['especies_unificadas'][parcela]:
+                    analysis_data['especies_unificadas'][parcela][apelido] = {
                         'apelido_original': apelido,
                         'apelido_usuario': apelido,
                         'genero': esp.get('genero', ''),
@@ -1556,14 +1575,14 @@ def analyze_parcela(parcela):
                     }
                 else:
                     # Atualizar genero/familia/observacoes se vieram preenchidos da IA
-                    if esp.get('genero') and not analysis_data['especies_unificadas'][apelido]['genero']:
-                        analysis_data['especies_unificadas'][apelido]['genero'] = esp.get('genero')
-                    if esp.get('familia') and not analysis_data['especies_unificadas'][apelido]['familia']:
-                        analysis_data['especies_unificadas'][apelido]['familia'] = esp.get('familia')
-                    if esp.get('observacoes') and not analysis_data['especies_unificadas'][apelido]['observacoes']:
-                        analysis_data['especies_unificadas'][apelido]['observacoes'] = esp.get('observacoes')
+                    if esp.get('genero') and not analysis_data['especies_unificadas'][parcela][apelido]['genero']:
+                        analysis_data['especies_unificadas'][parcela][apelido]['genero'] = esp.get('genero')
+                    if esp.get('familia') and not analysis_data['especies_unificadas'][parcela][apelido]['familia']:
+                        analysis_data['especies_unificadas'][parcela][apelido]['familia'] = esp.get('familia')
+                    if esp.get('observacoes') and not analysis_data['especies_unificadas'][parcela][apelido]['observacoes']:
+                        analysis_data['especies_unificadas'][parcela][apelido]['observacoes'] = esp.get('observacoes')
 
-                analysis_data['especies_unificadas'][apelido]['ocorrencias'] += 1
+                analysis_data['especies_unificadas'][parcela][apelido]['ocorrencias'] += 1
 
                 especies_encontradas.append({
                     'indice': esp_idx,
@@ -1588,12 +1607,12 @@ def analyze_parcela(parcela):
             })
             
             # 📊 Enviar resumo acumulativo após processar cada subparcela
-            total_especies_unicas = len(analysis_data['especies_unificadas'])
+            total_especies_unicas = len(analysis_data['especies_unificadas'].get(parcela, {}))
             especies_resumo = []
-            for apelido, info in analysis_data['especies_unificadas'].items():
+            for apelido, info in analysis_data['especies_unificadas'].get(parcela, {}).items():
                 especies_resumo.append({
                     'apelido': apelido,
-                    'ocorrencias': info['ocorrencias']
+                    'ocorrencias': info.get('ocorrencias', 0)
                 })
             
             # Ordenar por ocorrências (mais frequentes primeiro)
@@ -1603,7 +1622,7 @@ def analyze_parcela(parcela):
             yield f"data: {json.dumps({'type': 'progress', 'current': idx + 1, 'total': total_images, 'percentage': percentage_update, 'subparcela': subparcela, 'status': 'summary', 'total_especies_unicas': total_especies_unicas, 'especies_resumo': especies_resumo[:10]})}\n\n"
 
         # Evento final
-        yield f"data: {json.dumps({'type': 'complete', 'success': True, 'parcela': parcela, 'results': results, 'especies_unificadas': analysis_data['especies_unificadas']})}\n\n"
+        yield f"data: {json.dumps({'type': 'complete', 'success': True, 'parcela': parcela, 'results': results, 'especies_unificadas': analysis_data['especies_unificadas'].get(parcela, {})})}\n\n"
 
     return Response(stream_with_context(generate()), content_type='text/event-stream')
 
@@ -1692,8 +1711,8 @@ def analyze_additional_images():
 
     parcela_info = analysis_data['parcelas'][parcela_nome]
     
-    # Obter apelidos existentes para padronização
-    existing_apelidos = list(analysis_data['especies_unificadas'].keys())
+    # Obter apelidos existentes para padronização (aninhado por parcela)
+    existing_apelidos = list(analysis_data['especies_unificadas'].get(parcela_nome, {}).keys())
     
     # Carregar espécies de referência
     reference_apelidos = []
@@ -1701,8 +1720,23 @@ def analyze_additional_images():
         ref_file = os.path.join(os.path.dirname(__file__), 'reference_species.json')
         if os.path.exists(ref_file):
             with open(ref_file, 'r', encoding='utf-8') as f:
-                ref_species = json.load(f)
-                reference_apelidos = [sp['apelido'] for sp in ref_species if sp.get('apelido')]
+                ref_data = json.load(f)
+                
+                # Suportar ambos os formatos: {species: [...]} ou [...]
+                if isinstance(ref_data, dict):
+                    ref_species = ref_data.get('species', [])
+                elif isinstance(ref_data, list):
+                    ref_species = ref_data
+                else:
+                    ref_species = []
+                
+                # Extrair apelidos
+                for sp in ref_species:
+                    if isinstance(sp, dict) and sp.get('apelido'):
+                        reference_apelidos.append(sp['apelido'])
+                    elif isinstance(sp, str):
+                        reference_apelidos.append(sp)
+                
                 if reference_apelidos:
                     print(f"📚 Espécies de referência carregadas: {reference_apelidos}")
     except Exception as e:
@@ -1776,9 +1810,12 @@ def analyze_additional_images():
                 print(f"⚠️  IGNORANDO mensagem de erro: {apelido}")
                 continue
             
-            # Adicionar/atualizar espécie unificada
-            if apelido not in analysis_data['especies_unificadas']:
-                analysis_data['especies_unificadas'][apelido] = {
+            # Adicionar/atualizar espécie unificada (com parcela)
+            if parcela_nome not in analysis_data['especies_unificadas']:
+                analysis_data['especies_unificadas'][parcela_nome] = {}
+                
+            if apelido not in analysis_data['especies_unificadas'][parcela_nome]:
+                analysis_data['especies_unificadas'][parcela_nome][apelido] = {
                     'apelido_original': apelido,
                     'apelido_usuario': apelido,
                     'genero': esp.get('genero', ''),
@@ -1788,14 +1825,14 @@ def analyze_additional_images():
                     'ocorrencias': 0
                 }
             else:
-                if esp.get('genero') and not analysis_data['especies_unificadas'][apelido]['genero']:
-                    analysis_data['especies_unificadas'][apelido]['genero'] = esp.get('genero')
-                if esp.get('familia') and not analysis_data['especies_unificadas'][apelido]['familia']:
-                    analysis_data['especies_unificadas'][apelido]['familia'] = esp.get('familia')
-                if esp.get('observacoes') and not analysis_data['especies_unificadas'][apelido]['observacoes']:
-                    analysis_data['especies_unificadas'][apelido]['observacoes'] = esp.get('observacoes')
+                if esp.get('genero') and not analysis_data['especies_unificadas'][parcela_nome][apelido]['genero']:
+                    analysis_data['especies_unificadas'][parcela_nome][apelido]['genero'] = esp.get('genero')
+                if esp.get('familia') and not analysis_data['especies_unificadas'][parcela_nome][apelido]['familia']:
+                    analysis_data['especies_unificadas'][parcela_nome][apelido]['familia'] = esp.get('familia')
+                if esp.get('observacoes') and not analysis_data['especies_unificadas'][parcela_nome][apelido]['observacoes']:
+                    analysis_data['especies_unificadas'][parcela_nome][apelido]['observacoes'] = esp.get('observacoes')
             
-            analysis_data['especies_unificadas'][apelido]['ocorrencias'] += 1
+            analysis_data['especies_unificadas'][parcela_nome][apelido]['ocorrencias'] += 1
             
             especies_encontradas.append({
                 'indice': esp_idx,
@@ -1824,29 +1861,50 @@ def analyze_additional_images():
     
     print(f"✓ {len(novas_subparcelas)} novas subparcelas analisadas")
     
+    # Retornar espécies da parcela para compatibilidade
+    especies_retorno = analysis_data['especies_unificadas'].get(parcela_nome, {})
+    
     return jsonify({
         'success': True,
         'message': f'{len(novas_subparcelas)} subparcelas analisadas com sucesso',
         'novas_subparcelas': novas_subparcelas,
-        'especies_atualizadas': analysis_data['especies_unificadas']
+        'especies_atualizadas': especies_retorno
     })
 
 
 @app.route('/api/especies', methods=['GET'])
 def get_especies():
     """Retorna lista unificada de espécies"""
+    # Retornar espécies da primeira/única parcela para compatibilidade
+    # (sistema atualmente focado em single-parcela)
+    especies = {}
+    if analysis_data['especies_unificadas']:
+        # Pegar primeira parcela
+        first_parcela = next(iter(analysis_data['especies_unificadas'].values()))
+        especies = first_parcela if isinstance(first_parcela, dict) else {}
+    
     return jsonify({
-        'especies': analysis_data['especies_unificadas']
+        'especies': especies
     })
 
 @app.route('/api/especies/<apelido_original>', methods=['PUT'])
 def update_especie(apelido_original):
     """Atualiza informações de uma espécie"""
-    if apelido_original not in analysis_data['especies_unificadas']:
+    # Procurar espécie em todas as parcelas
+    especie_encontrada = False
+    parcela_da_especie = None
+    
+    for parcela_nome, especies_parcela in analysis_data['especies_unificadas'].items():
+        if apelido_original in especies_parcela:
+            especie_encontrada = True
+            parcela_da_especie = parcela_nome
+            break
+    
+    if not especie_encontrada:
         return jsonify({'error': 'Espécie não encontrada'}), 404
 
     data = request.json
-    especie = analysis_data['especies_unificadas'][apelido_original]
+    especie = analysis_data['especies_unificadas'][parcela_da_especie][apelido_original]
 
     # Atualizar dados na lista unificada
     if 'apelido_usuario' in data:
@@ -1943,13 +2001,16 @@ def merge_especies():
 
             subparcela['especies'] = especies_atualizadas
 
-    # Remover espécies antigas da lista unificada
-    for apelido in especies_origem:
-        if apelido in analysis_data['especies_unificadas']:
-            del analysis_data['especies_unificadas'][apelido]
+    # Remover espécies antigas da lista unificada (em todas as parcelas)
+    for parcela_nome, especies_parcela in analysis_data['especies_unificadas'].items():
+        for apelido in especies_origem:
+            if apelido in especies_parcela:
+                del especies_parcela[apelido]
 
-    # Adicionar nova espécie
-    analysis_data['especies_unificadas'][novo_apelido] = nova_especie
+    # Adicionar nova espécie na primeira parcela (compatibilidade)
+    if analysis_data['especies_unificadas']:
+        first_parcela = next(iter(analysis_data['especies_unificadas'].keys()))
+        analysis_data['especies_unificadas'][first_parcela][novo_apelido] = nova_especie
 
     return jsonify({
         'success': True,
@@ -1985,9 +2046,13 @@ def split_especie():
     for nova_esp in novas_especies:
         apelido = nova_esp['apelido']
 
+        # Garantir que especies_unificadas está aninhado por parcela
+        if parcela_nome not in analysis_data['especies_unificadas']:
+            analysis_data['especies_unificadas'][parcela_nome] = {}
+
         # Adicionar à lista unificada se não existir
-        if apelido not in analysis_data['especies_unificadas']:
-            analysis_data['especies_unificadas'][apelido] = {
+        if apelido not in analysis_data['especies_unificadas'][parcela_nome]:
+            analysis_data['especies_unificadas'][parcela_nome][apelido] = {
                 'apelido_original': apelido,
                 'apelido_usuario': apelido,
                 'genero': nova_esp.get('genero', ''),
@@ -1996,7 +2061,7 @@ def split_especie():
                 'ocorrencias': 0
             }
 
-        analysis_data['especies_unificadas'][apelido]['ocorrencias'] += 1
+        analysis_data['especies_unificadas'][parcela_nome][apelido]['ocorrencias'] += 1
 
         especies_atualizadas.append({
             'indice': len(especies_atualizadas) + 1,
@@ -2013,10 +2078,10 @@ def split_especie():
     subparcela['especies'] = especies_atualizadas
 
     # Atualizar contagem de ocorrências da espécie original
-    if apelido_original in analysis_data['especies_unificadas']:
-        analysis_data['especies_unificadas'][apelido_original]['ocorrencias'] -= 1
-        if analysis_data['especies_unificadas'][apelido_original]['ocorrencias'] <= 0:
-            del analysis_data['especies_unificadas'][apelido_original]
+    if parcela_nome in analysis_data['especies_unificadas'] and apelido_original in analysis_data['especies_unificadas'][parcela_nome]:
+        analysis_data['especies_unificadas'][parcela_nome][apelido_original]['ocorrencias'] -= 1
+        if analysis_data['especies_unificadas'][parcela_nome][apelido_original]['ocorrencias'] <= 0:
+            del analysis_data['especies_unificadas'][parcela_nome][apelido_original]
 
     return jsonify({
         'success': True,
@@ -2044,9 +2109,13 @@ def add_especie():
     subparcela = parcela['subparcelas'][subparcela_num]
     apelido = nova_especie['apelido']
 
+    # Garantir que especies_unificadas está aninhado por parcela
+    if parcela_nome not in analysis_data['especies_unificadas']:
+        analysis_data['especies_unificadas'][parcela_nome] = {}
+
     # Adicionar à lista unificada se não existir
-    if apelido not in analysis_data['especies_unificadas']:
-        analysis_data['especies_unificadas'][apelido] = {
+    if apelido not in analysis_data['especies_unificadas'][parcela_nome]:
+        analysis_data['especies_unificadas'][parcela_nome][apelido] = {
             'apelido_original': apelido,
             'apelido_usuario': apelido,
             'genero': nova_especie.get('genero', ''),
@@ -2055,7 +2124,7 @@ def add_especie():
             'ocorrencias': 0
         }
 
-    analysis_data['especies_unificadas'][apelido]['ocorrencias'] += 1
+    analysis_data['especies_unificadas'][parcela_nome][apelido]['ocorrencias'] += 1
 
     # Adicionar espécie à subparcela
     subparcela['especies'].append({
@@ -2104,10 +2173,10 @@ def remove_especie():
     subparcela['especies'] = especies_atualizadas
 
     # Atualizar contagem de ocorrências
-    if apelido in analysis_data['especies_unificadas']:
-        analysis_data['especies_unificadas'][apelido]['ocorrencias'] -= 1
-        if analysis_data['especies_unificadas'][apelido]['ocorrencias'] <= 0:
-            del analysis_data['especies_unificadas'][apelido]
+    if parcela_nome in analysis_data['especies_unificadas'] and apelido in analysis_data['especies_unificadas'][parcela_nome]:
+        analysis_data['especies_unificadas'][parcela_nome][apelido]['ocorrencias'] -= 1
+        if analysis_data['especies_unificadas'][parcela_nome][apelido]['ocorrencias'] <= 0:
+            del analysis_data['especies_unificadas'][parcela_nome][apelido]
 
     return jsonify({
         'success': True,
@@ -2527,7 +2596,8 @@ def export_excel():
 
         for esp_data in subparcela['especies']:
             apelido_orig = esp_data['apelido']
-            esp_info = analysis_data['especies_unificadas'].get(apelido_orig, {})
+            # Buscar espécie na estrutura aninhada por parcela
+            esp_info = analysis_data['especies_unificadas'].get(parcela_nome, {}).get(apelido_orig, {})
 
             row_data = [
                 parcela_nome if esp_data['indice'] == 1 else None,
@@ -2561,8 +2631,9 @@ def export_excel():
         cell.font = header_font
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
-    # Dados do resumo
-    for apelido, info in sorted(analysis_data['especies_unificadas'].items()):
+    # Dados do resumo (usar espécies da parcela)
+    especies_parcela = analysis_data['especies_unificadas'].get(parcela_nome, {})
+    for apelido, info in sorted(especies_parcela.items()):
         ws_resumo.append([
             info['apelido_original'],
             info['apelido_usuario'],
@@ -2632,6 +2703,35 @@ def save_apikey_config():
     return jsonify({
         'success': True,
         'message': 'API key configurada localmente'
+    })
+
+@app.route('/api/parcela/<parcela_nome>/images', methods=['GET'])
+def get_parcela_images(parcela_nome):
+    """Retorna lista de imagens de uma parcela para modo manual"""
+    if parcela_nome not in analysis_data['parcelas']:
+        return jsonify({'error': 'Parcela não encontrada'}), 404
+    
+    parcela = analysis_data['parcelas'][parcela_nome]
+    images_list = []
+    
+    # Processar lista de imagens
+    for idx, img_info in enumerate(parcela.get('images', []), 1):
+        if isinstance(img_info, dict):
+            img_path = img_info.get('path', '')
+        else:
+            img_path = str(img_info)
+        
+        if img_path and os.path.exists(img_path):
+            images_list.append({
+                'subparcela': idx,
+                'path': img_path,
+                'filename': os.path.basename(img_path)
+            })
+    
+    return jsonify({
+        'success': True,
+        'images': images_list,
+        'total': len(images_list)
     })
 
 @app.route('/api/analysis/save', methods=['POST'])
