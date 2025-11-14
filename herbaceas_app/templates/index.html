@@ -7,6 +7,12 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/edit-panel.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/prompt-config.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/coverage-drawer.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/species-details-modal.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/advanced-analytics.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -14,24 +20,6 @@
             <h1>🌿 Análise de Vegetação Herbácea</h1>
             <p>Sistema de análise automatizada de cobertura vegetal em quadrados de 1x1m</p>
         </header>
-
-        <!-- Seção 0: Importar ou Nova Análise -->
-        <section class="card" id="load-analysis-section">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <h2>📂 Análise</h2>
-                    <p class="info-text">Importe uma análise anterior ou inicie uma nova abaixo.</p>
-                </div>
-                <div style="display: flex; gap: 10px;">
-                    <button id="import-zip-initial-btn" class="btn btn-info" onclick="AnalysisManager.importCompleteZip()">
-                        � Importar ZIP
-                    </button>
-                    <button id="new-analysis-btn" class="btn btn-success" onclick="startNewAnalysis()">
-                        ✨ Nova Análise
-                    </button>
-                </div>
-            </div>
-        </section>
 
         <!-- Seção 1: Upload de Imagens -->
         <section class="card" id="upload-section">
@@ -68,8 +56,8 @@
             <div class="form-group" id="gemini-model-group" style="display: none;">
                 <label for="gemini-version">Versão do Gemini:</label>
                 <select id="gemini-version" class="ai-select">
+                    <option value="gemini-2.5-flash" selected>2.5 Flash (Rápido) ⚡</option>
                     <option value="gemini-flash-latest">Flash Latest (Rápido, Recomendado)</option>
-                    <option value="gemini-2.5-flash">2.5 Flash (Rápido)</option>
                     <option value="gemini-2.5-pro">2.5 Pro (Mais Poderoso) 🔥</option>
                     <option value="gemini-pro-latest">Pro Latest (Mais Poderoso) 🔥</option>
                     <option value="gemini-2.0-flash">2.0 Flash (Estável)</option>
@@ -139,20 +127,41 @@
             </div>
         </section>
 
-        <!-- Seção 4: Visualização e Exportação -->
+        <!-- Seção 4: Visualização -->
         <section class="card" id="export-section" style="display: none;">
-            <h2>4. Visualização e Exportação</h2>
+            <h2>4. Visualização e Resultados</h2>
             <div class="results-summary" id="results-summary"></div>
             <div class="subparcelas-grid" id="subparcelas-grid"></div>
-            <div style="display: flex; gap: 12px; margin-top: 20px;">
-                <button id="export-btn" class="btn btn-primary" style="flex: 1;">Exportar para Excel</button>
-                <button id="new-analysis-footer-btn" class="btn btn-success" onclick="startNewAnalysis()" style="flex: 1;">
+        </section>
+
+        <!-- Seção 5: Análises Avançadas -->
+        <section class="card" id="analytics-section" style="display: none;">
+            <h2>5. Análises Avançadas</h2>
+            <div id="advanced-analytics-section">
+                <!-- Análises ecológicas e fitossociológicas serão carregadas aqui -->
+            </div>
+        </section>
+    </div>
+
+    <!-- Rodapé Fixo de Exportação -->
+    <footer id="export-footer" style="display: block;">
+        <div class="export-footer-container">
+            <div class="export-footer-title">📦 Exportação & Importação</div>
+            <div class="export-footer-buttons">
+                <button id="import-zip-footer-btn" class="btn btn-info" onclick="AnalysisManager.importCompleteZip()">
+                    📥 Importar Projeto
+                </button>
+                <button id="export-excel-btn" class="btn btn-primary">📊 Excel</button>
+                <button id="export-pdf-btn" class="btn btn-danger">📄 PDF</button>
+                <button id="export-zip-btn" class="btn btn-warning">📦 ZIP</button>
+                <button id="new-analysis-footer-btn" class="btn btn-success" onclick="startNewAnalysis()">
                     ✨ Nova Análise
                 </button>
             </div>
-            <div id="export-status"></div>
-        </section>
-    </div>
+        </div>
+    </footer>
+
+    <div style="height: 50px;"></div> <!-- Espaçamento para o footer fixo -->
 
     <!-- Overlay do Painel Lateral -->
     <div id="edit-panel-overlay" class="edit-panel-overlay"></div>
@@ -186,10 +195,17 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     <script src="{{ url_for('static', filename='js/edit-panel.js') }}"></script>
     <script src="{{ url_for('static', filename='js/prompt-config.js') }}"></script>
     <script src="{{ url_for('static', filename='js/analysis-manager.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reference-species.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/svg-coverage-drawer.js') }}"></script>
+    <script>
+        // Alias para compatibilidade
+        window.CoverageDrawer = window.SVGCoverageDrawer;
+    </script>
+    <script src="{{ url_for('static', filename='js/species-details-modal.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/advanced-analytics.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

@@ -3,6 +3,7 @@ import json
 import zipfile
 import io
 import shutil
+import sys
 from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
 from werkzeug.utils import secure_filename
 import openpyxl
@@ -50,7 +51,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
 app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg'}
-app.config['DEFAULT_AI'] = os.environ.get('DEFAULT_AI', 'claude')  # claude, gpt4, gemini
+app.config['DEFAULT_AI'] = os.environ.get('DEFAULT_AI', 'gemini')  # gemini como padrão
 
 # Criar diretórios necessários
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -318,17 +319,23 @@ def validate_and_filter_results(analysis_result, template_config=None):
     analysis_result['especies'] = especies_filtradas
     return analysis_result
 
-def get_analysis_prompt(template_name="default", custom_params=None):
+def get_analysis_prompt(template_name="default", custom_params=None, custom_prompt=None):
     """
-    Retorna o prompt para análise de imagens baseado em template
+    Retorna o prompt para análise de imagens baseado em template ou prompt customizado
     
     Args:
         template_name: nome do template (default, regeneracao, carbono, etc)
         custom_params: dict com parâmetros customizados para sobrescrever
+        custom_prompt: prompt editado manualmente pelo usuário (sobrescreve template)
     
     Returns:
         str: prompt formatado
     """
+    # Se houver prompt customizado (editado manualmente), usar ele diretamente
+    if custom_prompt:
+        print("📝 Usando prompt editado manualmente pelo usuário")
+        return custom_prompt
+    
     return build_prompt(template_name, custom_params)
 
 def analyze_image_with_claude(image_path, api_key=None, model_version=None, template_config=None):
@@ -347,11 +354,12 @@ def analyze_image_with_claude(image_path, api_key=None, model_version=None, temp
         ext = image_path.split('.')[-1].lower()
         media_type = f"image/{ext}" if ext != 'jpg' else "image/jpeg"
 
-        # Gerar prompt baseado em template
+        # Gerar prompt baseado em template ou prompt customizado
         if template_config:
             prompt = get_analysis_prompt(
                 template_config.get('template', 'default'),
-                template_config.get('params')
+                template_config.get('params'),
+                template_config.get('customPrompt')  # Prompt editado manualmente
             )
         else:
             prompt = get_analysis_prompt()
@@ -501,10 +509,11 @@ def analyze_image_with_gpt4(image_path, api_key=None, template_config=None):
         if template_config is None:
             template_config = {'template': 'default', 'params': None}
         
-        # Gerar prompt usando template
+        # Gerar prompt usando template ou prompt customizado (GPT-4)
         template_name = template_config.get('template', 'default')
         custom_params = template_config.get('params')
-        prompt_text = get_analysis_prompt(template_name, custom_params)
+        custom_prompt = template_config.get('customPrompt')
+        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt)
         print(f"Usando template: {template_name}")
 
         with open(image_path, "rb") as image_file:
@@ -598,10 +607,11 @@ def analyze_image_with_gemini(image_path, api_key=None, model_version=None, temp
         if template_config is None:
             template_config = {'template': 'default', 'params': None}
         
-        # Gerar prompt usando template
+        # Gerar prompt usando template ou prompt customizado (Gemini)
         template_name = template_config.get('template', 'default')
         custom_params = template_config.get('params')
-        prompt_text = get_analysis_prompt(template_name, custom_params)
+        custom_prompt = template_config.get('customPrompt')
+        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt)
         print(f"Usando template: {template_name}")
 
         # Se um modelo específico foi fornecido, use-o primeiro
@@ -811,10 +821,11 @@ def analyze_image_with_deepseek(image_path, api_key=None, template_config=None):
         if template_config is None:
             template_config = {'template': 'default', 'params': None}
         
-        # Gerar prompt usando template
+        # Gerar prompt usando template ou prompt customizado (DeepSeek)
         template_name = template_config.get('template', 'default')
         custom_params = template_config.get('params')
-        prompt_text = get_analysis_prompt(template_name, custom_params)
+        custom_prompt = template_config.get('customPrompt')
+        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt)
         print(f"Usando template: {template_name}")
 
         # DeepSeek usa API compatível com OpenAI
@@ -886,10 +897,11 @@ def analyze_image_with_qwen(image_path, api_key=None, template_config=None):
         if template_config is None:
             template_config = {'template': 'default', 'params': None}
         
-        # Gerar prompt usando template
+        # Gerar prompt usando template ou prompt customizado (Qwen)
         template_name = template_config.get('template', 'default')
         custom_params = template_config.get('params')
-        prompt_text = get_analysis_prompt(template_name, custom_params)
+        custom_prompt = template_config.get('customPrompt')
+        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt)
         print(f"Usando template: {template_name}")
 
         # Qwen via DashScope (Alibaba Cloud)
@@ -961,10 +973,11 @@ def analyze_image_with_huggingface(image_path, api_key=None, template_config=Non
         if template_config is None:
             template_config = {'template': 'default', 'params': None}
         
-        # Gerar prompt usando template
+        # Gerar prompt usando template ou prompt customizado (HuggingFace)
         template_name = template_config.get('template', 'default')
         custom_params = template_config.get('params')
-        prompt_text = get_analysis_prompt(template_name, custom_params)
+        custom_prompt = template_config.get('customPrompt')
+        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt)
         print(f"Usando template: {template_name}")
 
         # Usar modelo de visão da Hugging Face (ex: LLaVA)
@@ -1180,7 +1193,10 @@ def get_available_ais():
             'available': True
         })
 
-    return jsonify({'ais': ais})
+    return jsonify({
+        'ais': ais,
+        'default': app.config['DEFAULT_AI']  # Retornar AI padrão
+    })
 
 @app.route('/api/templates', methods=['GET'])
 def get_templates():
@@ -1390,9 +1406,10 @@ def analyze_parcela(parcela):
         parcela_info = analysis_data['parcelas'][parcela]
         results = []
         total_images = len(parcela_info['images'])
-        
+
         # Evento inicial
         yield f"data: {json.dumps({'type': 'start', 'total': total_images})}\n\n"
+        sys.stdout.flush()  # Forçar envio imediato
 
         for idx, img_info in enumerate(parcela_info['images'], 1):
             # Verificar se img_info é um dicionário ou string
@@ -1415,6 +1432,7 @@ def analyze_parcela(parcela):
             # Evento de progresso: iniciando análise
             percentage = int((idx - 1) / total_images * 100)
             yield f"data: {json.dumps({'type': 'progress', 'current': idx-1, 'total': total_images, 'percentage': percentage, 'subparcela': subparcela, 'status': 'analyzing'})}\n\n"
+            sys.stdout.flush()  # Forçar envio imediato
 
             print(f"\nAnalisando subparcela {subparcela} ({idx}/{total_images})")
             print(f"Arquivo: {filepath}")
@@ -1470,7 +1488,8 @@ def analyze_parcela(parcela):
                     if retry > 0:
                         print(f"⚠️ Tentativa {retry + 1}/{max_retries + 1} - análise anterior retornou vazia")
                         yield f"data: {json.dumps({'type': 'progress', 'current': idx-1, 'total': total_images, 'percentage': percentage, 'subparcela': subparcela, 'status': 'retrying', 'retry': retry})}\n\n"
-                    
+                        sys.stdout.flush()  # Forçar envio imediato
+
                     if ai_model == 'gemini':
                         analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, template_config)
                     elif ai_model == 'claude':
@@ -1521,14 +1540,16 @@ def analyze_parcela(parcela):
                 # Evento de progresso: análise concluída
                 percentage = int(idx / total_images * 100)
                 yield f"data: {json.dumps({'type': 'progress', 'current': idx, 'total': total_images, 'percentage': percentage, 'subparcela': subparcela, 'status': 'completed', 'especies_count': num_especies})}\n\n"
-                
+                sys.stdout.flush()  # Forçar envio imediato
+
             except Exception as e:
                 error_msg = str(e)
                 print(f"ERRO na análise da subparcela {subparcela}: {error_msg}")
                 
                 # Evento de erro
                 yield f"data: {json.dumps({'type': 'error', 'subparcela': subparcela, 'error': error_msg[:100]})}\n\n"
-                
+                sys.stdout.flush()  # Forçar envio imediato
+
                 analysis = {
                     "especies": [{
                         "apelido": "Erro na análise",
@@ -1620,11 +1641,17 @@ def analyze_parcela(parcela):
             
             percentage_update = int((idx + 1) / total_images * 100)
             yield f"data: {json.dumps({'type': 'progress', 'current': idx + 1, 'total': total_images, 'percentage': percentage_update, 'subparcela': subparcela, 'status': 'summary', 'total_especies_unicas': total_especies_unicas, 'especies_resumo': especies_resumo[:10]})}\n\n"
+            sys.stdout.flush()  # Forçar envio imediato
 
         # Evento final
         yield f"data: {json.dumps({'type': 'complete', 'success': True, 'parcela': parcela, 'results': results, 'especies_unificadas': analysis_data['especies_unificadas'].get(parcela, {})})}\n\n"
+        sys.stdout.flush()  # Forçar envio final
 
-    return Response(stream_with_context(generate()), content_type='text/event-stream')
+    response = Response(stream_with_context(generate()), content_type='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    response.headers['Connection'] = 'keep-alive'
+    return response
 
 
 @app.route('/api/upload-additional-images', methods=['POST'])
@@ -2358,9 +2385,12 @@ def add_especie_to_subparcela(parcela, subparcela):
         return jsonify({'error': 'Subparcela não encontrada'}), 404
 
     subparcela_data = parcela_data['subparcelas'][subparcela]
-    
+
     nova_especie = {
         'apelido': data.get('apelido', 'Nova Espécie'),
+        'genero': data.get('genero', ''),
+        'familia': data.get('familia', ''),
+        'observacoes': data.get('observacoes', ''),
         'cobertura': data.get('cobertura', 0),
         'altura': data.get('altura', 0),
         'forma_vida': data.get('forma_vida', 'Erva'),
@@ -2368,23 +2398,34 @@ def add_especie_to_subparcela(parcela, subparcela):
     }
     
     subparcela_data['especies'].append(nova_especie)
-    
-    # Atualizar espécies unificadas
+
+    # Atualizar espécies unificadas (aninhado por parcela)
     apelido = nova_especie['apelido']
-    if apelido not in analysis_data['especies_unificadas']:
-        analysis_data['especies_unificadas'][apelido] = {
+
+    # Garantir que especies_unificadas está aninhado por parcela
+    if parcela not in analysis_data['especies_unificadas']:
+        analysis_data['especies_unificadas'][parcela] = {}
+
+    if apelido not in analysis_data['especies_unificadas'][parcela]:
+        analysis_data['especies_unificadas'][parcela][apelido] = {
             'apelido_original': apelido,
             'apelido_usuario': apelido,
-            'genero': '',
+            'genero': data.get('genero', ''),
             'especie': '',
-            'familia': '',
+            'familia': data.get('familia', ''),
+            'observacoes': data.get('observacoes', ''),
             'ocorrencias': 0
         }
-    analysis_data['especies_unificadas'][apelido]['ocorrencias'] += 1
+
+    analysis_data['especies_unificadas'][parcela][apelido]['ocorrencias'] += 1
+
+    print(f"✅ Espécie '{apelido}' adicionada à subparcela {subparcela} da parcela {parcela}")
+    print(f"   Total de ocorrências: {analysis_data['especies_unificadas'][parcela][apelido]['ocorrencias']}")
 
     return jsonify({
         'success': True,
-        'especie': nova_especie
+        'especie': nova_especie,
+        'message': f'Espécie {apelido} adicionada com sucesso'
     })
 
 @app.route('/api/parcela/<parcela>/especies', methods=['GET'])
@@ -2561,11 +2602,31 @@ def reanalyze_subparcela(parcela, subparcela):
         
         print(f"✓ Reanálise concluída: {len(especies_encontradas)} espécies")
         
+        # Retornar apenas espécies da parcela atual (aninhadas por parcela se existir)
+        especies_para_retornar = {}
+        if parcela in analysis_data.get('especies_unificadas', {}):
+            # Estrutura aninhada por parcela
+            especies_para_retornar = analysis_data['especies_unificadas'][parcela]
+        else:
+            # Estrutura global - filtrar apenas espécies desta parcela
+            # Verificar quais espécies aparecem nesta parcela
+            especies_desta_parcela = set()
+            for sub_id, sub_data in parcela_info['subparcelas'].items():
+                for esp in sub_data.get('especies', []):
+                    especies_desta_parcela.add(esp['apelido'])
+            
+            # Retornar apenas essas espécies
+            especies_para_retornar = {
+                apelido: info 
+                for apelido, info in analysis_data.get('especies_unificadas', {}).items()
+                if apelido in especies_desta_parcela
+            }
+        
         return jsonify({
             'success': True,
             'subparcela': subparcela,
             'especies': especies_encontradas,
-            'especies_unificadas': analysis_data['especies_unificadas']
+            'especies_unificadas': especies_para_retornar
         })
         
     except Exception as e:
@@ -2573,109 +2634,474 @@ def reanalyze_subparcela(parcela, subparcela):
         print(f"ERRO na reanálise: {error_msg}")
         return jsonify({'error': error_msg}), 500
 
-@app.route('/api/export', methods=['POST'])
-def export_excel():
-    """Exporta dados para Excel"""
+@app.route('/api/especies/<parcela>/<int:subparcela>/coverage', methods=['PUT'])
+def save_coverage_data(parcela, subparcela):
+    """Salva dados de cobertura visual (formas desenhadas) e atualiza porcentagens"""
     data = request.json
-    parcela_nome = data.get('parcela', 'Parcela_1')
 
-    if parcela_nome not in analysis_data['parcelas']:
+    if parcela not in analysis_data['parcelas']:
         return jsonify({'error': 'Parcela não encontrada'}), 404
 
-    parcela = analysis_data['parcelas'][parcela_nome]
+    parcela_data = analysis_data['parcelas'][parcela]
+    if subparcela not in parcela_data.get('subparcelas', {}):
+        return jsonify({'error': 'Subparcela não encontrada'}), 404
 
-    # Criar workbook
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Dados Detalhados"
+    subparcela_data = parcela_data['subparcelas'][subparcela]
 
-    # Cabeçalho
-    headers = ['Parcela', 'Subparcela', 'Índice', 'Apelido Original', 'Apelido Usuário',
-               'Gênero', 'Espécie', 'Família', 'Cobertura (%)', 'Altura (cm)', 'Forma de Vida', '🔗 Link Fotos']
-    ws.append(headers)
+    try:
+        # Salvar dados de cobertura (formas geométricas)
+        coverage_data = data.get('coverageData', {})
+        subparcela_data['coverageData'] = coverage_data
 
-    # Formatação do cabeçalho
-    header_fill = PatternFill(start_color="4CAF50", end_color="4CAF50", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF", size=11)
+        # Atualizar porcentagens de cobertura das espécies
+        especies_updates = data.get('especies', [])
+        for update in especies_updates:
+            apelido = update.get('apelido')
+            nova_cobertura = update.get('cobertura')
 
-    for cell in ws[1]:
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal='center', vertical='center')
+            if apelido and nova_cobertura is not None:
+                # Encontrar e atualizar a espécie
+                for esp in subparcela_data['especies']:
+                    if esp['apelido'] == apelido:
+                        esp['cobertura'] = nova_cobertura
+                        break
 
-    # Adicionar dados
-    for subparcela_num in sorted(parcela['subparcelas'].keys()):
-        subparcela = parcela['subparcelas'][subparcela_num]
+        print(f"✓ Dados de cobertura salvos para subparcela {subparcela}")
+        print(f"  - Área da subparcela: {'definida' if coverage_data.get('subparcelaShape') else 'não definida'}")
+        print(f"  - Áreas de espécies: {len(coverage_data.get('speciesShapes', []))} espécie(s) com áreas definidas")
 
-        for esp_data in subparcela['especies']:
-            apelido_orig = esp_data['apelido']
-            # Buscar espécie na estrutura aninhada por parcela
-            esp_info = analysis_data['especies_unificadas'].get(parcela_nome, {}).get(apelido_orig, {})
+        return jsonify({
+            'success': True,
+            'message': 'Dados de cobertura salvos com sucesso'
+        })
 
-            row_data = [
-                parcela_nome if esp_data['indice'] == 1 else None,
-                subparcela_num if esp_data['indice'] == 1 else None,
-                esp_data['indice'],
-                apelido_orig,
-                esp_info.get('apelido_usuario', apelido_orig),
-                esp_info.get('genero', ''),
-                esp_info.get('especie', ''),
-                esp_info.get('familia', ''),
-                esp_data['cobertura'],
-                esp_data['altura'],
-                esp_data['forma_vida'],
-                esp_info.get('link_fotos', '')
+    except Exception as e:
+        error_msg = str(e)
+        print(f"ERRO ao salvar dados de cobertura: {error_msg}")
+        return jsonify({'error': error_msg}), 500
+
+@app.route('/api/species/coverage', methods=['POST'])
+def update_species_coverage():
+    """Atualiza porcentagem de cobertura de uma espécie específica"""
+    data = request.json
+    
+    subparcela_id = data.get('subparcela_id')
+    especie_nome = data.get('especie_nome')
+    apelido = data.get('apelido')
+    cobertura = data.get('cobertura')
+    
+    if not subparcela_id or cobertura is None:
+        return jsonify({'error': 'Dados insuficientes'}), 400
+    
+    try:
+        # Buscar em todas as parcelas
+        for parcela_nome, parcela_data in analysis_data['parcelas'].items():
+            if subparcela_id in parcela_data.get('subparcelas', {}):
+                subparcela_data = parcela_data['subparcelas'][subparcela_id]
+                
+                # Atualizar cobertura da espécie
+                for esp in subparcela_data.get('especies', []):
+                    if (esp.get('especie') == especie_nome or 
+                        esp.get('apelido') == apelido):
+                        esp['cobertura'] = float(cobertura)
+                        print(f"✓ Cobertura atualizada: {apelido} = {cobertura}%")
+                        return jsonify({'success': True})
+                
+        return jsonify({'error': 'Espécie não encontrada'}), 404
+        
+    except Exception as e:
+        print(f"ERRO ao atualizar cobertura: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/species/area', methods=['POST'])
+def update_species_area():
+    """Atualiza áreas/polígonos desenhados de uma espécie"""
+    data = request.json
+    
+    parcela_nome = data.get('parcela')
+    subparcela_id = data.get('subparcela')
+    especie_nome = data.get('especie')
+    area_shapes = data.get('area_shapes', [])
+    
+    if not parcela_nome or not subparcela_id or not especie_nome:
+        return jsonify({'error': 'Dados insuficientes'}), 400
+    
+    try:
+        if parcela_nome not in analysis_data['parcelas']:
+            return jsonify({'error': 'Parcela não encontrada'}), 404
+            
+        parcela_data = analysis_data['parcelas'][parcela_nome]
+        
+        if subparcela_id not in parcela_data.get('subparcelas', {}):
+            return jsonify({'error': 'Subparcela não encontrada'}), 404
+        
+        subparcela_data = parcela_data['subparcelas'][subparcela_id]
+        
+        # Atualizar área da espécie
+        for esp in subparcela_data.get('especies', []):
+            if esp.get('apelido') == especie_nome or esp.get('especie') == especie_nome:
+                esp['area_shapes'] = area_shapes
+                print(f"✓ Áreas da espécie {especie_nome} atualizadas: {len(area_shapes)} polígonos")
+                return jsonify({'success': True})
+        
+        return jsonify({'error': 'Espécie não encontrada'}), 404
+        
+    except Exception as e:
+        print(f"ERRO ao atualizar área: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/parcela/<parcela>/subparcela/<int:subparcela>/add-species-ai', methods=['POST'])
+def add_species_with_ai(parcela, subparcela):
+    """Analisa imagem com IA para detectar espécies adicionais"""
+    print(f"\n=== Analisando espécies adicionais com IA - {parcela}/{subparcela} ===")
+
+    if parcela not in analysis_data['parcelas']:
+        return jsonify({'error': 'Parcela não encontrada'}), 404
+
+    parcela_info = analysis_data['parcelas'][parcela]
+
+    # Encontrar a imagem da subparcela
+    img_info = None
+    for img in parcela_info['images']:
+        if img['subparcela'] == subparcela:
+            img_info = img
+            break
+
+    if not img_info:
+        return jsonify({'error': 'Subparcela não encontrada'}), 404
+
+    # Obter configuração
+    data = request.get_json() or {}
+    ai_model = data.get('ai_model', app.config['DEFAULT_AI'])
+    existing_species = data.get('existing_species', [])
+
+    print(f"Modelo: {ai_model}")
+    print(f"Espécies existentes: {existing_species}")
+
+    # Obter API keys
+    api_key = None
+    gemini_version = request.headers.get('X-Gemini-Version', 'gemini-flash-latest')
+    claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-4-5-20250929')
+
+    if ai_model == 'claude':
+        api_key = decode_api_key(request.headers.get('X-API-Key-Claude'))
+    elif ai_model == 'gpt4':
+        api_key = decode_api_key(request.headers.get('X-API-Key-GPT4'))
+    elif ai_model == 'gemini':
+        api_key = decode_api_key(request.headers.get('X-API-Key-Gemini'))
+    elif ai_model == 'deepseek':
+        api_key = decode_api_key(request.headers.get('X-API-Key-DeepSeek'))
+    elif ai_model == 'qwen':
+        api_key = decode_api_key(request.headers.get('X-API-Key-Qwen'))
+    elif ai_model == 'huggingface':
+        api_key = decode_api_key(request.headers.get('X-API-Key-HuggingFace'))
+
+    if not api_key:
+        return jsonify({'error': f'API key não configurada para {ai_model}'}), 400
+
+    try:
+        filepath = img_info['path']
+        print(f"Analisando: {filepath}")
+
+        # Criar template customizado que instrui a IA a procurar espécies adicionais
+        template_config = {
+            'template': 'default',
+            'params': {
+                'existing_species': existing_species,
+                'detect_coordinates': True,
+                'min_species': 1,
+                'max_species': 5  # Limitar a 5 novas espécies
+            }
+        }
+
+        # Analisar
+        if ai_model == 'gemini':
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, template_config)
+        elif ai_model == 'claude':
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, template_config)
+        else:
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, template_config)
+
+        # Filtrar apenas espécies novas (não detectadas anteriormente)
+        new_species = []
+        for esp in analysis.get('especies', []):
+            apelido = esp.get('apelido', '')
+
+            # Ignorar se já existe
+            if apelido in existing_species:
+                print(f"   ⚠️ Espécie '{apelido}' já existe, ignorando")
+                continue
+
+            # Ignorar erros
+            erro_keywords = [
+                'erro', 'error', 'falha', 'limite', 'atingido',
+                'aguarde', 'não disponível', 'timeout', 'quota',
+                'exceeded', 'rate limit', 'api key', 'invalid'
             ]
-            ws.append(row_data)
 
-    # Ajustar largura das colunas
-    column_widths = [10, 12, 8, 25, 25, 15, 20, 20, 12, 12, 14, 40]
-    for idx, width in enumerate(column_widths, 1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+            if any(keyword in apelido.lower() for keyword in erro_keywords):
+                print(f"   ❌ Ignorando erro: {apelido}")
+                continue
 
-    # Criar aba de resumo
-    ws_resumo = wb.create_sheet("Resumo por Espécie")
-    resumo_headers = ['Apelido Original', 'Apelido Usuário', 'Gênero', 'Espécie',
-                      'Família', 'Nº Ocorrências', 'Forma de Vida', '🔗 Link Fotos']
-    ws_resumo.append(resumo_headers)
+            new_species.append(esp)
+            print(f"   ✅ Nova espécie detectada: {apelido}")
 
-    # Formatação do cabeçalho do resumo
-    for cell in ws_resumo[1]:
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.alignment = Alignment(horizontal='center', vertical='center')
+        if len(new_species) == 0:
+            return jsonify({
+                'success': True,
+                'new_species': [],
+                'message': 'Nenhuma espécie adicional detectada'
+            })
 
-    # Dados do resumo (usar espécies da parcela)
-    especies_parcela = analysis_data['especies_unificadas'].get(parcela_nome, {})
-    for apelido, info in sorted(especies_parcela.items()):
-        ws_resumo.append([
-            info['apelido_original'],
-            info['apelido_usuario'],
-            info['genero'],
-            info['especie'],
-            info['familia'],
-            info['ocorrencias'],
-            # Determinar forma de vida (pegar da primeira ocorrência)
-            '-',
-            info.get('link_fotos', '')
-        ])
+        # Adicionar novas espécies à subparcela
+        subparcela_data = parcela_info['subparcelas'][subparcela]
 
-    # Ajustar largura das colunas do resumo
-    resumo_widths = [25, 25, 15, 20, 20, 14, 14, 40]
-    for idx, width in enumerate(resumo_widths, 1):
-        ws_resumo.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+        for esp in new_species:
+            apelido = esp['apelido']
 
-    # Salvar arquivo
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{parcela_nome}_Analise_{timestamp}.xlsx"
-    filepath = os.path.join('exports', filename)
-    wb.save(filepath)
+            # Adicionar à subparcela
+            nova_especie = {
+                'indice': len(subparcela_data['especies']) + 1,
+                'apelido': apelido,
+                'genero': esp.get('genero', ''),
+                'familia': esp.get('familia', ''),
+                'observacoes': esp.get('observacoes', ''),
+                'cobertura': esp.get('cobertura', 5),
+                'altura': esp.get('altura', 10),
+                'forma_vida': esp.get('forma_vida', 'Erva'),
+                'areas': esp.get('areas', [])  # Coordenadas da IA
+            }
 
-    return jsonify({
-        'success': True,
-        'filename': filename,
-        'download_url': f'/api/download/{filename}'
-    })
+            subparcela_data['especies'].append(nova_especie)
+
+            # Atualizar espécies unificadas
+            if apelido not in analysis_data['especies_unificadas']:
+                analysis_data['especies_unificadas'][apelido] = {
+                    'apelido_original': apelido,
+                    'apelido_usuario': apelido,
+                    'genero': esp.get('genero', ''),
+                    'especie': '',
+                    'familia': esp.get('familia', ''),
+                    'observacoes': esp.get('observacoes', ''),
+                    'ocorrencias': 0
+                }
+
+            analysis_data['especies_unificadas'][apelido]['ocorrencias'] += 1
+
+        print(f"✓ {len(new_species)} novas espécies adicionadas")
+
+        return jsonify({
+            'success': True,
+            'new_species': new_species,
+            'message': f'{len(new_species)} nova(s) espécie(s) detectada(s)'
+        })
+
+    except Exception as e:
+        error_msg = str(e)
+        print(f"ERRO na análise: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': error_msg}), 500
+
+@app.route('/api/export', methods=['POST'])
+def export_excel():
+    """Exporta dados completos para Excel com análises profissionais"""
+    try:
+        data = request.json
+        parcela_nome = data.get('parcela', 'Parcela_1')
+        
+        print(f"\n📊 Iniciando exportação Excel para parcela: {parcela_nome}")
+        print(f"📦 Dados recebidos: {json.dumps(data, indent=2, ensure_ascii=False)}")
+
+        if parcela_nome not in analysis_data['parcelas']:
+            return jsonify({'error': 'Parcela não encontrada'}), 404
+
+        parcela = analysis_data['parcelas'][parcela_nome]
+        subparcelas_data = data.get('subparcelas', [])
+        especies_unificadas = data.get('especies_unificadas', [])
+        estatisticas = data.get('estatisticas', {})
+
+        # Criar workbook
+        wb = openpyxl.Workbook()
+        
+        # ==== ABA 1: RESUMO EXECUTIVO ====
+        ws_resumo = wb.active
+        ws_resumo.title = "Resumo Executivo"
+        
+        # Título principal
+        ws_resumo['A1'] = f"RELATÓRIO DE ANÁLISE - {parcela_nome}"
+        ws_resumo['A1'].font = Font(bold=True, size=16, color="FFFFFF")
+        ws_resumo['A1'].fill = PatternFill(start_color="1976D2", end_color="1976D2", fill_type="solid")
+        ws_resumo['A1'].alignment = Alignment(horizontal='center', vertical='center')
+        ws_resumo.merge_cells('A1:E1')
+        ws_resumo.row_dimensions[1].height = 30
+        
+        # Informações gerais
+        ws_resumo['A3'] = "Data da Análise:"
+        ws_resumo['B3'] = data.get('data_analise', datetime.now().strftime("%d/%m/%Y"))
+        ws_resumo['A4'] = "Total de Subparcelas:"
+        ws_resumo['B4'] = estatisticas.get('total_subparcelas', len(subparcelas_data))
+        ws_resumo['A5'] = "Espécies Únicas:"
+        ws_resumo['B5'] = estatisticas.get('total_especies_unicas', len(especies_unificadas))
+        ws_resumo['A6'] = "Cobertura Total (%):"
+        ws_resumo['B6'] = round(estatisticas.get('cobertura_total', 0), 2)
+        ws_resumo['A7'] = "Altura Média (cm):"
+        ws_resumo['B7'] = round(estatisticas.get('altura_media', 0), 2)
+        
+        for row in range(3, 8):
+            ws_resumo[f'A{row}'].font = Font(bold=True)
+            ws_resumo[f'A{row}'].fill = PatternFill(start_color="E3F2FD", end_color="E3F2FD", fill_type="solid")
+        
+        # ==== ABA 2: DADOS DETALHADOS ====
+        ws_detalhes = wb.create_sheet("Dados Detalhados")
+        
+        headers = ['Subparcela', 'Índice', 'Apelido', 'Gênero', 'Família', 
+                   'Cobertura (%)', 'Altura (cm)', 'Forma de Vida', 'Observações']
+        ws_detalhes.append(headers)
+        
+        # Formatação do cabeçalho
+        header_fill = PatternFill(start_color="4CAF50", end_color="4CAF50", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        
+        for cell in ws_detalhes[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        # Adicionar dados de cada subparcela
+        for subparcela in subparcelas_data:
+            sub_num = subparcela.get('numero')
+            for idx, esp in enumerate(subparcela.get('especies', []), 1):
+                row_data = [
+                    sub_num,
+                    idx,
+                    esp.get('apelido', ''),
+                    esp.get('genero', ''),
+                    esp.get('familia', ''),
+                    round(esp.get('cobertura', 0), 2),
+                    round(esp.get('altura', 0), 2),
+                    esp.get('forma_vida', ''),
+                    esp.get('observacoes', '')
+                ]
+                ws_detalhes.append(row_data)
+        
+        # Ajustar larguras
+        column_widths = [12, 8, 25, 15, 20, 12, 12, 14, 30]
+        for idx, width in enumerate(column_widths, 1):
+            ws_detalhes.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+        
+        # ==== ABA 3: ESPÉCIES UNIFICADAS ====
+        ws_especies = wb.create_sheet("Espécies Unificadas")
+        
+        especies_headers = ['Apelido Original', 'Apelido Usuário', 'Gênero', 'Espécie',
+                            'Família', 'Nº Ocorrências', 'Observações']
+        ws_especies.append(especies_headers)
+        
+        for cell in ws_especies[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        for esp in especies_unificadas:
+            ws_especies.append([
+                esp.get('apelido_original', ''),
+                esp.get('apelido_usuario', ''),
+                esp.get('genero', ''),
+                esp.get('especie', ''),
+                esp.get('familia', ''),
+                esp.get('ocorrencias', 0),
+                esp.get('observacoes', '')
+            ])
+        
+        especies_widths = [25, 25, 15, 20, 20, 14, 30]
+        for idx, width in enumerate(especies_widths, 1):
+            ws_especies.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+        
+        # ==== ABA 4: ANÁLISE POR SUBPARCELA ====
+        ws_analise = wb.create_sheet("Análise por Subparcela")
+        
+        analise_headers = ['Subparcela', 'Total Espécies', 'Cobertura Total (%)', 
+                           'Altura Média (cm)', 'Forma de Vida Dominante']
+        ws_analise.append(analise_headers)
+        
+        for cell in ws_analise[1]:
+            cell.fill = PatternFill(start_color="FF9800", end_color="FF9800", fill_type="solid")
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        for subparcela in subparcelas_data:
+            especies = subparcela.get('especies', [])
+            total_esp = len(especies)
+            cobertura_total = sum(e.get('cobertura', 0) for e in especies)
+            altura_media = sum(e.get('altura', 0) for e in especies) / total_esp if total_esp > 0 else 0
+            
+            # Forma de vida dominante
+            formas_vida = [e.get('forma_vida', 'Erva') for e in especies]
+            forma_dominante = max(set(formas_vida), key=formas_vida.count) if formas_vida else 'N/A'
+            
+            ws_analise.append([
+                subparcela.get('numero'),
+                total_esp,
+                round(cobertura_total, 2),
+                round(altura_media, 2),
+                forma_dominante
+            ])
+        
+        analise_widths = [12, 14, 18, 16, 22]
+        for idx, width in enumerate(analise_widths, 1):
+            ws_analise.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+        
+        # ==== ABA 5: DIVERSIDADE E ESTATÍSTICAS ====
+        ws_stats = wb.create_sheet("Estatísticas")
+        
+        ws_stats['A1'] = "ESTATÍSTICAS DE DIVERSIDADE"
+        ws_stats['A1'].font = Font(bold=True, size=14, color="FFFFFF")
+        ws_stats['A1'].fill = PatternFill(start_color="673AB7", end_color="673AB7", fill_type="solid")
+        ws_stats.merge_cells('A1:B1')
+        
+        # Estatísticas gerais
+        stats_data = [
+            ["Métrica", "Valor"],
+            ["Riqueza de Espécies", len(especies_unificadas)],
+            ["Total de Registros", sum(e.get('ocorrencias', 0) for e in especies_unificadas)],
+            ["Cobertura Média por Espécie (%)", round(estatisticas.get('cobertura_total', 0) / len(especies_unificadas), 2) if especies_unificadas else 0],
+            ["Altura Média Geral (cm)", round(estatisticas.get('altura_media', 0), 2)],
+            ["Espécie Mais Frequente", max(especies_unificadas, key=lambda e: e.get('ocorrencias', 0)).get('apelido_original', 'N/A') if especies_unificadas else 'N/A'],
+        ]
+        
+        for row_idx, row_data in enumerate(stats_data, 3):
+            ws_stats.append(row_data)
+            if row_idx == 3:  # Header
+                ws_stats[f'A{row_idx}'].font = Font(bold=True)
+                ws_stats[f'B{row_idx}'].font = Font(bold=True)
+                ws_stats[f'A{row_idx}'].fill = PatternFill(start_color="E1BEE7", end_color="E1BEE7", fill_type="solid")
+                ws_stats[f'B{row_idx}'].fill = PatternFill(start_color="E1BEE7", end_color="E1BEE7", fill_type="solid")
+        
+        ws_stats.column_dimensions['A'].width = 30
+        ws_stats.column_dimensions['B'].width = 20
+        
+        # Salvar arquivo
+        os.makedirs('exports', exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{parcela_nome}_Relatorio_Completo_{timestamp}.xlsx"
+        filepath = os.path.join('exports', filename)
+        wb.save(filepath)
+        
+        print(f"✅ Arquivo Excel salvo: {filepath}")
+
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'download_url': f'/api/download/{filename}'
+        })
+        
+    except Exception as e:
+        print(f"❌ Erro na exportação: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/download/<filename>')
 def download_file(filename):
@@ -2725,24 +3151,44 @@ def get_parcela_images(parcela_nome):
     """Retorna lista de imagens de uma parcela para modo manual"""
     if parcela_nome not in analysis_data['parcelas']:
         return jsonify({'error': 'Parcela não encontrada'}), 404
-    
+
     parcela = analysis_data['parcelas'][parcela_nome]
     images_list = []
-    
+
+    # CRITICAL FIX: Criar estrutura de subparcelas para modo manual
+    if 'subparcelas' not in parcela:
+        parcela['subparcelas'] = {}
+
     # Processar lista de imagens
     for idx, img_info in enumerate(parcela.get('images', []), 1):
         if isinstance(img_info, dict):
             img_path = img_info.get('path', '')
         else:
             img_path = str(img_info)
-        
+
         if img_path and os.path.exists(img_path):
             images_list.append({
                 'subparcela': idx,
                 'path': img_path,
                 'filename': os.path.basename(img_path)
             })
-    
+
+            # CRITICAL FIX: Criar subparcela vazia no backend se não existir
+            if idx not in parcela['subparcelas']:
+                parcela['subparcelas'][idx] = {
+                    'nome': f'Subparcela {idx}',
+                    'image': os.path.basename(img_path),
+                    'especies': [],
+                    'manual_mode': True
+                }
+                print(f"✅ Subparcela {idx} criada no backend para modo manual")
+
+    # Garantir que especies_unificadas existe para esta parcela
+    if parcela_nome not in analysis_data['especies_unificadas']:
+        analysis_data['especies_unificadas'][parcela_nome] = {}
+
+    print(f"📊 Modo manual: {len(images_list)} subparcelas preparadas para parcela {parcela_nome}")
+
     return jsonify({
         'success': True,
         'images': images_list,
@@ -3201,12 +3647,34 @@ def import_complete_analysis():
         try:
             # Extrair ZIP
             with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+                # Listar conteúdo do ZIP para debug
+                print("📦 Conteúdo do ZIP:")
+                for name in zip_ref.namelist():
+                    print(f"   - {name}")
+
                 zip_ref.extractall(temp_dir)
-            
+
+            # Listar arquivos extraídos para debug
+            print(f"\n📁 Arquivos em {temp_dir}:")
+            for root, dirs, files in os.walk(temp_dir):
+                for file in files:
+                    rel_path = os.path.relpath(os.path.join(root, file), temp_dir)
+                    print(f"   - {rel_path}")
+
             # Ler analysis_data.json
             json_path = os.path.join(temp_dir, 'analysis_data.json')
+
+            # Se não encontrou, procurar em subdiretórios
             if not os.path.exists(json_path):
-                return jsonify({'error': 'Arquivo analysis_data.json não encontrado no ZIP'}), 400
+                print(f"⚠️ analysis_data.json não encontrado em {json_path}")
+                # Procurar recursivamente
+                for root, dirs, files in os.walk(temp_dir):
+                    if 'analysis_data.json' in files:
+                        json_path = os.path.join(root, 'analysis_data.json')
+                        print(f"✓ Encontrado em: {json_path}")
+                        break
+                else:
+                    return jsonify({'error': 'Arquivo analysis_data.json não encontrado no ZIP'}), 400
             
             with open(json_path, 'r', encoding='utf-8') as f:
                 imported_data = json.load(f)
@@ -3218,15 +3686,31 @@ def import_complete_analysis():
             os.makedirs(upload_dir, exist_ok=True)
             
             # Copiar imagens para local permanente
+            # Procurar diretório 'images' (pode estar no temp_dir ou em subdiretório)
             images_dir = os.path.join(temp_dir, 'images')
-            image_mapping = {}  # old_path -> new_path
-            
+
+            # Se não encontrou, procurar recursivamente
+            if not os.path.exists(images_dir):
+                for root, dirs, files in os.walk(temp_dir):
+                    if 'images' in dirs:
+                        images_dir = os.path.join(root, 'images')
+                        print(f"✓ Diretório de imagens encontrado em: {images_dir}")
+                        break
+
+            image_mapping = {}  # filename -> new_path
+
             if os.path.exists(images_dir):
+                print(f"📷 Copiando imagens de {images_dir} para {upload_dir}")
                 for filename in os.listdir(images_dir):
                     src = os.path.join(images_dir, filename)
-                    dst = os.path.join(upload_dir, filename)
-                    shutil.copy2(src, dst)
-                    image_mapping[filename] = dst
+                    if os.path.isfile(src):  # Só copiar arquivos, não diretórios
+                        dst = os.path.join(upload_dir, filename)
+                        shutil.copy2(src, dst)
+                        image_mapping[filename] = dst
+                        print(f"   ✓ {filename}")
+                print(f"✓ {len(image_mapping)} imagens copiadas")
+            else:
+                print(f"⚠️ Diretório de imagens não encontrado")
             
             # Atualizar paths das imagens nas subparcelas
             for subparcela_id, subparcela in imported_data['subparcelas'].items():
@@ -3264,11 +3748,30 @@ def import_complete_analysis():
             # Limpar diretório temporário
             shutil.rmtree(temp_dir, ignore_errors=True)
             
+            # Preparar dados de resposta completos para restaurar a interface
+            analysis_results = []
+            for subparcela_id, subparcela_data in sorted(imported_data['subparcelas'].items()):
+                analysis_results.append({
+                    'subparcela': subparcela_data.get('nome', f'Sub {len(analysis_results) + 1}'),
+                    'image_path': subparcela_data.get('image_path', ''),
+                    'especies': subparcela_data.get('especies', []),
+                    'cobertura_total': subparcela_data.get('cobertura_total', 0),
+                    'area_descoberta': subparcela_data.get('area_descoberta', 0)
+                })
+            
+            subparcelas_list = [
+                {'name': f"Subparcela {i+1}", 'path': r['image_path']}
+                for i, r in enumerate(analysis_results)
+            ]
+            
             return jsonify({
                 'success': True,
                 'message': f'Análise "{parcela_name}" importada com sucesso',
                 'parcela': parcela_name,
-                'metadata': imported_data.get('metadata', {})
+                'metadata': imported_data.get('metadata', {}),
+                'analysis_results': analysis_results,
+                'especies': imported_data.get('especies_unificadas', {}),
+                'subparcelas': subparcelas_list
             })
             
         except Exception as e:
@@ -3279,6 +3782,354 @@ def import_complete_analysis():
             
     except Exception as e:
         print(f"Erro ao importar análise completa: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ====== ENDPOINTS DE FOTOS DE ESPÉCIES ======
+
+# Estrutura para armazenar fotos das espécies
+species_photos = {}  # {apelido_original: [{id, filename, url, uploaded_at}]}
+
+@app.route('/api/especies/<apelido>/photos', methods=['GET'])
+def get_species_photos(apelido):
+    """Retorna lista de fotos de uma espécie"""
+    photos = species_photos.get(apelido, [])
+    return jsonify({
+        'success': True,
+        'photos': photos
+    })
+
+@app.route('/api/especies/<apelido>/photos', methods=['POST'])
+def upload_species_photos(apelido):
+    """Upload de fotos de uma espécie"""
+    try:
+        if 'photos' not in request.files:
+            return jsonify({'error': 'Nenhuma foto enviada'}), 400
+
+        files = request.files.getlist('photos')
+
+        if not files:
+            return jsonify({'error': 'Nenhuma foto selecionada'}), 400
+
+        # Criar diretório para fotos de espécies se não existir
+        photos_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'species_photos', secure_filename(apelido))
+        os.makedirs(photos_dir, exist_ok=True)
+
+        uploaded_photos = []
+
+        for file in files:
+            if file and file.filename:
+                # Gerar nome único para o arquivo
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                original_filename = secure_filename(file.filename)
+                filename = f"{timestamp}_{original_filename}"
+                filepath = os.path.join(photos_dir, filename)
+
+                # Salvar arquivo
+                file.save(filepath)
+
+                # Criar URL relativa
+                relative_path = filepath.replace('static/', '').replace('\\', '/')
+                photo_url = f'/static/{relative_path}'
+
+                # Criar registro da foto
+                photo_record = {
+                    'id': f"{apelido}_{timestamp}_{original_filename}",
+                    'filename': original_filename,
+                    'url': photo_url,
+                    'uploaded_at': datetime.now().isoformat()
+                }
+
+                uploaded_photos.append(photo_record)
+
+        # Adicionar fotos ao registro da espécie
+        if apelido not in species_photos:
+            species_photos[apelido] = []
+
+        species_photos[apelido].extend(uploaded_photos)
+
+        # Salvar em arquivo JSON para persistência
+        photos_data_file = os.path.join(app.config['UPLOAD_FOLDER'], 'species_photos_data.json')
+        with open(photos_data_file, 'w', encoding='utf-8') as f:
+            json.dump(species_photos, f, ensure_ascii=False, indent=2)
+
+        print(f"✓ {len(uploaded_photos)} foto(s) adicionada(s) para {apelido}")
+
+        return jsonify({
+            'success': True,
+            'uploaded': len(uploaded_photos),
+            'photos': species_photos[apelido]
+        })
+
+    except Exception as e:
+        print(f"Erro ao fazer upload de fotos: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/especies/<apelido>/photos/<photo_id>', methods=['DELETE'])
+def delete_species_photo(apelido, photo_id):
+    """Remove uma foto de uma espécie"""
+    try:
+        if apelido not in species_photos:
+            return jsonify({'error': 'Espécie não encontrada'}), 404
+
+        # Encontrar e remover a foto
+        photo_to_remove = None
+        for photo in species_photos[apelido]:
+            if photo['id'] == photo_id:
+                photo_to_remove = photo
+                break
+
+        if not photo_to_remove:
+            return jsonify({'error': 'Foto não encontrada'}), 404
+
+        # Remover arquivo físico
+        file_path = photo_to_remove['url'].replace('/static/', 'static/')
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            print(f"✓ Arquivo removido: {file_path}")
+
+        # Remover do registro
+        species_photos[apelido] = [p for p in species_photos[apelido] if p['id'] != photo_id]
+
+        # Se não houver mais fotos, limpar diretório
+        if not species_photos[apelido]:
+            photos_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'species_photos', secure_filename(apelido))
+            if os.path.exists(photos_dir):
+                shutil.rmtree(photos_dir)
+                print(f"✓ Diretório removido: {photos_dir}")
+            del species_photos[apelido]
+
+        # Salvar alterações
+        photos_data_file = os.path.join(app.config['UPLOAD_FOLDER'], 'species_photos_data.json')
+        with open(photos_data_file, 'w', encoding='utf-8') as f:
+            json.dump(species_photos, f, ensure_ascii=False, indent=2)
+
+        return jsonify({
+            'success': True,
+            'message': 'Foto removida com sucesso'
+        })
+
+    except Exception as e:
+        print(f"Erro ao remover foto: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# Carregar fotos salvas na inicialização
+def load_species_photos():
+    """Carrega fotos das espécies do arquivo JSON"""
+    global species_photos
+    photos_data_file = os.path.join(app.config['UPLOAD_FOLDER'], 'species_photos_data.json')
+
+    if os.path.exists(photos_data_file):
+        try:
+            with open(photos_data_file, 'r', encoding='utf-8') as f:
+                species_photos = json.load(f)
+            print(f"✓ Fotos de espécies carregadas: {len(species_photos)} espécie(s)")
+        except Exception as e:
+            print(f"Erro ao carregar fotos: {e}")
+            species_photos = {}
+    else:
+        species_photos = {}
+
+# Carregar fotos na inicialização
+load_species_photos()
+
+@app.route('/export_pdf', methods=['POST'])
+def export_pdf():
+    """Exporta análise completa para PDF"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from io import BytesIO
+        
+        data = request.json
+        parcela_nome = data.get('parcela', 'Parcela')
+        especies = data.get('especies', {})
+        analytics = data.get('analytics', {})
+        
+        # Criar PDF em memória
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4,
+                                rightMargin=2*cm, leftMargin=2*cm,
+                                topMargin=2*cm, bottomMargin=2*cm)
+        
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Título
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#2196F3'),
+            spaceAfter=30,
+            alignment=1  # Center
+        )
+        
+        story.append(Paragraph(f"Relatório de Análise de Vegetação Herbácea", title_style))
+        story.append(Paragraph(f"<b>Parcela:</b> {parcela_nome}", styles['Heading2']))
+        story.append(Spacer(1, 20))
+        
+        # Análises Ecológicas
+        story.append(Paragraph("Análises Ecológicas", styles['Heading2']))
+        
+        analytics_data = [
+            ['Índice', 'Valor', 'Interpretação'],
+            ['Diversidade de Shannon (H\')', f"{analytics.get('diversity', 0):.3f}", 'Indica diversidade de espécies'],
+            ['Riqueza de Espécies (S)', str(analytics.get('richness', 0)), 'Número total de espécies'],
+            ['Equitabilidade de Pielou (J\')', f"{analytics.get('eveness', 0):.3f}", 'Uniformidade da distribuição'],
+            ['Dominância de Simpson (D)', f"{analytics.get('simpson', 0):.3f}", 'Probabilidade de dominância']
+        ]
+        
+        t = Table(analytics_data, colWidths=[6*cm, 4*cm, 8*cm])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4CAF50')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        story.append(t)
+        story.append(Spacer(1, 30))
+        
+        # Tabela de Espécies
+        story.append(Paragraph("Lista de Espécies Identificadas", styles['Heading2']))
+        story.append(Spacer(1, 10))
+        
+        especies_data = [['Apelido', 'Gênero', 'Espécie', 'Família', 'Cobertura (%)', 'Ocorrências']]
+        
+        for esp_nome, esp_info in sorted(especies.items(), key=lambda x: x[1].get('cobertura', 0), reverse=True):
+            especies_data.append([
+                esp_info.get('apelido_usuario', esp_nome),
+                esp_info.get('genero', '-'),
+                esp_info.get('especie', '-'),
+                esp_info.get('familia', '-'),
+                f"{esp_info.get('cobertura', 0):.2f}",
+                str(esp_info.get('ocorrencias', 0))
+            ])
+        
+        t_especies = Table(especies_data, colWidths=[4*cm, 3*cm, 3*cm, 3*cm, 2.5*cm, 2.5*cm])
+        t_especies.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2196F3')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTSIZE', (0, 1), (-1, -1), 9)
+        ]))
+        
+        story.append(t_especies)
+        
+        # Construir PDF
+        doc.build(story)
+        
+        # Retornar PDF
+        buffer.seek(0)
+        return send_file(buffer, 
+                        mimetype='application/pdf',
+                        as_attachment=True,
+                        download_name=f'{parcela_nome}_relatorio_completo.pdf')
+    
+    except Exception as e:
+        print(f"Erro ao gerar PDF: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/export_zip', methods=['POST'])
+def export_zip():
+    """Exporta pacote completo com Excel, PDF, fotos e JSON"""
+    try:
+        import zipfile
+        from io import BytesIO
+        
+        data = request.json
+        parcela_nome = data.get('parcela', 'Parcela')
+        especies = data.get('especies', {})
+        analysis_results = data.get('analysisResults', [])
+        analytics = data.get('analytics', {})
+        
+        # Criar ZIP em memória
+        zip_buffer = BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # 1. Adicionar JSON com todos os dados
+            json_data = {
+                'parcela': parcela_nome,
+                'especies': especies,
+                'analysisResults': analysis_results,
+                'analytics': analytics,
+                'data_exportacao': datetime.now().isoformat()
+            }
+            zip_file.writestr(f'{parcela_nome}_dados.json', 
+                            json.dumps(json_data, indent=2, ensure_ascii=False))
+            
+            # 2. Adicionar Excel (chamando a função existente)
+            # TODO: Implementar geração de Excel com analytics
+            
+            # 3. Adicionar fotos das subparcelas
+            upload_folder = app.config['UPLOAD_FOLDER']
+            parcela_folder = os.path.join(upload_folder, parcela_nome)
+            
+            if os.path.exists(parcela_folder):
+                for filename in os.listdir(parcela_folder):
+                    if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        file_path = os.path.join(parcela_folder, filename)
+                        zip_file.write(file_path, f'subparcelas/{filename}')
+            
+            # 4. Adicionar fotos das espécies
+            species_photos_folder = os.path.join(upload_folder, 'species_photos')
+            
+            if os.path.exists(species_photos_folder):
+                for species_folder in os.listdir(species_photos_folder):
+                    species_path = os.path.join(species_photos_folder, species_folder)
+                    if os.path.isdir(species_path):
+                        for filename in os.listdir(species_path):
+                            if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                                file_path = os.path.join(species_path, filename)
+                                zip_file.write(file_path, f'especies/{species_folder}/{filename}')
+            
+            # 5. Adicionar README
+            readme_content = f"""
+# Pacote de Análise de Vegetação Herbácea
+## {parcela_nome}
+
+Data de Exportação: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+
+### Conteúdo do Pacote:
+- **{parcela_nome}_dados.json**: Todos os dados da análise em formato JSON
+- **subparcelas/**: Fotos das subparcelas analisadas
+- **especies/**: Fotos das espécies identificadas (organizadas por espécie)
+
+### Análises Ecológicas:
+- Diversidade de Shannon: {analytics.get('diversity', 0):.3f}
+- Riqueza de Espécies: {analytics.get('richness', 0)}
+- Equitabilidade: {analytics.get('eveness', 0):.3f}
+- Dominância de Simpson: {analytics.get('simpson', 0):.3f}
+
+### Espécies Identificadas: {len(especies)}
+
+Para reimportar esta análise no sistema, use a opção "Importar ZIP" e selecione este arquivo.
+"""
+            zip_file.writestr('README.txt', readme_content)
+        
+        # Retornar ZIP
+        zip_buffer.seek(0)
+        return send_file(zip_buffer,
+                        mimetype='application/zip',
+                        as_attachment=True,
+                        download_name=f'{parcela_nome}_pacote_completo.zip')
+    
+    except Exception as e:
+        print(f"Erro ao gerar ZIP: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

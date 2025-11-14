@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx bmad-method:*)",
+      "Bash(python -c:*)",
+      "Bash(git checkout:*)",
+      "WebSearch",
+      "WebFetch(domain:annotorious.github.io)",
+      "WebFetch(domain:konvajs.org)",
+      "WebFetch(domain:blog.faltutech.com)",
+      "Bash(git add:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

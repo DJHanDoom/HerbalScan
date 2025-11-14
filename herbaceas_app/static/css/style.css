@@ -88,8 +88,15 @@ header p {
     border-radius: 6px;
     font-size: 1rem;
     background: white;
+    color: #2d3748;
     cursor: pointer;
     transition: border-color 0.3s;
+}
+
+.form-group select.ai-select option {
+    background: white;
+    color: #2d3748;
+    padding: 8px;
 }
 
 .form-group select.ai-select:focus {
@@ -323,9 +330,15 @@ tbody tr:hover {
 
 .subparcelas-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
     gap: 20px;
     margin: 20px 0;
+}
+
+@media (max-width: 500px) {
+    .subparcelas-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .subparcela-card {
@@ -343,6 +356,14 @@ tbody tr:hover {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.subparcela-header > div {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
 }
 
 .subparcela-image {
@@ -384,6 +405,8 @@ tbody tr:hover {
 .especie-actions {
     display: flex;
     gap: 5px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
 }
 
 .results-summary {
@@ -834,11 +857,11 @@ tbody tr:hover {
 
 .viewer-container {
     position: relative;
-    width: 95vw;
-    height: 92vh;
-    max-width: 1800px;
+    width: 98vw;
+    height: 98vh;
+    max-width: none;
     background: #1a202c;
-    border-radius: 16px;
+    border-radius: 8px;
     display: flex;
     flex-direction: column;
     box-shadow: 0 25px 80px rgba(0, 0, 0, 0.8);
@@ -850,14 +873,14 @@ tbody tr:hover {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 20px 25px;
+    padding: 12px 20px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-bottom: 3px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
 }
 
 .viewer-title {
     color: white;
-    font-size: 1.4rem;
+    font-size: 1.2rem;
     font-weight: 700;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
@@ -886,7 +909,7 @@ tbody tr:hover {
     transform: scale(1.05);
 }
 
-/* Conteúdo split: imagem (60%) + edição (40%) */
+/* Conteúdo split: imagem (75%) + edição (25%) */
 .viewer-content {
     flex: 1;
     display: flex;
@@ -894,7 +917,7 @@ tbody tr:hover {
 }
 
 .viewer-image-side {
-    flex: 6;
+    flex: 7.5;
     display: flex;
     flex-direction: column;
     background: #000;
@@ -903,11 +926,12 @@ tbody tr:hover {
 }
 
 .viewer-edit-side {
-    flex: 4;
+    flex: 2.5;
     display: flex;
     flex-direction: column;
     background: #2d3748;
     overflow: hidden;
+    min-width: 320px;
 }
 
 /* Container da imagem com zoom */
@@ -918,9 +942,13 @@ tbody tr:hover {
     justify-content: center;
     overflow: auto;
     position: relative;
+    width: 100%;
+    height: 100%;
 }
 
 #viewer-image {
+    width: 100%;
+    height: 100%;
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
@@ -933,29 +961,29 @@ tbody tr:hover {
     cursor: grabbing;
 }
 
-/* Controles de zoom (dentro da área da imagem) */
+/* Controles de zoom (dentro da área da imagem) - mais compactos */
 .viewer-zoom-controls {
     position: absolute;
-    bottom: 20px;
-    right: 20px;
+    bottom: 12px;
+    right: 12px;
     display: flex;
-    gap: 8px;
-    background: rgba(0, 0, 0, 0.7);
-    padding: 10px;
-    border-radius: 12px;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.8);
+    padding: 6px 8px;
+    border-radius: 8px;
     backdrop-filter: blur(10px);
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
 }
 
 .viewer-zoom-btn {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
     background: #4a5568;
     border: none;
-    border-radius: 8px;
+    border-radius: 6px;
     color: white;
     cursor: pointer;
-    font-size: 1.3rem;
+    font-size: 1.1rem;
     font-weight: bold;
     transition: all 0.2s;
     display: flex;
@@ -971,13 +999,13 @@ tbody tr:hover {
 #viewer-zoom-level {
     color: white;
     font-weight: 700;
-    font-size: 1.1rem;
-    padding: 0 12px;
+    font-size: 0.95rem;
+    padding: 0 8px;
     display: flex;
     align-items: center;
 }
 
-/* Setas de navegação (grandes e intuitivas) */
+/* Setas de navegação - mais compactas */
 .viewer-nav-arrows {
     position: absolute;
     top: 50%;
@@ -985,19 +1013,19 @@ tbody tr:hover {
     display: flex;
     justify-content: space-between;
     width: 100%;
-    padding: 0 20px;
+    padding: 0 12px;
     pointer-events: none;
 }
 
 .viewer-arrow {
     pointer-events: all;
-    width: 60px;
-    height: 60px;
-    background: rgba(102, 126, 234, 0.85);
-    border: 3px solid white;
+    width: 50px;
+    height: 50px;
+    background: rgba(102, 126, 234, 0.9);
+    border: 2px solid white;
     border-radius: 50%;
     color: white;
-    font-size: 2rem;
+    font-size: 1.8rem;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -1023,25 +1051,25 @@ tbody tr:hover {
     pointer-events: none;
 }
 
-/* Indicador de posição */
+/* Indicador de posição - mais compacto */
 .viewer-position-indicator {
     position: absolute;
-    top: 20px;
+    top: 12px;
     left: 50%;
     transform: translateX(-50%);
     background: rgba(0, 0, 0, 0.8);
     color: white;
-    padding: 10px 20px;
-    border-radius: 20px;
-    font-size: 1.1rem;
+    padding: 6px 16px;
+    border-radius: 16px;
+    font-size: 0.95rem;
     font-weight: 700;
     backdrop-filter: blur(10px);
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
 }
 
-/* Painel de edição de espécies */
+/* Painel de edição de espécies - mais compacto */
 .viewer-edit-header {
-    padding: 20px;
+    padding: 12px 16px;
     background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
     border-bottom: 2px solid #1a202c;
 }
@@ -1591,4 +1619,172 @@ tbody tr:hover {
 #load-analysis-initial-btn:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5);
+}
+
+/* Estilos para adicionar espécie inline */
+.add-species-tab {
+    flex: 1;
+    padding: 10px;
+    background: #2d3748;
+    border: 2px solid #4a5568;
+    border-radius: 8px;
+    color: #cbd5e0;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.add-species-tab:hover {
+    background: #4a5568;
+    border-color: #667eea;
+}
+
+.add-species-tab.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-color: #667eea;
+    color: white;
+}
+
+.add-species-content {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ===== FOOTER FIXO DE EXPORTAÇÃO ===== */
+#export-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+    border-top: 2px solid #667eea;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.2);
+    z-index: 9999;
+    padding: 0;
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.export-footer-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+}
+
+.export-footer-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: white;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: fit-content;
+}
+
+.export-footer-buttons {
+    display: flex;
+    gap: 8px;
+    flex: 1;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+}
+
+.export-footer-buttons .btn {
+    padding: 8px 16px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    white-space: nowrap;
+}
+
+.export-footer-buttons .btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
+}
+
+.export-footer-buttons .btn:active {
+    transform: translateY(0);
+}
+
+.export-footer-buttons .btn-info {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.export-footer-buttons .btn-primary {
+    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+    color: white;
+}
+
+.export-footer-buttons .btn-danger {
+    background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+    color: white;
+}
+
+.export-footer-buttons .btn-warning {
+    background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+    color: white;
+}
+
+.export-footer-buttons .btn-success {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+/* Responsividade do footer */
+@media (max-width: 1024px) {
+    .export-footer-container {
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px 15px;
+    }
+    
+    .export-footer-title {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .export-footer-buttons {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 768px) {
+    .export-footer-buttons {
+        flex-direction: column;
+    }
+    
+    .export-footer-buttons .btn {
+        width: 100%;
+    }
 }

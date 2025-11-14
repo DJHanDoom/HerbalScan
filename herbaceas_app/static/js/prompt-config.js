@@ -168,11 +168,14 @@ const PromptConfig = {
                         
                         <div class="prompt-preview">
                             <div class="prompt-preview-header">
-                                <span class="prompt-preview-title">📄 Preview do Prompt</span>
+                                <span class="prompt-preview-title">� Preview do Prompt (Editável)</span>
                                 <span class="prompt-preview-length" id="prompt-length">0 caracteres</span>
                             </div>
-                            <div class="prompt-preview-content" id="prompt-preview-text">
-                                Carregando...
+                            <textarea class="prompt-preview-content" id="prompt-preview-text" 
+                                      placeholder="Carregando..."
+                                      oninput="PromptConfig.onPromptEdit()">Carregando...</textarea>
+                            <div class="prompt-preview-hint">
+                                💡 <strong>Dica:</strong> Edite o prompt diretamente aqui. Suas alterações manuais serão preservadas até você alterar as configurações acima.
                             </div>
                         </div>
                     </div>
@@ -206,6 +209,7 @@ const PromptConfig = {
         `;
         document.body.appendChild(modal);
         
+        this.manualEdit = false; // Resetar flag de edição manual
         this.renderTemplates();
         this.updatePreview();
     },
@@ -397,6 +401,7 @@ const PromptConfig = {
             const el = document.getElementById(id);
             if (el) {
                 el.addEventListener('change', () => {
+                    this.manualEdit = false; // Resetar flag ao mudar configurações
                     this.updatePreview();
                     this.saveCurrentConfig(); // Salvar automaticamente
                 });
@@ -433,6 +438,11 @@ const PromptConfig = {
     },
     
     async updatePreview() {
+        // Se houver edição manual, não sobrescrever
+        if (this.manualEdit) {
+            return;
+        }
+        
         clearTimeout(this.previewTimer);
         this.previewTimer = setTimeout(async () => {
             try {
@@ -446,12 +456,31 @@ const PromptConfig = {
                 });
                 
                 const data = await response.json();
-                document.getElementById('prompt-preview-text').textContent = data.prompt;
+                const previewElement = document.getElementById('prompt-preview-text');
+                previewElement.value = data.prompt;
                 document.getElementById('prompt-length').textContent = `${data.length} caracteres`;
             } catch (error) {
                 console.error('Erro ao gerar preview:', error);
             }
         }, 500);
+    },
+    
+    onPromptEdit() {
+        // Marcar que houve edição manual
+        this.manualEdit = true;
+        
+        // Atualizar contador de caracteres
+        const previewElement = document.getElementById('prompt-preview-text');
+        const length = previewElement.value.length;
+        document.getElementById('prompt-length').textContent = `${length} caracteres`;
+    },
+    
+    getEditedPrompt() {
+        // Retornar prompt editado se houver edição manual
+        if (this.manualEdit) {
+            return document.getElementById('prompt-preview-text').value;
+        }
+        return null;
     },
     
     open() {
@@ -614,6 +643,12 @@ const PromptConfig = {
             template: this.currentTemplate,
             params: this.getCustomParams()
         };
+        
+        // Se houve edição manual, salvar o prompt editado
+        if (this.manualEdit) {
+            config.customPrompt = document.getElementById('prompt-preview-text').value;
+            console.log('💾 Salvando prompt editado manualmente');
+        }
         
         localStorage.setItem('promptConfig', JSON.stringify(config));
         

@@ -1,6 +1,7 @@
 Flask==3.0.0
 openpyxl==3.1.2
 Werkzeug==3.0.1
+reportlab>=4.0.0          # Para exportação PDF
 
 # IAs Premium - Instale apenas as que você vai usar
 anthropic>=0.72.0          # Para Claude

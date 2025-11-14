@@ -1,0 +1,342 @@
+/* Análises Avançadas - Estilos */
+
+#advanced-analytics-section {
+    margin-top: 20px;
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+/* Navegação por abas */
+.analytics-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #e0e0e0;
+    flex-wrap: wrap;
+}
+
+.analytics-tab {
+    padding: 12px 20px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: #666;
+    transition: all 0.3s ease;
+}
+
+.analytics-tab:hover {
+    color: #2196F3;
+    background: rgba(33, 150, 243, 0.05);
+}
+
+.analytics-tab.active {
+    color: #2196F3;
+    border-bottom-color: #2196F3;
+    font-weight: 600;
+}
+
+/* Conteúdo das abas */
+.analytics-tab-content {
+    display: none;
+    animation: fadeIn 0.3s ease-in;
+    overflow: hidden;
+}
+
+.analytics-tab-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Grid de cards */
+.analytics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+/* Cards individuais */
+.analytics-card {
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    max-height: fit-content;
+}
+
+.analytics-card canvas {
+    max-height: 250px !important;
+    height: 250px !important;
+}
+
+.analytics-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+}
+
+.analytics-card h3 {
+    margin: 0 0 15px 0;
+    font-size: 16px;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.analytics-value {
+    font-size: 48px;
+    font-weight: 700;
+    color: #2196F3;
+    text-align: center;
+    margin: 20px 0;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+}
+
+.analytics-description {
+    font-size: 13px;
+    color: #666;
+    line-height: 1.5;
+    margin: 10px 0;
+}
+
+.analytics-interpretation {
+    margin-top: 15px;
+    padding: 12px;
+    background: rgba(255,255,255,0.8);
+    border-radius: 8px;
+    border-left: 4px solid #4CAF50;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+/* Seções */
+.analytics-section {
+    margin-bottom: 30px;
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    border: 1px solid #e0e0e0;
+    max-height: fit-content;
+}
+
+.analytics-section canvas {
+    max-height: 300px !important;
+    height: 300px !important;
+}
+
+.analytics-section h3 {
+    margin: 0 0 15px 0;
+    font-size: 18px;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Tabela fitossociológica */
+.phytosociological-table {
+    overflow-x: auto;
+    margin-top: 15px;
+}
+
+.phytosociological-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.phytosociological-table th {
+    background: #2196F3;
+    color: white;
+    padding: 12px 8px;
+    text-align: left;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+}
+
+.phytosociological-table td {
+    padding: 10px 8px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.phytosociological-table tr:hover {
+    background: rgba(33, 150, 243, 0.05);
+}
+
+/* Indicadores de qualidade */
+.quality-indicators {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+}
+
+.quality-indicator {
+    padding: 15px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 10px;
+    color: white;
+    text-align: center;
+}
+
+.quality-indicator .label {
+    font-size: 12px;
+    opacity: 0.9;
+    margin-bottom: 8px;
+}
+
+.quality-indicator .value {
+    font-size: 28px;
+    font-weight: 700;
+}
+
+/* Matriz de Jaccard */
+#jaccard-matrix {
+    overflow-x: auto;
+}
+
+#jaccard-matrix table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+#jaccard-matrix td,
+#jaccard-matrix th {
+    padding: 8px;
+    text-align: center;
+    border: 1px solid #e0e0e0;
+}
+
+#jaccard-matrix th {
+    background: #f5f5f5;
+    font-weight: 600;
+}
+
+/* Canvas para gráficos */
+canvas {
+    max-width: 100%;
+    max-height: 400px !important;
+    width: 100% !important;
+}
+
+/* Estratificação vertical */
+.stratification-bars {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-around;
+    height: 200px;
+    margin: 20px 0;
+}
+
+.stratification-bar {
+    width: 60px;
+    background: linear-gradient(to top, #4CAF50, #8BC34A);
+    border-radius: 4px 4px 0 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding-top: 10px;
+    color: white;
+    font-weight: 600;
+    font-size: 14px;
+    position: relative;
+}
+
+.stratification-bar::after {
+    content: attr(data-label);
+    position: absolute;
+    bottom: -25px;
+    font-size: 11px;
+    color: #666;
+    font-weight: normal;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+    .analytics-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .analytics-tabs {
+        flex-direction: column;
+    }
+    
+    .analytics-tab {
+        width: 100%;
+        text-align: left;
+    }
+    
+    .analytics-value {
+        font-size: 36px;
+    }
+}
+
+/* Animações */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.loading {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Tooltips */
+.analytics-tooltip {
+    position: relative;
+    display: inline-block;
+    cursor: help;
+}
+
+.analytics-tooltip::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.8);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    z-index: 1000;
+}
+
+.analytics-tooltip:hover::after {
+    opacity: 1;
+}
+
+/* Sucessão Ecológica */
+.succession-stages {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.succession-stages .stage {
+    padding: 10px;
+}
+
+.succession-stages .stage-bar {
+    height: 20px;
+    margin-top: 8px;
+    border-radius: 10px;
+    transition: width 0.5s ease;
+}
+

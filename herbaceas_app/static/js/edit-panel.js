@@ -8,15 +8,45 @@ function openEditPanel(title, contentHTML, onSave) {
     const bodyEl = document.getElementById('edit-panel-body');
     const saveBtn = document.getElementById('edit-panel-save');
 
+    console.log('📝 openEditPanel chamado:', { title, hasSaveBtn: !!saveBtn, hasOnSave: !!onSave });
+
+    if (!saveBtn) {
+        console.error('❌ Botão Salvar não encontrado no DOM!');
+        return;
+    }
+
     titleEl.textContent = title;
     bodyEl.innerHTML = contentHTML;
 
+    // Remover listeners antigos clonando o botão
+    const newSaveBtn = saveBtn.cloneNode(true);
+    newSaveBtn.id = 'edit-panel-save'; // Garantir que o ID seja mantido
+    saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+    
+    console.log('🔄 Botão clonado, ID:', newSaveBtn.id, 'Parent:', newSaveBtn.parentNode.className);
+
     // Configurar callback de salvamento
-    saveBtn.onclick = () => {
+    newSaveBtn.onclick = () => {
+        console.log('💾 Botão Salvar clicado!');
         if (onSave) {
+            console.log('✅ Executando callback onSave...');
             onSave();
+        } else {
+            console.error('❌ Nenhum callback onSave definido!');
         }
     };
+    
+    console.log('✅ Event listener anexado ao botão Salvar (onclick)');
+    
+    // Teste adicional: verificar se o botão está realmente no DOM e clicável
+    setTimeout(() => {
+        const btnTest = document.getElementById('edit-panel-save');
+        console.log('🧪 Teste do botão após timeout:', {
+            existe: !!btnTest,
+            visivel: btnTest ? window.getComputedStyle(btnTest).display !== 'none' : false,
+            pointer: btnTest ? window.getComputedStyle(btnTest).pointerEvents : 'N/A'
+        });
+    }, 500);
 
     // Mostrar painel
     panel.classList.add('active');
@@ -391,6 +421,8 @@ function addEspecieToSubparcelaPanel(subparcela) {
     `;
 
     openEditPanel('Adicionar Espécie', formHTML, async () => {
+        console.log('🚀 Callback de salvamento executado!');
+        
         const apelido = document.getElementById('new-apelido').value.trim();
         const cobertura = parseFloat(document.getElementById('new-cobertura').value);
         const altura = parseFloat(document.getElementById('new-altura').value);
@@ -400,15 +432,21 @@ function addEspecieToSubparcelaPanel(subparcela) {
         const familia = document.getElementById('new-familia').value.trim();
         const linkFotos = document.getElementById('new-link-fotos').value.trim();
 
+        console.log('📝 Dados coletados:', { apelido, cobertura, altura, formaVida });
+
         if (!apelido || isNaN(cobertura) || isNaN(altura) || !formaVida) {
+            console.error('❌ Validação falhou');
             showAlert('error', 'Preencha todos os campos obrigatórios');
             return;
         }
 
         if (cobertura < 0 || cobertura > 100 || altura < 0) {
+            console.error('❌ Valores fora do range válido');
             showAlert('error', 'Valores inválidos. Cobertura: 0-100, Altura: ≥0');
             return;
         }
+
+        console.log('✅ Validação passou, enviando requisição...');
 
         try {
             const response = await fetch('/api/especies/add', {
@@ -431,15 +469,27 @@ function addEspecieToSubparcelaPanel(subparcela) {
             });
 
             const result = await response.json();
+            console.log('📡 Resposta recebida:', result);
 
             if (result.success) {
-                await refreshData();
+                console.log('✅ Espécie adicionada com sucesso');
+                
+                // Fechar painel ANTES de atualizar dados
                 closeEditPanel();
+                
+                // Mostrar mensagem de sucesso
                 showAlert('success', result.message);
+                
+                // Atualizar dados em background
+                await refreshData();
+                
+                console.log('🔄 Dados atualizados');
             } else {
+                console.error('❌ Erro na resposta:', result.error);
                 showAlert('error', result.error || 'Erro ao adicionar');
             }
         } catch (error) {
+            console.error('❌ Erro na requisição:', error);
             showAlert('error', 'Erro: ' + error.message);
         }
     });

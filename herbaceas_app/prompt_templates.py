@@ -22,7 +22,8 @@ PROMPT_TEMPLATES = {
             "focus_functional": False,
             "focus_succession": False,
             "focus_carbon": False,
-            "standardize_across_subplots": "moderate"  # none, conservative, moderate, aggressive
+            "standardize_across_subplots": "moderate",  # none, conservative, moderate, aggressive
+            "detect_coordinates": True  # Detectar coordenadas de polígonos das espécies
         }
     },
     
@@ -48,7 +49,8 @@ PROMPT_TEMPLATES = {
                 "Diferencie estágios de desenvolvimento (plântula, jovem, estabelecida)",
                 "Observe presença de espécies pioneiras vs secundárias quando possível",
                 "Registre abundância de regenerantes lenhosos"
-            ]
+            ],
+            "detect_coordinates": True
         }
     },
     
@@ -75,7 +77,8 @@ PROMPT_TEMPLATES = {
                 "Observe cobertura de gramíneas competidoras (Brachiaria, Melinis)",
                 "Registre presença de espécies indicadoras de sucessão secundária",
                 "Identifique mudas de espécies nativas arbóreas/arbustivas"
-            ]
+            ],
+            "detect_coordinates": True
         }
     },
     
@@ -102,7 +105,8 @@ PROMPT_TEMPLATES = {
                 "Observe proporção de material vivo vs senescente",
                 "Para gramíneas cespitosas, note densidade das touceiras",
                 "Diferencie entre estratos herbáceo (<50cm) e subarbustivo (50-150cm)"
-            ]
+            ],
+            "detect_coordinates": True
         }
     },
     
@@ -129,7 +133,8 @@ PROMPT_TEMPLATES = {
                 "Observe fenologia quando possível: floração, frutificação, senescência",
                 "Diferencie grupos funcionais: gramíneas C3 vs C4 (quando óbvio pela cor/textura)",
                 "Registre presença de estruturas especializadas: estolões, rizomas, bulbos (quando visíveis)"
-            ]
+            ],
+            "detect_coordinates": True
         }
     },
     
@@ -156,7 +161,8 @@ PROMPT_TEMPLATES = {
                 "Registre subarbustos e sufrutescentes característicos",
                 "Identifique xilopódios e estruturas de rebrota quando visíveis",
                 "Note presença de espécies indicadoras de queimada recente"
-            ]
+            ],
+            "detect_coordinates": True
         }
     },
     
@@ -183,7 +189,8 @@ PROMPT_TEMPLATES = {
                 "Observe presença de samambaias e licófitas",
                 "Registre abundância de serapilheira (importante em ambientes florestais)",
                 "Note presença de lianas e trepadeiras jovens"
-            ]
+            ],
+            "detect_coordinates": True
         }
     },
     
@@ -211,7 +218,8 @@ PROMPT_TEMPLATES = {
                 "Identifique sinais de regeneração natural (mudas nativas)",
                 "Note presença de espécies ruderais e indicadoras de distúrbio",
                 "Estime vigor da vegetação (plantas saudáveis vs estressadas/secas)"
-            ]
+            ],
+            "detect_coordinates": True
         }
     },
     
@@ -238,7 +246,8 @@ PROMPT_TEMPLATES = {
                 "Observe plantas aquáticas/palustres: Pontederiaceae, Alismataceae",
                 "Registre presença de juncos e taboas quando presentes",
                 "Note adaptações a ambientes alagados (aerênquima, raízes adventícias visíveis)"
-            ]
+            ],
+            "detect_coordinates": True
         }
     },
     
@@ -264,7 +273,8 @@ PROMPT_TEMPLATES = {
                 "Use categorias amplas: 'Gramíneas', 'Herbáceas de Folha Larga', 'Plantas Lenhosas'",
                 "Foque em cobertura e estrutura geral da vegetação",
                 "Minimize detalhes taxonômicos"
-            ]
+            ],
+            "detect_coordinates": True
         }
     },
     
@@ -292,7 +302,8 @@ PROMPT_TEMPLATES = {
                 "Use características diagnósticas específicas para famílias/gêneros",
                 "Para Poaceae: note tipo de inflorescência (panícula, espiga, racemo, digitada)",
                 "Para Cyperaceae: observe formato da inflorescência (umbela, espiga, capítulo)"
-            ]
+            ],
+            "detect_coordinates": True
         }
     }
 }
@@ -693,7 +704,46 @@ Para cada morfotipo CLARAMENTE visível, forneça:
 6. **altura** - Altura média em cm (considere o quadrado de 1x1m como referência)
 
 7. **forma_vida**: "Erva", "Arbusto", "Subarbusto", "Plântula", "Liana", "Trepadeira", ou "-" (para solo/serapilheira)
+"""
 
+    # Instruções de coordenadas (condicional)
+    if params.get('detect_coordinates', False):
+        prompt += """
+8. **areas** - COORDENADAS DE LOCALIZAÇÃO (array de polígonos):
+   🎯 **IMPORTANTE: Tente sempre identificar onde cada espécie está localizada na imagem**
+
+   Para cada espécie, forneça as áreas onde ela ocorre usando coordenadas em **porcentagem (0-100)**:
+   - x: 0 (esquerda) a 100 (direita)
+   - y: 0 (topo) a 100 (fundo)
+
+   **Formato:** array de polígonos, onde cada polígono é uma lista de pontos [x, y]
+   - Mínimo 3-4 pontos para formar um polígono fechado
+   - Para áreas simples, use 4 pontos (retângulo/quadrilátero)
+   - Para áreas irregulares, use 5+ pontos seguindo o contorno
+   - Você pode fornecer MÚLTIPLOS polígonos se a espécie ocorre em áreas separadas
+
+   **Quando fornecer coordenadas:**
+   ✅ SEMPRE tente quando a espécie tem uma região distinta e visível
+   ✅ Use múltiplos polígonos para espécies em áreas descontínuas
+   ✅ Aproximações são aceitáveis - não precisa ser pixel-perfect
+   ✅ Para espécies dominantes, marque as principais manchas/agregações
+
+   **Quando deixar vazio []:**
+   ❌ Espécie muito dispersa/uniforme por toda imagem (ex: gramínea homogênea)
+   ❌ Impossível determinar limites claros da área
+   ❌ Solo Exposto ou Serapilheira (geralmente dispersos)
+
+   **Exemplos de boas coordenadas:**
+   - Touceira de gramínea no canto: [[10, 15], [30, 15], [30, 40], [10, 40]]
+   - Plântula isolada: [[45, 60], [52, 60], [52, 70], [45, 70]]
+   - Área irregular de leguminosa: [[20, 50], [35, 48], [40, 60], [30, 68], [18, 65]]
+   - Espécie em 2 manchas: [[[5,10],[15,10],[15,25],[5,25]], [[70,80],[85,80],[85,95],[70,95]]]
+"""
+    else:
+        prompt += """
+"""
+
+    prompt += """
 EXEMPLOS DE RESPOSTA (JSON válido, sem ```json):
 {
   "especies": [
@@ -704,7 +754,17 @@ EXEMPLOS DE RESPOSTA (JSON válido, sem ```json):
       "observacoes": "Crescimento em touceiras densas, folhas lineares muito finas (<2mm largura), caules cilíndricos visíveis, cor verde-claro predominante com leve tonalidade amarelada, textura lisa e glabra, bainhas abertas características de Poaceae, algumas folhas senescentes nas pontas, altura variando 25-35cm",
       "cobertura": 45,
       "altura": 30,
-      "forma_vida": "Erva"
+      "forma_vida": "Erva"""
+
+    # Adicionar exemplo de areas se ativado
+    if params.get('detect_coordinates', False):
+        prompt += """,
+      "areas": [
+        [[10, 20], [40, 20], [40, 60], [10, 60]],
+        [[60, 30], [80, 30], [80, 70], [60, 70]]
+      ]"""
+
+    prompt += """
     },
     {
       "apelido": "Leguminosa Trifoliolada Pilosa Dourada",
@@ -713,7 +773,15 @@ EXEMPLOS DE RESPOSTA (JSON válido, sem ```json):
       "observacoes": "Folhas compostas trifolioladas (3 folíolos por folha), folíolos ovados a elípticos de 8-12mm comprimento, margem inteira, pilosidade densa de coloração dourada cobrindo lâmina e pecíolo, textura aveludada ao toque visual, estípulas pequenas presentes na base do pecíolo, crescimento prostrado a semi-ereto, cor verde-médio, altura 5-8cm",
       "cobertura": 10,
       "altura": 6,
-      "forma_vida": "Erva"
+      "forma_vida": "Erva"""
+
+    if params.get('detect_coordinates', False):
+        prompt += """,
+      "areas": [
+        [[15, 70], [35, 75], [30, 90], [12, 85]]
+      ]"""
+
+    prompt += """
     },
     {
       "apelido": "Plântula Dicotiledônea Pilosa Prateada",
@@ -722,7 +790,13 @@ EXEMPLOS DE RESPOSTA (JSON válido, sem ```json):
       "observacoes": "Plântula jovem com 2 cotilédones ovados visíveis, 2-4 folhas verdadeiras em desenvolvimento, folhas lanceoladas de 10-15mm, pilosidade densa prateada em toda planta especialmente no hipocótilo e face abaxial das folhas, margem foliar inteira, cor verde-claro, crescimento ereto, altura 3-5cm",
       "cobertura": 5,
       "altura": 4,
-      "forma_vida": "Plântula"
+      "forma_vida": "Plântula"""
+
+    if params.get('detect_coordinates', False):
+        prompt += """,
+      "areas": []"""
+
+    prompt += """
     }
   ]
 }
@@ -750,7 +824,10 @@ REGRAS FINAIS:
         }\n"""
     
     prompt += "✓ Soma de coberturas = ~100%\n"
-    
+
+    if params.get('detect_coordinates', False):
+        prompt += "✓ TENTE SEMPRE fornecer coordenadas 'areas' para espécies com localização visível\n"
+
     if params['include_soil']:
         prompt += "✓ Inclua 'Solo Exposto' se aplicável\n"
     else:
@@ -780,6 +857,7 @@ REGRAS FINAIS:
 - Identificação de gênero: {params['include_genus'].upper().replace('_', ' ')}
 - Identificação de família: {params['include_family'].upper().replace('_', ' ')}
 - Nível de detalhe nas observações: {params['detail_level'].upper().replace('_', ' ')}
+- Coordenadas de localização: {'FORNEÇA SEMPRE QUE POSSÍVEL (campo areas)' if params.get('detect_coordinates', False) else 'NÃO NECESSÁRIO'}
 - **PRIORIZE PRECISÃO**: Na dúvida entre agrupar ou separar morfotipos, SEPARE!
 
 Retorne APENAS JSON válido sem marcadores markdown."""

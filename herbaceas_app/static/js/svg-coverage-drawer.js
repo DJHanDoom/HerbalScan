@@ -1,0 +1,973 @@
+// ============================================================
+// SVG COVERAGE DRAWER v3.0 - SVG Overlay Method
+// ============================================================
+// Baseado na análise em ANALISE_METODOS_CANVAS.md
+// Usa SVG overlay com viewBox para sincronização automática
+// ============================================================
+
+const SVGCoverageDrawer = {
+    // Estado
+    svg: null,
+    image: null,
+    imageContainer: null,
+    currentSubparcela: null,
+    toolbar: null,
+
+    // Dados
+    subparcelaPolygon: null,  // { points: [{x,y}, ...] }
+    speciesPolygons: {},       // { speciesIndex: [{ points: [{x,y}, ...] }, ...] }
+
+    // Modo de desenho
+    drawMode: null,            // 'subparcela' ou 'species'
+    currentSpeciesIndex: null,
+    currentTool: 'rectangle',  // 'rectangle', 'polygon', 'circle', 'ellipse'
+
+    // Estado do desenho
+    isDrawing: false,
+    startPoint: null,
+    currentPath: null,
+    polygonPoints: [],
+    currentPreviewShape: null,  // Para preview de círculo/elipse
+
+    // Configurações visuais
+    fillEnabled: false,
+    subparcelaFillEnabled: false,
+    fillOpacity: 0.3,
+    strokeWidth: 3,
+
+    // Cores
+    colors: {
+        subparcela: '#667eea',
+        species: [
+            '#48bb78', '#ed8936', '#f6e05e', '#ec4899',
+            '#8b5cf6', '#3b82f6', '#ef4444', '#10b981'
+        ]
+    },
+
+    // ========================================
+    // INICIALIZAÇÃO
+    // ========================================
+
+    init(imageElement, subparcelaData) {
+        console.log('🎨 SVGCoverageDrawer v3.0 - SVG Overlay Method');
+
+        this.image = imageElement;
+        this.currentSubparcela = subparcelaData;
+        this.imageContainer = document.getElementById('viewer-img-container');
+
+        if (!this.imageContainer) {
+            console.error('❌ Container não encontrado');
+            return;
+        }
+
+        this.createSVG();
+        this.createToolbar();
+        this.setupEventListeners();
+        this.loadSavedData();
+    },
+
+    createSVG() {
+        // Remover SVG antigo se existir
+        const oldSVG = document.getElementById('coverage-svg');
+        if (oldSVG) oldSVG.remove();
+
+        // Aguardar imagem carregar
+        if (!this.image.complete || !this.image.naturalWidth) {
+            this.image.onload = () => this.createSVG();
+            return;
+        }
+
+        // Criar SVG com viewBox = dimensões naturais da imagem
+        this.svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        this.svg.id = 'coverage-svg';
+        this.svg.setAttribute('viewBox', `0 0 ${this.image.naturalWidth} ${this.image.naturalHeight}`);
+
+        // Estilo: overlay absoluto que cobre todo o container
+        this.svg.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            display: none;
+        `;
+
+        // Criar grupo para área da subparcela
+        const subparcelaGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        subparcelaGroup.id = 'subparcela-group';
+        this.svg.appendChild(subparcelaGroup);
+
+        // Criar grupo para espécies
+        const speciesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        speciesGroup.id = 'species-group';
+        this.svg.appendChild(speciesGroup);
+
+        // Criar grupo para desenho temporário
+        const drawGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        drawGroup.id = 'draw-group';
+        this.svg.appendChild(drawGroup);
+
+        this.imageContainer.appendChild(this.svg);
+
+        console.log(`✅ SVG criado: viewBox="${this.svg.getAttribute('viewBox')}"`);
+    },
+
+    // ========================================
+    // TOOLBAR
+    // ========================================
+
+    createToolbar() {
+        const oldToolbar = document.getElementById('coverage-toolbar');
+        if (oldToolbar) oldToolbar.remove();
+
+        this.toolbar = document.createElement('div');
+        this.toolbar.id = 'coverage-toolbar';
+        this.toolbar.style.cssText = `
+            position: absolute;
+            top: 50%;
+            left: 10px;
+            transform: translateY(-50%);
+            background: linear-gradient(135deg, rgba(0,0,0,0.95), rgba(30,30,40,0.95));
+            padding: 8px;
+            border-radius: 12px;
+            z-index: 20;
+            display: none;
+            flex-direction: column;
+            gap: 6px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+        `;
+
+        const buttons = [
+            { id: 'rect-btn', label: '▢', title: 'Retângulo (R)', tool: 'rectangle', color: '#3b82f6' },
+            { id: 'circle-btn', label: '○', title: 'Círculo (C)', tool: 'circle', color: '#10b981' },
+            { id: 'ellipse-btn', label: '⬭', title: 'Elipse (E)', tool: 'ellipse', color: '#8b5cf6' },
+            { id: 'polygon-btn', label: '⬡', title: 'Polígono (P)\nEnter ou duplo clique para finalizar', tool: 'polygon', color: '#f59e0b' },
+            { id: 'divider', isDivider: true },
+            { id: 'cancel-btn', label: '✕', title: 'Cancelar (ESC)', action: 'cancel', color: '#ef4444' },
+            { id: 'finish-btn', label: '✓', title: 'Finalizar e Sair', action: 'finish', color: '#10b981' }
+        ];
+
+        buttons.forEach(btn => {
+            if (btn.isDivider) {
+                const divider = document.createElement('div');
+                divider.style.cssText = `
+                    height: 1px;
+                    background: rgba(255,255,255,0.1);
+                    margin: 4px 0;
+                `;
+                this.toolbar.appendChild(divider);
+                return;
+            }
+
+            const button = document.createElement('button');
+            button.id = btn.id;
+            button.textContent = btn.label;
+            button.title = btn.title;
+            button.dataset.tool = btn.tool || btn.action;
+
+            const baseColor = btn.color || '#4a5568';
+            button.style.cssText = `
+                padding: 12px;
+                background: ${baseColor}22;
+                color: white;
+                border: 2px solid ${baseColor};
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 20px;
+                font-weight: 700;
+                transition: all 0.2s;
+                min-width: 50px;
+                min-height: 50px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                position: relative;
+            `;
+
+            button.onmouseenter = () => {
+                button.style.background = baseColor;
+                button.style.transform = 'scale(1.1)';
+                button.style.boxShadow = `0 0 20px ${baseColor}88`;
+            };
+
+            button.onmouseleave = () => {
+                const isActive = this.currentTool === btn.tool;
+                button.style.background = isActive ? baseColor : `${baseColor}22`;
+                button.style.transform = isActive ? 'scale(1.05)' : 'scale(1)';
+                button.style.boxShadow = 'none';
+            };
+
+            if (btn.tool) {
+                button.onclick = () => {
+                    this.setTool(btn.tool);
+                    this.updateToolbarHighlight();
+                };
+            } else if (btn.action === 'cancel') {
+                button.onclick = () => this.cancelDrawing();
+            } else if (btn.action === 'finish') {
+                button.onclick = () => this.stopDrawing();
+            }
+
+            this.toolbar.appendChild(button);
+        });
+
+        this.imageContainer.appendChild(this.toolbar);
+        console.log('🔧 Toolbar criada (vertical colorida)');
+    },
+
+    updateToolbarHighlight() {
+        const buttons = this.toolbar.querySelectorAll('button[data-tool]');
+        buttons.forEach(btn => {
+            const tool = btn.dataset.tool;
+            const isActive = this.currentTool === tool;
+            const colorMap = {
+                'rectangle': '#3b82f6',
+                'circle': '#10b981',
+                'ellipse': '#8b5cf6',
+                'polygon': '#f59e0b'
+            };
+            const baseColor = colorMap[tool] || '#4a5568';
+
+            btn.style.background = isActive ? baseColor : `${baseColor}22`;
+            btn.style.transform = isActive ? 'scale(1.05)' : 'scale(1)';
+            btn.style.boxShadow = isActive ? `0 0 15px ${baseColor}66` : 'none';
+        });
+    },
+
+    // ========================================
+    // EVENTOS
+    // ========================================
+
+    setupEventListeners() {
+        this.svg.addEventListener('mousedown', (e) => this.onMouseDown(e));
+        this.svg.addEventListener('mousemove', (e) => this.onMouseMove(e));
+        this.svg.addEventListener('mouseup', (e) => this.onMouseUp(e));
+        this.svg.addEventListener('dblclick', (e) => this.onDoubleClick(e));
+        document.addEventListener('keydown', (e) => this.onKeyDown(e));
+    },
+
+    getSVGPoint(e) {
+        // Converter coordenadas da tela para coordenadas do SVG
+        // O browser faz toda a mágica! Não precisamos calcular nada!
+        const pt = this.svg.createSVGPoint();
+        pt.x = e.clientX;
+        pt.y = e.clientY;
+
+        const svgP = pt.matrixTransform(this.svg.getScreenCTM().inverse());
+        return { x: svgP.x, y: svgP.y };
+    },
+
+    onMouseDown(e) {
+        if (!this.drawMode) return;
+        e.preventDefault();
+
+        const point = this.getSVGPoint(e);
+
+        if (this.currentTool === 'polygon') {
+            this.polygonPoints.push(point);
+            this.isDrawing = true;
+            this.renderCurrentDraw();
+        } else {
+            // Rectangle, Circle, Ellipse
+            this.isDrawing = true;
+            this.startPoint = point;
+        }
+    },
+
+    onMouseMove(e) {
+        if (!this.isDrawing) return;
+        e.preventDefault();
+
+        const point = this.getSVGPoint(e);
+
+        if (this.currentTool === 'polygon') {
+            this.renderCurrentDraw(point);
+        } else if (this.startPoint) {
+            // Rectangle, Circle, Ellipse
+            this.renderCurrentDraw(point);
+        }
+    },
+
+    onMouseUp(e) {
+        if (!this.isDrawing || this.currentTool === 'polygon') return;
+        e.preventDefault();
+
+        const point = this.getSVGPoint(e);
+
+        if (this.startPoint) {
+            switch (this.currentTool) {
+                case 'rectangle':
+                    this.finishRectangle(point);
+                    break;
+                case 'circle':
+                    this.finishCircle(point);
+                    break;
+                case 'ellipse':
+                    this.finishEllipse(point);
+                    break;
+            }
+        }
+
+        this.isDrawing = false;
+        this.startPoint = null;
+    },
+
+    onDoubleClick(e) {
+        if (this.currentTool === 'polygon' && this.polygonPoints.length >= 3) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.finishPolygon();
+        }
+    },
+
+    onKeyDown(e) {
+        if (!this.drawMode) return;
+
+        switch(e.key.toLowerCase()) {
+            case 'r':
+                this.setTool('rectangle');
+                break;
+            case 'p':
+                this.setTool('polygon');
+                break;
+            case 'c':
+                this.setTool('circle');
+                break;
+            case 'e':
+                this.setTool('ellipse');
+                break;
+            case 'escape':
+                this.cancelDrawing();
+                break;
+            case 'enter':
+                // Finalizar polígono com Enter
+                if (this.currentTool === 'polygon' && this.polygonPoints.length >= 3) {
+                    this.finishPolygon();
+                }
+                break;
+        }
+    },
+
+    // ========================================
+    // DESENHO
+    // ========================================
+
+    renderCurrentDraw(currentPoint = null) {
+        const drawGroup = this.svg.querySelector('#draw-group');
+        drawGroup.innerHTML = '';
+
+        const color = this.drawMode === 'subparcela'
+            ? this.colors.subparcela
+            : this.colors.species[this.currentSpeciesIndex % this.colors.species.length];
+
+        if (this.currentTool === 'rectangle' && this.startPoint && currentPoint) {
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', Math.min(this.startPoint.x, currentPoint.x));
+            rect.setAttribute('y', Math.min(this.startPoint.y, currentPoint.y));
+            rect.setAttribute('width', Math.abs(currentPoint.x - this.startPoint.x));
+            rect.setAttribute('height', Math.abs(currentPoint.y - this.startPoint.y));
+            rect.setAttribute('fill', color);
+            rect.setAttribute('fill-opacity', '0.2');
+            rect.setAttribute('stroke', color);
+            rect.setAttribute('stroke-width', this.strokeWidth);
+            rect.setAttribute('stroke-dasharray', '5,5');
+            drawGroup.appendChild(rect);
+        }
+        else if (this.currentTool === 'circle' && this.startPoint && currentPoint) {
+            const dx = currentPoint.x - this.startPoint.x;
+            const dy = currentPoint.y - this.startPoint.y;
+            const radius = Math.sqrt(dx * dx + dy * dy);
+
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', this.startPoint.x);
+            circle.setAttribute('cy', this.startPoint.y);
+            circle.setAttribute('r', radius);
+            circle.setAttribute('fill', color);
+            circle.setAttribute('fill-opacity', '0.2');
+            circle.setAttribute('stroke', color);
+            circle.setAttribute('stroke-width', this.strokeWidth);
+            circle.setAttribute('stroke-dasharray', '5,5');
+            drawGroup.appendChild(circle);
+        }
+        else if (this.currentTool === 'ellipse' && this.startPoint && currentPoint) {
+            const rx = Math.abs(currentPoint.x - this.startPoint.x);
+            const ry = Math.abs(currentPoint.y - this.startPoint.y);
+
+            const ellipse = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+            ellipse.setAttribute('cx', this.startPoint.x);
+            ellipse.setAttribute('cy', this.startPoint.y);
+            ellipse.setAttribute('rx', rx);
+            ellipse.setAttribute('ry', ry);
+            ellipse.setAttribute('fill', color);
+            ellipse.setAttribute('fill-opacity', '0.2');
+            ellipse.setAttribute('stroke', color);
+            ellipse.setAttribute('stroke-width', this.strokeWidth);
+            ellipse.setAttribute('stroke-dasharray', '5,5');
+            drawGroup.appendChild(ellipse);
+        }
+        else if (this.currentTool === 'polygon' && this.polygonPoints.length > 0) {
+            const points = [...this.polygonPoints];
+            if (currentPoint) points.push(currentPoint);
+
+            const pointsStr = points.map(p => `${p.x},${p.y}`).join(' ');
+            const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            polygon.setAttribute('points', pointsStr);
+            polygon.setAttribute('fill', 'rgba(255,255,255,0.2)');
+            polygon.setAttribute('stroke', '#fff');
+            polygon.setAttribute('stroke-width', '2');
+            polygon.setAttribute('stroke-dasharray', '5,5');
+            drawGroup.appendChild(polygon);
+        }
+    },
+
+    finishRectangle(endPoint) {
+        const x1 = Math.min(this.startPoint.x, endPoint.x);
+        const y1 = Math.min(this.startPoint.y, endPoint.y);
+        const x2 = Math.max(this.startPoint.x, endPoint.x);
+        const y2 = Math.max(this.startPoint.y, endPoint.y);
+
+        // Converter retângulo em polígono
+        const points = [
+            { x: x1, y: y1 },
+            { x: x2, y: y1 },
+            { x: x2, y: y2 },
+            { x: x1, y: y2 }
+        ];
+
+        this.savePolygon(points);
+    },
+
+    finishCircle(endPoint) {
+        const dx = endPoint.x - this.startPoint.x;
+        const dy = endPoint.y - this.startPoint.y;
+        const radius = Math.sqrt(dx * dx + dy * dy);
+
+        if (radius < 5) {
+            console.warn('⚠️ Círculo muito pequeno, cancelando');
+            return;
+        }
+
+        // Converter círculo em polígono (48 segmentos para suavidade)
+        const points = [];
+        const segments = 48;
+        for (let i = 0; i < segments; i++) {
+            const angle = (i / segments) * 2 * Math.PI;
+            points.push({
+                x: this.startPoint.x + Math.cos(angle) * radius,
+                y: this.startPoint.y + Math.sin(angle) * radius
+            });
+        }
+
+        this.savePolygon(points);
+        console.log(`✅ Círculo convertido para polígono (raio: ${radius.toFixed(1)}px)`);
+    },
+
+    finishEllipse(endPoint) {
+        const rx = Math.abs(endPoint.x - this.startPoint.x);
+        const ry = Math.abs(endPoint.y - this.startPoint.y);
+
+        if (rx < 5 || ry < 5) {
+            console.warn('⚠️ Elipse muito pequena, cancelando');
+            return;
+        }
+
+        // Converter elipse em polígono (48 segmentos para suavidade)
+        const points = [];
+        const segments = 48;
+        for (let i = 0; i < segments; i++) {
+            const angle = (i / segments) * 2 * Math.PI;
+            points.push({
+                x: this.startPoint.x + Math.cos(angle) * rx,
+                y: this.startPoint.y + Math.sin(angle) * ry
+            });
+        }
+
+        this.savePolygon(points);
+        console.log(`✅ Elipse convertida para polígono (${rx.toFixed(1)}x${ry.toFixed(1)}px)`);
+    },
+
+    finishPolygon() {
+        if (this.polygonPoints.length < 3) return;
+        this.savePolygon([...this.polygonPoints]);
+        this.polygonPoints = [];
+        this.isDrawing = false;
+
+        // Limpar preview
+        const drawGroup = this.svg.querySelector('#draw-group');
+        if (drawGroup) drawGroup.innerHTML = '';
+
+        console.log('✅ Polígono finalizado');
+    },
+
+    savePolygon(points) {
+        const color = this.drawMode === 'subparcela'
+            ? this.colors.subparcela
+            : this.colors.species[this.currentSpeciesIndex % this.colors.species.length];
+
+        if (this.drawMode === 'subparcela') {
+            this.subparcelaPolygon = { points };
+            this.renderSubparcela();
+            this.persistSubparcelaArea(points);
+        } else if (this.drawMode === 'species') {
+            if (!this.speciesPolygons[this.currentSpeciesIndex]) {
+                this.speciesPolygons[this.currentSpeciesIndex] = [];
+            }
+            this.speciesPolygons[this.currentSpeciesIndex].push({ points });
+            this.renderSpecies();
+            this.persistSpeciesArea(this.currentSpeciesIndex, this.speciesPolygons[this.currentSpeciesIndex]);
+
+            // Calcular e atualizar cobertura
+            this.updateCoverageDisplay();
+        }
+
+        // Limpar desenho temporário
+        this.svg.querySelector('#draw-group').innerHTML = '';
+
+        console.log(`✅ Polígono salvo (${this.drawMode}):`, points.length, 'pontos');
+    },
+
+    renderSubparcela() {
+        const subparcelaGroup = this.svg.querySelector('#subparcela-group');
+        subparcelaGroup.innerHTML = '';
+
+        if (!this.subparcelaPolygon) return;
+
+        const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        const pointsStr = this.subparcelaPolygon.points.map(p => `${p.x},${p.y}`).join(' ');
+        polygon.setAttribute('points', pointsStr);
+
+        const fillOpacity = this.subparcelaFillEnabled ? this.fillOpacity : 0;
+        polygon.setAttribute('fill', this.colors.subparcela);
+        polygon.setAttribute('fill-opacity', fillOpacity);
+        polygon.setAttribute('stroke', this.colors.subparcela);
+        polygon.setAttribute('stroke-width', this.strokeWidth);
+
+        subparcelaGroup.appendChild(polygon);
+    },
+
+    renderSpecies() {
+        const speciesGroup = this.svg.querySelector('#species-group');
+        speciesGroup.innerHTML = '';
+
+        Object.keys(this.speciesPolygons).forEach(speciesIndex => {
+            const polygons = this.speciesPolygons[speciesIndex];
+            const color = this.colors.species[speciesIndex % this.colors.species.length];
+
+            polygons.forEach(polyData => {
+                const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                const pointsStr = polyData.points.map(p => `${p.x},${p.y}`).join(' ');
+                polygon.setAttribute('points', pointsStr);
+
+                const fillOpacity = this.fillEnabled ? this.fillOpacity : 0;
+                polygon.setAttribute('fill', color);
+                polygon.setAttribute('fill-opacity', fillOpacity);
+                polygon.setAttribute('stroke', color);
+                polygon.setAttribute('stroke-width', this.strokeWidth);
+                polygon.dataset.speciesIndex = speciesIndex;
+
+                speciesGroup.appendChild(polygon);
+            });
+        });
+    },
+
+    render() {
+        this.renderSubparcela();
+        this.renderSpecies();
+    },
+
+    cancelDrawing() {
+        this.isDrawing = false;
+        this.startPoint = null;
+        this.polygonPoints = [];
+        this.svg.querySelector('#draw-group').innerHTML = '';
+        console.log('❌ Desenho cancelado');
+    },
+
+    // ========================================
+    // MODOS DE DESENHO
+    // ========================================
+
+    startDrawSubparcela(tool = 'rectangle') {
+        this.drawMode = 'subparcela';
+        this.currentTool = tool;
+        this.svg.style.display = 'block';
+        this.svg.style.pointerEvents = 'auto';
+        this.toolbar.style.display = 'flex';
+
+        console.log('📐 Modo: Desenhar Área 100%');
+        if (typeof showAlert === 'function') {
+            showAlert('info', `📐 Desenhar Área 100% - ${tool === 'polygon' ? 'Clique para adicionar pontos, duplo clique para fechar' : 'Arraste para criar retângulo'}`);
+        }
+    },
+
+    startDrawSpecies(speciesIndex, tool = 'rectangle') {
+        if (!this.subparcelaPolygon) {
+            console.warn('⚠️ Defina a área 100% primeiro!');
+            if (typeof showAlert === 'function') {
+                showAlert('warning', '⚠️ Primeiro defina a área de 100% da subparcela!');
+            }
+            return;
+        }
+
+        if (!this.currentSubparcela || !this.currentSubparcela.especies) {
+            console.error('❌ Dados da subparcela não disponíveis');
+            if (typeof showAlert === 'function') {
+                showAlert('error', 'Erro: Dados da subparcela não carregados. Reabra o modal.');
+            }
+            return;
+        }
+
+        if (!this.currentSubparcela.especies[speciesIndex]) {
+            console.error(`❌ Espécie ${speciesIndex} não encontrada`);
+            return;
+        }
+
+        this.drawMode = 'species';
+        this.currentSpeciesIndex = speciesIndex;
+        this.currentTool = tool;
+        this.svg.style.display = 'block';
+        this.svg.style.pointerEvents = 'auto';
+        this.toolbar.style.display = 'flex';
+
+        const speciesName = this.currentSubparcela.especies[speciesIndex].apelido || `Espécie ${speciesIndex + 1}`;
+        console.log(`🌿 Modo: Desenhar espécie "${speciesName}"`);
+        if (typeof showAlert === 'function') {
+            showAlert('info', `🌿 Desenhar "${speciesName}" - ${tool === 'polygon' ? 'Clique para pontos, duplo clique para fechar' : 'Arraste para retângulo'}`);
+        }
+    },
+
+    stopDrawing() {
+        this.drawMode = null;
+        this.currentSpeciesIndex = null;
+        this.isDrawing = false;
+        this.startPoint = null;
+        this.polygonPoints = [];
+        this.toolbar.style.display = 'none';
+
+        // Manter SVG visível se houver polígonos
+        if (!this.subparcelaPolygon && Object.keys(this.speciesPolygons).length === 0) {
+            this.svg.style.display = 'none';
+        }
+        this.svg.style.pointerEvents = 'none';
+
+        this.svg.querySelector('#draw-group').innerHTML = '';
+        console.log('⏹️ Modo de desenho desativado');
+    },
+
+    setTool(tool) {
+        this.currentTool = tool;
+        console.log(`🔧 Ferramenta: ${tool}`);
+    },
+
+    // ========================================
+    // PERSISTÊNCIA
+    // ========================================
+
+    async persistSubparcelaArea(points) {
+        const data = {
+            parcela: window.appState?.parcelaNome,
+            subparcela: this.currentSubparcela.subparcela,
+            area_shape: { type: 'polygon', points }
+        };
+
+        try {
+            const response = await fetch('/api/subparcela/area', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                console.log('✅ Área da subparcela salva');
+                this.currentSubparcela.area_shape = { type: 'polygon', points };
+            }
+        } catch (error) {
+            console.error('❌ Erro ao salvar:', error);
+        }
+    },
+
+    async persistSpeciesArea(speciesIndex, polygons) {
+        if (!this.currentSubparcela || !this.currentSubparcela.especies || !this.currentSubparcela.especies[speciesIndex]) {
+            console.error('❌ Espécie não encontrada para persistir área');
+            return;
+        }
+
+        const especie = this.currentSubparcela.especies[speciesIndex];
+        const data = {
+            parcela: window.appState?.parcelaNome,
+            subparcela: this.currentSubparcela.id || this.currentSubparcela.subparcela,
+            especie: especie.apelido || especie.especie,
+            area_shapes: polygons.map(p => ({ type: 'polygon', points: p.points }))
+        };
+
+        try {
+            const response = await fetch('/api/species/area', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                console.log(`✅ Áreas da espécie ${speciesIndex} salvas`);
+                especie.area_shapes = data.area_shapes;
+            }
+        } catch (error) {
+            console.error('❌ Erro ao salvar:', error);
+        }
+    },
+
+    loadSavedData() {
+        console.log('💾 Carregando dados salvos...');
+
+        // Carregar área da subparcela
+        if (this.currentSubparcela.area_shape) {
+            this.subparcelaPolygon = this.currentSubparcela.area_shape;
+            console.log('  ✅ Área da subparcela carregada');
+        }
+
+        // Carregar áreas das espécies
+        if (this.currentSubparcela.especies) {
+            this.currentSubparcela.especies.forEach((esp, index) => {
+                if (esp.area_shapes && Array.isArray(esp.area_shapes)) {
+                    this.speciesPolygons[index] = esp.area_shapes;
+                    console.log(`  ✅ Áreas da espécie ${index} "${esp.apelido}" carregadas`);
+                }
+            });
+        }
+
+        // Renderizar polígonos salvos
+        this.render();
+
+        // Mostrar SVG se houver polígonos
+        if (this.subparcelaPolygon || Object.keys(this.speciesPolygons).length > 0) {
+            this.svg.style.display = 'block';
+            console.log('  📐 SVG mostrado com polígonos salvos');
+        }
+    },
+
+    // ========================================
+    // CÁLCULO DE COBERTURA
+    // ========================================
+
+    calculatePolygonArea(points) {
+        if (!points || points.length < 3) return 0;
+
+        let area = 0;
+        for (let i = 0; i < points.length; i++) {
+            const j = (i + 1) % points.length;
+            area += points[i].x * points[j].y;
+            area -= points[j].x * points[i].y;
+        }
+        return Math.abs(area / 2);
+    },
+
+    pointInPolygon(point, polygon) {
+        if (!polygon || polygon.length < 3) return false;
+
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const xi = polygon[i].x, yi = polygon[i].y;
+            const xj = polygon[j].x, yj = polygon[j].y;
+
+            const intersect = ((yi > point.y) !== (yj > point.y))
+                && (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        return inside;
+    },
+
+    calculateSpeciesCoverage(speciesIndex) {
+        const polygons = this.speciesPolygons[speciesIndex];
+        if (!polygons || polygons.length === 0) return 0;
+
+        // Usar Monte Carlo para calcular união
+        const samples = 10000;
+        let insideCount = 0;
+
+        // Bounding box
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        polygons.forEach(polyData => {
+            polyData.points.forEach(p => {
+                minX = Math.min(minX, p.x);
+                maxX = Math.max(maxX, p.x);
+                minY = Math.min(minY, p.y);
+                maxY = Math.max(maxY, p.y);
+            });
+        });
+
+        // Amostrar pontos
+        for (let i = 0; i < samples; i++) {
+            const point = {
+                x: minX + Math.random() * (maxX - minX),
+                y: minY + Math.random() * (maxY - minY)
+            };
+
+            // Está dentro de pelo menos um polígono?
+            for (let polyData of polygons) {
+                if (this.pointInPolygon(point, polyData.points)) {
+                    insideCount++;
+                    break;
+                }
+            }
+        }
+
+        const boundingBoxArea = (maxX - minX) * (maxY - minY);
+        return boundingBoxArea * (insideCount / samples);
+    },
+
+    calculateCoveragePercentage(speciesIndex) {
+        if (!this.subparcelaPolygon) {
+            console.warn('⚠️ Área total (100%) não definida');
+            return 0;
+        }
+
+        const totalArea = this.calculatePolygonArea(this.subparcelaPolygon.points);
+        if (totalArea === 0) return 0;
+
+        const polygons = this.speciesPolygons[speciesIndex];
+        if (!polygons || polygons.length === 0) return 0;
+
+        // Calcular interseção com área total usando Monte Carlo
+        const samples = 10000;
+        let insideCount = 0;
+
+        const totalPolygon = this.subparcelaPolygon.points;
+
+        // Bounding box
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        polygons.forEach(polyData => {
+            polyData.points.forEach(p => {
+                minX = Math.min(minX, p.x);
+                maxX = Math.max(maxX, p.x);
+                minY = Math.min(minY, p.y);
+                maxY = Math.max(maxY, p.y);
+            });
+        });
+
+        for (let i = 0; i < samples; i++) {
+            const point = {
+                x: minX + Math.random() * (maxX - minX),
+                y: minY + Math.random() * (maxY - minY)
+            };
+
+            // Está dentro de pelo menos um polígono da espécie?
+            let inSpecies = false;
+            for (let polyData of polygons) {
+                if (this.pointInPolygon(point, polyData.points)) {
+                    inSpecies = true;
+                    break;
+                }
+            }
+
+            // E dentro da área total?
+            if (inSpecies && this.pointInPolygon(point, totalPolygon)) {
+                insideCount++;
+            }
+        }
+
+        const boundingBoxArea = (maxX - minX) * (maxY - minY);
+        const intersectionArea = boundingBoxArea * (insideCount / samples);
+
+        const percentage = (intersectionArea / totalArea) * 100;
+        return Math.min(100, Math.max(0, percentage));
+    },
+
+    updateCoverageDisplay() {
+        if (this.drawMode !== 'species' || this.currentSpeciesIndex === null) return;
+
+        const percentage = this.calculateCoveragePercentage(this.currentSpeciesIndex);
+        const speciesIndex = this.currentSpeciesIndex;
+
+        console.log(`📊 Atualizando cobertura da espécie ${speciesIndex}: ${percentage.toFixed(1)}%`);
+
+        // 1. Atualizar no card do viewer
+        const speciesCard = document.getElementById(`viewer-species-${speciesIndex}`);
+        if (speciesCard) {
+            const detailsContainer = speciesCard.querySelector('.viewer-species-details');
+            if (detailsContainer) {
+                const coverageDetail = Array.from(detailsContainer.querySelectorAll('.viewer-species-detail'))
+                    .find(detail => detail.querySelector('.viewer-species-detail-label')?.textContent === 'Cobertura');
+
+                if (coverageDetail) {
+                    const valueElement = coverageDetail.querySelector('.viewer-species-detail-value');
+                    if (valueElement) {
+                        valueElement.textContent = `${percentage.toFixed(1)}%`;
+                    }
+                }
+            }
+        }
+
+        // 2. Atualizar no objeto da espécie (para persistência)
+        if (this.currentSubparcela.especies && this.currentSubparcela.especies[speciesIndex]) {
+            this.currentSubparcela.especies[speciesIndex].cobertura = parseFloat(percentage.toFixed(1));
+        }
+
+        // 3. Persistir no backend
+        this.persistCoveragePercentage(speciesIndex, percentage);
+
+        // Propagar para tabelas/análises
+        if (typeof window.updateSpeciesCoverageInTables === 'function') {
+            const subparcelaId = this.currentSubparcela.id || this.currentSubparcela.subparcela;
+            console.log(`📤 Propagando cobertura: subparcela=${subparcelaId}, espécie=${speciesIndex}, cobertura=${percentage.toFixed(1)}%`);
+            window.updateSpeciesCoverageInTables(subparcelaId, speciesIndex, percentage);
+        }
+    },
+
+    async persistCoveragePercentage(speciesIndex, percentage) {
+        if (!this.currentSubparcela || !this.currentSubparcela.especies || !this.currentSubparcela.especies[speciesIndex]) {
+            console.error('❌ Espécie não encontrada para persistir cobertura');
+            return;
+        }
+
+        const especie = this.currentSubparcela.especies[speciesIndex];
+        const subparcelaId = this.currentSubparcela.id || this.currentSubparcela.subparcela;
+
+        const data = {
+            subparcela_id: subparcelaId,
+            especie_nome: especie.especie || especie.apelido,
+            apelido: especie.apelido,
+            cobertura: parseFloat(percentage.toFixed(1))
+        };
+
+        try {
+            const response = await fetch('/api/species/coverage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                console.log(`✅ Cobertura ${percentage.toFixed(1)}% salva no backend`);
+            } else {
+                console.error('❌ Erro ao salvar cobertura:', await response.text());
+            }
+        } catch (error) {
+            console.error('❌ Erro ao persistir cobertura:', error);
+        }
+    },
+
+    // ========================================
+    // LIMPEZA
+    // ========================================
+
+    destroy() {
+        if (this.svg) {
+            this.svg.remove();
+            this.svg = null;
+        }
+        if (this.toolbar) {
+            this.toolbar.remove();
+            this.toolbar = null;
+        }
+        this.drawMode = null;
+        this.isDrawing = false;
+        this.polygonPoints = [];
+        console.log('🗑️ SVGCoverageDrawer destruído');
+    }
+};
+
+// Exportar globalmente
+window.SVGCoverageDrawer = SVGCoverageDrawer;

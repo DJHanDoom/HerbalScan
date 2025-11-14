@@ -7,7 +7,7 @@ const appState = {
     especiesUnificadas: {},
     currentSubparcela: null,
     availableAIs: [],
-    selectedAI: 'claude',
+    selectedAI: 'gemini', // Gemini como padrão
     apiKeys: {
         claude: localStorage.getItem('ANTHROPIC_API_KEY') || '',
         gpt4: localStorage.getItem('OPENAI_API_KEY') || '',
@@ -76,7 +76,12 @@ const elements = {
     speciesSection: document.getElementById('species-section'),
     speciesTbody: document.getElementById('species-tbody'),
     exportSection: document.getElementById('export-section'),
-    exportBtn: document.getElementById('export-btn'),
+    analyticsSection: document.getElementById('analytics-section'),
+    exportFooter: document.getElementById('export-footer'),
+    exportBtn: document.getElementById('export-btn'), // Mantém para compatibilidade
+    exportExcelBtn: document.getElementById('export-excel-btn'),
+    exportPdfBtn: document.getElementById('export-pdf-btn'),
+    exportZipBtn: document.getElementById('export-zip-btn'),
     exportStatus: document.getElementById('export-status'),
     resultsSummary: document.getElementById('results-summary'),
     subparcelasGrid: document.getElementById('subparcelas-grid')
@@ -90,7 +95,22 @@ elements.analyzeBtn.addEventListener('click', analyzeImages);
 elements.manualModeBtn.addEventListener('click', startManualMode);
 elements.addImagesBtn.addEventListener('click', () => elements.addImagesInput.click());
 elements.addImagesInput.addEventListener('change', handleAddImages);
-elements.exportBtn.addEventListener('click', exportToExcel);
+
+// Novos event listeners para exportação
+if (elements.exportExcelBtn) {
+    elements.exportExcelBtn.addEventListener('click', exportToExcel);
+}
+if (elements.exportPdfBtn) {
+    elements.exportPdfBtn.addEventListener('click', exportToPDF);
+}
+if (elements.exportZipBtn) {
+    elements.exportZipBtn.addEventListener('click', exportToZip);
+}
+
+// Fallback para compatibilidade
+if (elements.exportBtn && !elements.exportExcelBtn) {
+    elements.exportBtn.addEventListener('click', exportToExcel);
+}
 
 // Inicialização
 document.addEventListener('DOMContentLoaded', initializeApp);
@@ -776,8 +796,9 @@ async function startManualMode() {
         
         // Criar subparcelas vazias para cada imagem
         appState.analysisResults = data.images.map((img, idx) => ({
-            subparcela_id: idx + 1,
+            subparcela: idx + 1,  // CRITICAL FIX: Deve ser "subparcela", não "subparcela_id"
             image_path: img.path,
+            image: img.filename,  // Adicionar filename também
             especies: [],
             analise_completa: false,  // Marcar como incompleta inicialmente
             manual_mode: true  // Flag para indicar modo manual
@@ -977,7 +998,7 @@ async function analyzeImages() {
         let geminiVersion = null;
         if (appState.selectedAI === 'gemini') {
             const geminiVersionSelect = document.getElementById('gemini-version');
-            geminiVersion = geminiVersionSelect ? geminiVersionSelect.value : 'gemini-flash-latest';
+            geminiVersion = geminiVersionSelect ? geminiVersionSelect.value : 'gemini-2.5-flash';
             console.log('Usando versão do Gemini:', geminiVersion);
         }
         
@@ -1038,12 +1059,26 @@ async function analyzeImages() {
         const reader = initResponse.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let hasReceivedData = false;
+
+        console.log('🔄 Iniciando leitura do stream SSE...');
 
         while (true) {
             const {done, value} = await reader.read();
-            if (done) break;
+            
+            if (done) {
+                console.log('✅ Stream finalizado');
+                if (!hasReceivedData) {
+                    console.warn('⚠️ Stream finalizado sem receber dados!');
+                    throw new Error('Análise não retornou dados. Verifique o console do servidor.');
+                }
+                break;
+            }
 
+            hasReceivedData = true;
             buffer += decoder.decode(value, {stream: true});
+            console.log('📦 Recebido chunk:', buffer.slice(-100)); // Log dos últimos 100 chars
+            
             const lines = buffer.split('\n\n');
             buffer = lines.pop(); // Guardar linha incompleta
 
@@ -1052,7 +1087,7 @@ async function analyzeImages() {
                 
                 try {
                     const data = JSON.parse(line.substring(6));
-                    console.log('Evento SSE:', data);
+                    console.log('📨 Evento SSE:', data.type, data);
 
                     if (data.type === 'start') {
                         elements.progressText.textContent = `Iniciando análise de ${data.total} subparcelas...`;
@@ -1087,20 +1122,20 @@ async function analyzeImages() {
                         }
                     }
                     else if (data.type === 'error') {
-                        console.error('Erro na subparcela', data.subparcela, ':', data.error);
+                        console.error('❌ Erro na subparcela', data.subparcela, ':', data.error);
                         elements.progressText.textContent = `⚠️ Erro na subparcela ${data.subparcela}: ${data.error}`;
                     }
                     else if (data.type === 'complete') {
-                        console.log('Análise completa:', data);
+                        console.log('🎉 Análise completa:', data);
                         
                         if (data.success) {
                             appState.analysisResults = data.results;
                             appState.especies = data.especies_unificadas;
                             appState.parcelaNome = data.parcela; // 🔧 FIX: Salvar nome da parcela
 
-                            console.log('Resultados:', appState.analysisResults);
-                            console.log('Espécies:', appState.especies);
-                            console.log('Parcela:', appState.parcelaNome);
+                            console.log('✅ Resultados:', appState.analysisResults);
+                            console.log('✅ Espécies:', appState.especies);
+                            console.log('✅ Parcela:', appState.parcelaNome);
 
                             elements.progressFill.style.width = '100%';
                             elements.progressText.textContent = '✅ Análise concluída! Processando resultados...';
@@ -1113,7 +1148,7 @@ async function analyzeImages() {
                                     elements.speciesSection.scrollIntoView({ behavior: 'smooth' });
                                     showAlert('success', `Análise concluída! ${Object.keys(data.especies_unificadas).length} espécies identificadas.`);
                                 } catch (displayError) {
-                                    console.error('Erro ao exibir resultados:', displayError);
+                                    console.error('❌ Erro ao exibir resultados:', displayError);
                                     showAlert('error', 'Erro ao exibir resultados: ' + displayError.message);
                                 }
                             }, 500);
@@ -1146,10 +1181,111 @@ function displayResults() {
     // Exibir subparcelas
     displaySubparcelas();
     
+    // Mostrar seções de resultados, analytics e footer de exportação
+    if (elements.exportSection) {
+        elements.exportSection.style.display = 'block';
+    }
+    if (elements.analyticsSection) {
+        elements.analyticsSection.style.display = 'block';
+    }
+    if (elements.exportFooter) {
+        elements.exportFooter.style.display = 'block';
+    }
+    
     // Mostrar botão de adicionar imagens (agora que há resultados)
     if (elements.addImagesBtn) {
         elements.addImagesBtn.style.display = 'inline-block';
     }
+
+    // Renderizar análises avançadas
+    if (typeof AdvancedAnalytics !== 'undefined') {
+        // Agregar dados de cobertura e altura de todas as subparcelas
+        const especiesWithData = {};
+        
+        Object.keys(appState.especies).forEach(apelido => {
+            const esp = appState.especies[apelido];
+            let totalCobertura = 0;
+            let totalAltura = 0;
+            let count = 0;
+            
+            // Percorrer todas as subparcelas para coletar dados
+            appState.analysisResults.forEach(result => {
+                if (result.especies) {
+                    result.especies.forEach(e => {
+                        if (e.apelido === apelido) {
+                            totalCobertura += parseFloat(e.cobertura) || 0;
+                            totalAltura += parseFloat(e.altura) || 0;
+                            count++;
+                        }
+                    });
+                }
+            });
+            
+            especiesWithData[apelido] = {
+                ...esp,
+                cobertura: totalCobertura,
+                altura_media: count > 0 ? totalAltura / count : 0,
+                ocorrencias: count
+            };
+        });
+        
+        console.log('📊 Dados agregados para analytics:', especiesWithData);
+        
+        AdvancedAnalytics.initialize({
+            especies: especiesWithData,
+            analysisResults: appState.analysisResults,
+            subparcelas: appState.uploadedFiles.map(f => f.name)
+        });
+    }
+}
+
+// Recalcular espécies unificadas baseado nas subparcelas atuais
+function recalcularEspeciesUnificadas() {
+    console.log('🔄 Recalculando espécies unificadas...');
+    
+    const novasEspecies = {};
+    
+    // Percorrer todas as subparcelas e contar ocorrências
+    appState.analysisResults.forEach(result => {
+        if (!result.especies) return;
+        
+        result.especies.forEach(esp => {
+            const apelido = esp.apelido;
+            
+            if (!novasEspecies[apelido]) {
+                novasEspecies[apelido] = {
+                    apelido_original: apelido,
+                    apelido_usuario: apelido,
+                    genero: esp.genero || '',
+                    especie: esp.especie || '',
+                    familia: esp.familia || '',
+                    observacoes: esp.observacoes || '',
+                    ocorrencias: 0
+                };
+            } else {
+                // Atualizar dados se estiverem vazios
+                if (esp.genero && !novasEspecies[apelido].genero) {
+                    novasEspecies[apelido].genero = esp.genero;
+                }
+                if (esp.familia && !novasEspecies[apelido].familia) {
+                    novasEspecies[apelido].familia = esp.familia;
+                }
+                if (esp.observacoes && !novasEspecies[apelido].observacoes) {
+                    novasEspecies[apelido].observacoes = esp.observacoes;
+                }
+            }
+            
+            novasEspecies[apelido].ocorrencias++;
+        });
+    });
+    
+    // Atualizar appState
+    appState.especies = novasEspecies;
+    
+    console.log(`✅ Espécies recalculadas: ${Object.keys(novasEspecies).length} espécies únicas`);
+    console.log('   Espécies:', Object.keys(novasEspecies));
+    
+    return novasEspecies;
 }
 
 function displaySpeciesTable() {
@@ -1167,6 +1303,7 @@ function displaySpeciesTable() {
             <td>${esp.familia || '-'}</td>
             <td><span class="badge badge-primary">${esp.ocorrencias}</span></td>
             <td>
+                <button class="btn btn-small btn-info" onclick="SpeciesDetailsModal.open('${esp.apelido_original}')" title="Ver detalhes e dashboard">📊 Detalhes</button>
                 <button class="btn btn-small btn-primary" onclick="editSpecies('${esp.apelido_original}')">Editar</button>
                 <input type="checkbox" class="species-checkbox" value="${esp.apelido_original}">
             </td>
@@ -1228,6 +1365,7 @@ function displaySubparcelas() {
     appState.analysisResults.forEach(result => {
         const card = document.createElement('div');
         card.className = 'subparcela-card';
+        card.setAttribute('data-subparcela', result.subparcela);
 
         // Verificar se há erros
         const hasError = result.especies.some(esp =>
@@ -1236,14 +1374,14 @@ function displaySubparcelas() {
             esp.apelido.includes('inválida')
         );
 
-        const especiesHTML = result.especies.map(esp => {
+        const especiesHTML = result.especies.map((esp, index) => {
             const isError = esp.apelido.includes('Erro') ||
                           esp.apelido.includes('não disponível') ||
                           esp.apelido.includes('inválida');
 
             if (isError) {
                 return `
-                    <div class="especie-item" style="background: #fed7d7; border-left-color: #f56565;">
+                    <div class="especie-item" data-species-index="${index}" style="background: #fed7d7; border-left-color: #f56565;">
                         <div class="especie-info">
                             <div class="especie-nome" style="color: #c53030;">⚠️ ${esp.apelido}</div>
                             <div class="especie-dados" style="color: #742a2a;">
@@ -1260,7 +1398,7 @@ function displaySubparcelas() {
             }
 
             return `
-                <div class="especie-item">
+                <div class="especie-item" data-species-index="${index}">
                     <div class="especie-info">
                         <div class="especie-nome">
                             ${getDisplayName(esp.apelido)}
@@ -1268,16 +1406,8 @@ function displaySubparcelas() {
                         </div>
                         <div class="especie-dados">
                             ${getDisplayTaxonomy(esp.apelido)}<br>
-                            Cobertura: ${esp.cobertura}% | Altura: ${esp.altura}cm | ${esp.forma_vida}
+                            Cobertura: <span class="species-coverage">${esp.cobertura}</span>% | Altura: ${esp.altura}cm | ${esp.forma_vida}
                         </div>
-                    </div>
-                    <div class="especie-actions">
-                        <button class="btn btn-small btn-primary" onclick="editSubparcelaEspecie(${result.subparcela}, '${esp.apelido}')">
-                            ✏️
-                        </button>
-                        <button class="btn btn-small btn-danger" onclick="removeSubparcelaEspecie(${result.subparcela}, '${esp.apelido}')">
-                            🗑️
-                        </button>
                     </div>
                 </div>
             `;
@@ -1302,26 +1432,17 @@ function displaySubparcelas() {
                     <button class="btn btn-small btn-warning" onclick="reanalyzeSubparcela(event, ${result.subparcela})" title="Reanalisar com IA">
                         🔄 Reanalisar
                     </button>
-                    <button class="btn btn-small btn-success" onclick="addEspecieToSubparcela(${result.subparcela})">+ Adicionar</button>
                 </div>
             </div>
             <img src="${result.image_path || '/static/uploads/' + appState.parcelaNome + '/' + (result.image || result.filename)}" class="subparcela-image" alt="Subparcela ${result.subparcela}" onclick="openImageViewer(${result.subparcela}, '${result.image || result.filename}')" style="cursor: pointer;">
             <div class="subparcela-content">
                 ${errorBanner}
                 ${especiesHTML}
-                <button class="btn btn-small btn-warning" style="margin-top: 10px; width: 100%;" onclick="splitSpeciesDialog(${result.subparcela})">
-                    Subdividir Espécie
-                </button>
             </div>
         `;
 
         elements.subparcelasGrid.appendChild(card);
     });
-    
-    // Adicionar botões de visualização/edição (novo modal)
-    setTimeout(() => {
-        addViewerButtons();
-    }, 100);
 }
 
 function retryAnalyze(subparcela) {
@@ -1410,7 +1531,33 @@ async function executeReanalysis(subparcela, promptConfig) {
     if (!confirm(`Reanalisar subparcela ${subparcela} com ${appState.selectedAI}${templateInfo}?\n\nIsso substituirá todas as espécies atuais desta subparcela.`)) {
         return false;
     }
-    
+
+    // Mostrar indicador de progresso
+    showAlert('info', `🔄 Reanalisando subparcela ${subparcela}...`);
+
+    // Adicionar indicador visual na UI
+    const subparcelaCards = document.querySelectorAll('.subparcela-card');
+    let targetCard = null;
+    subparcelaCards.forEach(card => {
+        const headerText = card.querySelector('.subparcela-header span')?.textContent;
+        if (headerText && headerText.includes(`Subparcela ${subparcela}`)) {
+            targetCard = card;
+            card.style.opacity = '0.6';
+            card.style.pointerEvents = 'none';
+            const overlay = document.createElement('div');
+            overlay.className = 'reanalysis-overlay';
+            overlay.innerHTML = `
+                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 20px; border-radius: 10px; text-align: center; z-index: 100;">
+                    <div style="font-size: 2rem; margin-bottom: 10px;">🔄</div>
+                    <div style="font-weight: bold; margin-bottom: 5px;">Reanalisando...</div>
+                    <div style="font-size: 0.9rem; color: #cbd5e0;">Aguarde, processando imagem</div>
+                </div>
+            `;
+            card.style.position = 'relative';
+            card.appendChild(overlay);
+        }
+    });
+
     try {
         const headers = {
             'Content-Type': 'application/json'
@@ -1456,19 +1603,34 @@ async function executeReanalysis(subparcela, promptConfig) {
             appState.analysisResults[idx].especies = result.especies;
         }
         
-        appState.especiesUnificadas = result.especies_unificadas || appState.especiesUnificadas;
+        // Recalcular espécies unificadas com base em TODAS as subparcelas
+        recalcularEspeciesUnificadas();
         
-        // Atualizar interface
+        // Atualizar interface completa
         displaySubparcelas();
-        displayEspecies();
+        displaySpeciesTable();
         
+        // Atualizar analytics se disponível
+        if (typeof AdvancedAnalytics !== 'undefined' && typeof AdvancedAnalytics.refreshAnalytics === 'function') {
+            AdvancedAnalytics.refreshAnalytics();
+        }
+
         showAlert('success', `Subparcela ${subparcela} reanalisada com sucesso! ${result.especies.length} espécies encontradas.`);
-        
+
         return true;
-        
+
     } catch (error) {
         console.error('Erro na reanálise:', error);
         showAlert('error', `Erro ao reanalisar: ${error.message}`);
+
+        // Remover overlay de erro
+        if (targetCard) {
+            const overlay = targetCard.querySelector('.reanalysis-overlay');
+            if (overlay) overlay.remove();
+            targetCard.style.opacity = '1';
+            targetCard.style.pointerEvents = 'auto';
+        }
+
         return false;
     }
 }
@@ -1506,16 +1668,26 @@ function getDisplayTaxonomy(apelidoOriginal) {
 
 // Editar espécie global
 function editSpecies(apelidoOriginal) {
-    const especie = appState.especies[apelidoOriginal];
+    // Abrir modal de detalhes na aba "Editar"
+    if (typeof SpeciesDetailsModal !== 'undefined' && typeof SpeciesDetailsModal.open === 'function') {
+        SpeciesDetailsModal.open(apelidoOriginal, 'edit');
+    } else {
+        // Fallback para o modal antigo se o novo não estiver disponível
+        const especie = appState.especies[apelidoOriginal];
+        if (!especie) {
+            showAlert('error', 'Espécie não encontrada');
+            return;
+        }
 
-    document.getElementById('edit-apelido-original').value = apelidoOriginal;
-    document.getElementById('edit-apelido-original-display').value = apelidoOriginal;
-    document.getElementById('edit-apelido-usuario').value = especie.apelido_usuario;
-    document.getElementById('edit-genero').value = especie.genero || '';
-    document.getElementById('edit-especie').value = especie.especie || '';
-    document.getElementById('edit-familia').value = especie.familia || '';
+        document.getElementById('edit-apelido-original').value = apelidoOriginal;
+        document.getElementById('edit-apelido-original-display').value = apelidoOriginal;
+        document.getElementById('edit-apelido-usuario').value = especie.apelido_usuario;
+        document.getElementById('edit-genero').value = especie.genero || '';
+        document.getElementById('edit-especie').value = especie.especie || '';
+        document.getElementById('edit-familia').value = especie.familia || '';
 
-    elements.editModal.classList.add('active');
+        elements.editModal.classList.add('active');
+    }
 }
 
 async function handleEditSubmit(e) {
@@ -1812,6 +1984,7 @@ async function confirmSplit() {
         if (result.success) {
             showAlert('success', result.message);
             await refreshData();
+            recalcularEspeciesUnificadas();
             closeSplitModal();
         } else {
             showAlert('error', result.error || 'Erro ao subdividir espécie');
@@ -1923,30 +2096,53 @@ async function editSubparcelaEspecie(subparcela, apelido) {
     }
 }
 
-// Atualizar dados
-async function refreshData() {
+// Sincronizar com backend antes de exportar
+async function syncWithBackend() {
     try {
+        console.log('🔄 Buscando dados atualizados do backend...');
+        
         // Buscar dados atualizados da parcela
         const parcelaResponse = await fetch(`/api/parcela/${appState.parcelaNome}`);
+        if (!parcelaResponse.ok) {
+            throw new Error('Erro ao buscar dados da parcela');
+        }
         const parcelaData = await parcelaResponse.json();
 
-        // Buscar espécies
-        const especiesResponse = await fetch('/api/especies');
-        const especiesData = await especiesResponse.json();
-
-        // Atualizar estado
-        appState.especies = especiesData.especies;
-
-        // Reformatar resultados
+        // Atualizar analysisResults com dados mais recentes
         appState.analysisResults = [];
         for (const [subNum, subData] of Object.entries(parcelaData.subparcelas)) {
             appState.analysisResults.push({
                 subparcela: parseInt(subNum),
                 image: subData.image,
-                especies: subData.especies
+                image_path: subData.image_path,
+                filename: subData.filename,
+                especies: subData.especies || [],
+                area_shape: subData.area_shape
             });
         }
 
+        // Buscar espécies unificadas atualizadas
+        const especiesResponse = await fetch(`/api/parcela/${appState.parcelaNome}/especies`);
+        if (especiesResponse.ok) {
+            const especiesData = await especiesResponse.json();
+            appState.especies = especiesData.especies || especiesData;
+        }
+
+        console.log('✅ Dados sincronizados com sucesso');
+        console.log(`   - ${appState.analysisResults.length} subparcelas`);
+        console.log(`   - ${Object.keys(appState.especies).length} espécies únicas`);
+        
+        return true;
+    } catch (error) {
+        console.error('❌ Erro ao sincronizar:', error);
+        return false;
+    }
+}
+
+// Atualizar dados
+async function refreshData() {
+    try {
+        await syncWithBackend();
         // Reexibir
         displayResults();
     } catch (error) {
@@ -1957,30 +2153,121 @@ async function refreshData() {
 // Exportar para Excel
 async function exportToExcel() {
     try {
-        elements.exportBtn.disabled = true;
-        elements.exportBtn.textContent = 'Exportando...';
+        console.log('📊 Iniciando exportação para Excel...');
+        
+        // Desabilitar botão durante exportação
+        if (elements.exportBtn) {
+            elements.exportBtn.disabled = true;
+            elements.exportBtn.textContent = 'Exportando...';
+        }
+        if (elements.exportExcelBtn) {
+            elements.exportExcelBtn.disabled = true;
+            elements.exportExcelBtn.textContent = 'Exportando...';
+        }
+        
+        // Buscar dados atualizados do backend antes de exportar
+        console.log('🔄 Sincronizando dados com o backend...');
+        await syncWithBackend();
+
+        // Preparar dados completos para exportação
+        const exportData = {
+            parcela: appState.parcelaNome,
+            data_analise: new Date().toLocaleDateString('pt-BR'),
+            
+            // Dados das subparcelas
+            subparcelas: appState.analysisResults.map(result => ({
+                numero: result.subparcela,
+                imagem: result.image || result.filename,
+                especies: result.especies.map(esp => ({
+                    apelido: esp.apelido,
+                    genero: esp.genero || '',
+                    familia: esp.familia || '',
+                    cobertura: esp.cobertura || 0,
+                    altura: esp.altura || 0,
+                    forma_vida: esp.forma_vida || 'Erva',
+                    observacoes: esp.observacoes || ''
+                }))
+            })),
+            
+            // Resumo geral das espécies
+            especies_unificadas: Object.values(appState.especies).map(esp => ({
+                apelido_original: esp.apelido_original,
+                apelido_usuario: esp.apelido_usuario,
+                genero: esp.genero || '',
+                especie: esp.especie || '',
+                familia: esp.familia || '',
+                ocorrencias: esp.ocorrencias || 0,
+                observacoes: esp.observacoes || ''
+            })),
+            
+            // Estatísticas agregadas
+            estatisticas: {
+                total_subparcelas: appState.analysisResults.length,
+                total_especies_unicas: Object.keys(appState.especies).length,
+                cobertura_total: appState.analysisResults.reduce((sum, r) => 
+                    sum + r.especies.reduce((s, e) => s + (parseFloat(e.cobertura) || 0), 0), 0
+                ),
+                altura_media: appState.analysisResults.length > 0 ? 
+                    appState.analysisResults.reduce((sum, r) => 
+                        sum + r.especies.reduce((s, e) => s + (parseFloat(e.altura) || 0), 0) / r.especies.length, 0
+                    ) / appState.analysisResults.length : 0
+            }
+        };
+        
+        // Adicionar análises avançadas se disponíveis
+        if (typeof AdvancedAnalytics !== 'undefined' && typeof AdvancedAnalytics.getExportData === 'function') {
+            console.log('📊 Coletando dados de análises avançadas...');
+            try {
+                const analyticsData = AdvancedAnalytics.getExportData();
+                if (analyticsData && Object.keys(analyticsData).length > 0) {
+                    exportData.analises_avancadas = analyticsData;
+                    console.log('✅ Dados de análises avançadas incluídos');
+                }
+            } catch (e) {
+                console.warn('⚠️ Não foi possível coletar análises avançadas:', e.message);
+            }
+        }
+
+        console.log('📦 Dados preparados:', exportData);
 
         const response = await fetch('/api/export', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parcela: appState.parcelaNome })
+            body: JSON.stringify(exportData)
         });
 
+        console.log('📥 Resposta do servidor:', response.status);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Erro HTTP ${response.status}: ${errorText}`);
+        }
+
         const data = await response.json();
+        console.log('✅ Dados recebidos:', data);
 
-        if (data.success) {
-            showAlert('success', 'Exportado com sucesso!');
-
+        if (data.success && data.download_url) {
+            showAlert('success', '✅ Exportado com sucesso!');
+            
             // Download automático
+            console.log('⬇️ Iniciando download:', data.download_url);
             window.location.href = data.download_url;
         } else {
-            showAlert('error', data.error || 'Erro ao exportar');
+            throw new Error(data.error || 'Erro ao exportar - resposta inválida');
         }
     } catch (error) {
-        showAlert('error', 'Erro: ' + error.message);
+        console.error('❌ Erro na exportação:', error);
+        showAlert('error', 'Erro ao exportar: ' + error.message);
     } finally {
-        elements.exportBtn.disabled = false;
-        elements.exportBtn.textContent = 'Exportar para Excel';
+        // Reabilitar botão
+        if (elements.exportBtn) {
+            elements.exportBtn.disabled = false;
+            elements.exportBtn.textContent = 'Exportar para Excel';
+        }
+        if (elements.exportExcelBtn) {
+            elements.exportExcelBtn.disabled = false;
+            elements.exportExcelBtn.textContent = 'Exportar Excel';
+        }
     }
 }
 
@@ -2401,10 +2688,79 @@ function createViewerModal() {
             <div class="viewer-header">
                 <div class="viewer-title">Visualização e Edição</div>
                 <div class="viewer-header-controls">
+                    <button class="viewer-define-area-btn" onclick="startDrawSubparcelaArea()" title="Definir área da subparcela">📐 Definir Área 100%</button>
+                    <button class="viewer-define-area-btn" onclick="importAIAreas()" title="Importar áreas detectadas pela IA" style="background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);">🤖 Importar Áreas IA</button>
+                    <button class="viewer-define-area-btn" onclick="togglePolygonSettings()" title="Configurações de visualização">⚙️ Configs</button>
                     <button class="viewer-close-btn" onclick="closeImageViewer()">✕ Fechar</button>
                 </div>
             </div>
-            
+
+            <!-- Painel de configurações (colapsável) -->
+            <div id="polygon-settings-panel" style="display: none; background: #1a202c; padding: 12px 16px; border-bottom: 2px solid #4a5568;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: center;">
+                    <!-- Toggle Preenchimento Espécies -->
+                    <label style="display: flex; align-items: center; gap: 8px; color: white; font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+                        <input type="checkbox" id="polygon-fill-toggle" onchange="updatePolygonDisplay()"
+                               style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>🌿 Espécies</span>
+                    </label>
+
+                    <!-- Toggle Preenchimento Área Total -->
+                    <label style="display: flex; align-items: center; gap: 8px; color: white; font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+                        <input type="checkbox" id="subparcela-fill-toggle" onchange="updateSubparcelaDisplay()"
+                               style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>📐 Área 100%</span>
+                    </label>
+
+                    <!-- Toggle Grid -->
+                    <label style="display: flex; align-items: center; gap: 8px; color: white; font-size: 0.85rem; font-weight: 600; cursor: pointer;">
+                        <input type="checkbox" id="grid-toggle" onchange="toggleGrid()"
+                               style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>⊞ Grid</span>
+                    </label>
+
+                    <!-- Opacidade -->
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label style="color: white; font-size: 0.85rem; font-weight: 600; white-space: nowrap;">
+                            Opacidade: <span id="opacity-value">30</span>%
+                        </label>
+                        <input type="range" id="polygon-opacity" min="0" max="100" value="30"
+                               oninput="updatePolygonOpacity(this.value)"
+                               style="width: 80px; cursor: pointer;">
+                    </div>
+
+                    <!-- Espessura do contorno -->
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label style="color: white; font-size: 0.85rem; font-weight: 600; white-space: nowrap;">
+                            Borda: <span id="stroke-value">3</span>px
+                        </label>
+                        <input type="range" id="polygon-stroke" min="1" max="10" value="3"
+                               oninput="updatePolygonStroke(this.value)"
+                               style="width: 80px; cursor: pointer;">
+                    </div>
+
+                    <!-- Tamanho das células do grid -->
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label style="color: white; font-size: 0.85rem; font-weight: 600; white-space: nowrap;">
+                            Grid: <span id="grid-size-value">10</span>%
+                        </label>
+                        <input type="range" id="grid-cell-size" min="5" max="20" value="10"
+                               oninput="updateGridCellSize(this.value)"
+                               style="width: 80px; cursor: pointer;">
+                    </div>
+
+                    <!-- Espessura das linhas do grid -->
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label style="color: white; font-size: 0.85rem; font-weight: 600; white-space: nowrap;">
+                            Linha: <span id="grid-line-value">1</span>px
+                        </label>
+                        <input type="range" id="grid-line-width" min="1" max="5" value="1"
+                               oninput="updateGridLineWidth(this.value)"
+                               style="width: 80px; cursor: pointer;">
+                    </div>
+                </div>
+            </div>
+
             <div class="viewer-content">
                 <!-- Lado da Imagem (60%) -->
                 <div class="viewer-image-side">
@@ -2431,8 +2787,90 @@ function createViewerModal() {
                 <div class="viewer-edit-side">
                     <div class="viewer-edit-header">
                         <div class="viewer-edit-title">Espécies Detectadas</div>
-                        <button class="viewer-add-species-btn" onclick="addSpeciesInViewer()">+ Adicionar Espécie</button>
+                        <button class="viewer-add-species-btn" onclick="toggleAddSpeciesForm()">+ Adicionar Espécie</button>
                     </div>
+
+                    <!-- Formulário inline para adicionar espécie -->
+                    <div id="viewer-add-species-form" style="display: none; background: #1a202c; padding: 20px; border-bottom: 2px solid #4a5568;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h3 style="color: white; margin: 0; font-size: 1.1rem;">Nova Espécie</h3>
+                            <button onclick="toggleAddSpeciesForm()" style="background: none; border: none; color: #cbd5e0; font-size: 1.5rem; cursor: pointer;">×</button>
+                        </div>
+
+                        <!-- Tabs: IA ou Manual -->
+                        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                            <button id="add-tab-ai" class="add-species-tab active" onclick="switchAddSpeciesTab('ai')">
+                                🤖 Análise por IA
+                            </button>
+                            <button id="add-tab-manual" class="add-species-tab" onclick="switchAddSpeciesTab('manual')">
+                                ✏️ Manual
+                            </button>
+                        </div>
+
+                        <!-- Conteúdo aba IA -->
+                        <div id="add-species-ai-content" class="add-species-content">
+                            <p style="color: #cbd5e0; font-size: 0.9rem; margin-bottom: 15px;">
+                                A IA analisará a imagem e sugerirá espécies adicionais que não foram detectadas.
+                            </p>
+                            <button class="btn btn-primary" onclick="analyzeMoreSpecies()" style="width: 100%;">
+                                🔍 Analisar com IA
+                            </button>
+                        </div>
+
+                        <!-- Conteúdo aba Manual -->
+                        <div id="add-species-manual-content" class="add-species-content" style="display: none;">
+                            <div style="display: flex; flex-direction: column; gap: 12px;">
+                                <div>
+                                    <label style="color: #cbd5e0; font-size: 0.9rem; display: block; margin-bottom: 5px;">Apelido/Nome*</label>
+                                    <input type="text" id="manual-apelido" placeholder="Ex: Gramínea Verde" style="width: 100%; padding: 8px; border-radius: 6px; border: 2px solid #4a5568; background: #2d3748; color: white;">
+                                </div>
+
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                    <div>
+                                        <label style="color: #cbd5e0; font-size: 0.9rem; display: block; margin-bottom: 5px;">Cobertura (%)</label>
+                                        <input type="number" id="manual-cobertura" value="10" min="0" max="100" style="width: 100%; padding: 8px; border-radius: 6px; border: 2px solid #4a5568; background: #2d3748; color: white;">
+                                    </div>
+                                    <div>
+                                        <label style="color: #cbd5e0; font-size: 0.9rem; display: block; margin-bottom: 5px;">Altura (cm)</label>
+                                        <input type="number" id="manual-altura" value="10" min="0" style="width: 100%; padding: 8px; border-radius: 6px; border: 2px solid #4a5568; background: #2d3748; color: white;">
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label style="color: #cbd5e0; font-size: 0.9rem; display: block; margin-bottom: 5px;">Forma de Vida</label>
+                                    <select id="manual-forma-vida" style="width: 100%; padding: 8px; border-radius: 6px; border: 2px solid #4a5568; background: #2d3748; color: white;">
+                                        <option value="Erva">Erva</option>
+                                        <option value="Arbusto">Arbusto</option>
+                                        <option value="Subarbusto">Subarbusto</option>
+                                        <option value="Plântula">Plântula</option>
+                                        <option value="Liana">Liana</option>
+                                        <option value="Trepadeira">Trepadeira</option>
+                                    </select>
+                                </div>
+
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                                    <div>
+                                        <label style="color: #cbd5e0; font-size: 0.9rem; display: block; margin-bottom: 5px;">Gênero (opcional)</label>
+                                        <input type="text" id="manual-genero" placeholder="Ex: Paspalum" style="width: 100%; padding: 8px; border-radius: 6px; border: 2px solid #4a5568; background: #2d3748; color: white;">
+                                    </div>
+                                    <div>
+                                        <label style="color: #cbd5e0; font-size: 0.9rem; display: block; margin-bottom: 5px;">Família (opcional)</label>
+                                        <input type="text" id="manual-familia" placeholder="Ex: Poaceae" style="width: 100%; padding: 8px; border-radius: 6px; border: 2px solid #4a5568; background: #2d3748; color: white;">
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label style="color: #cbd5e0; font-size: 0.9rem; display: block; margin-bottom: 5px;">Observações (opcional)</label>
+                                    <textarea id="manual-observacoes" placeholder="Características visuais, pilosidade, cor..." rows="3" style="width: 100%; padding: 8px; border-radius: 6px; border: 2px solid #4a5568; background: #2d3748; color: white; resize: vertical;"></textarea>
+                                </div>
+
+                                <button class="btn btn-success" onclick="saveManualSpecies()" style="width: 100%; margin-top: 5px;">
+                                    ✓ Adicionar Espécie
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="viewer-species-list" id="viewer-species-list">
                         <!-- Espécies serão carregadas aqui -->
                     </div>
@@ -2442,6 +2880,30 @@ function createViewerModal() {
     `;
     
     document.body.appendChild(viewerModal);
+    
+    // Adicionar event listeners para os toggles de preenchimento
+    const polygonFillToggle = document.getElementById('polygon-fill-toggle');
+    const subparcelaFillToggle = document.getElementById('subparcela-fill-toggle');
+    
+    if (polygonFillToggle) {
+        console.log('✅ Checkbox polygon-fill-toggle encontrado, adicionando listener');
+        polygonFillToggle.addEventListener('change', function() {
+            console.log('🌿 Toggle Espécies mudou para:', this.checked);
+            updatePolygonDisplay();
+        });
+    } else {
+        console.error('❌ Checkbox polygon-fill-toggle NÃO encontrado no DOM');
+    }
+    
+    if (subparcelaFillToggle) {
+        console.log('✅ Checkbox subparcela-fill-toggle encontrado, adicionando listener');
+        subparcelaFillToggle.addEventListener('change', function() {
+            console.log('📐 Toggle Área 100% mudou para:', this.checked);
+            updateSubparcelaDisplay();
+        });
+    } else {
+        console.error('❌ Checkbox subparcela-fill-toggle NÃO encontrado no DOM');
+    }
     
     // Eventos de zoom com scroll do mouse
     const imgContainer = viewerModal.querySelector('#viewer-img-container');
@@ -2475,7 +2937,7 @@ function updateViewerContent() {
     
     // Atualizar imagem
     const img = viewerModal.querySelector('#viewer-image');
-    img.src = `/static/uploads/${appState.parcelaNome}/${result.image}`;
+    img.src = result.image_path || `/static/uploads/${appState.parcelaNome}/${result.image || result.filename}`;
     
     // Atualizar indicador de posição
     const posIndicator = viewerModal.querySelector('#viewer-position');
@@ -2544,6 +3006,8 @@ function loadViewerSpecies() {
                     </div>
                 </div>
                 <div class="viewer-species-actions">
+                    <button class="viewer-draw-btn" onclick="startDrawCoverageForSpecies(${index})" title="Desenhar áreas de cobertura">📐 Desenhar Área</button>
+                    <button class="viewer-clear-areas-btn" onclick="clearSpeciesAreas(${index})" title="Limpar todas as áreas desenhadas desta espécie" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">🗑️ Limpar Áreas</button>
                     <button class="viewer-edit-btn" onclick="startEditSpeciesInViewer(${index})">✏️ Editar</button>
                     <button class="viewer-split-btn" onclick="splitSpeciesInViewer(${index})">✂️ Dividir</button>
                     <button class="viewer-delete-btn" onclick="deleteSpeciesInViewer(${index})">🗑️ Remover</button>
@@ -2682,11 +3146,15 @@ async function saveEditSpeciesInViewer(especieIndex) {
             // Atualizar estado local
             result.especies[especieIndex] = especieAtualizada;
             
-            // Buscar dados atualizados do servidor para sincronizar completamente
-            await refreshData();
+            // Recalcular espécies unificadas localmente
+            recalcularEspeciesUnificadas();
             
             // Recarregar visualização do viewer com dados atualizados
             loadViewerSpecies();
+            
+            // Atualizar tabela de gerenciamento
+            displaySubparcelas();
+            displaySpeciesTable();
             
             showAlert('success', 'Espécie atualizada com sucesso!');
         } else {
@@ -2798,11 +3266,302 @@ function closeImageViewer() {
     document.removeEventListener('keydown', handleViewerKeyboard);
 }
 
-async function addSpeciesInViewer() {
+// Funções para o formulário inline de adicionar espécie
+
+function toggleAddSpeciesForm() {
+    const form = document.getElementById('viewer-add-species-form');
+    if (form.style.display === 'none') {
+        form.style.display = 'block';
+        // Limpar campos do formulário manual
+        document.getElementById('manual-apelido').value = '';
+        document.getElementById('manual-cobertura').value = '10';
+        document.getElementById('manual-altura').value = '10';
+        document.getElementById('manual-forma-vida').value = 'Erva';
+        document.getElementById('manual-genero').value = '';
+        document.getElementById('manual-familia').value = '';
+        document.getElementById('manual-observacoes').value = '';
+    } else {
+        form.style.display = 'none';
+    }
+}
+
+function switchAddSpeciesTab(tab) {
+    // Atualizar tabs
+    document.getElementById('add-tab-ai').classList.toggle('active', tab === 'ai');
+    document.getElementById('add-tab-manual').classList.toggle('active', tab === 'manual');
+
+    // Mostrar/ocultar conteúdo
+    document.getElementById('add-species-ai-content').style.display = tab === 'ai' ? 'block' : 'none';
+    document.getElementById('add-species-manual-content').style.display = tab === 'manual' ? 'block' : 'none';
+}
+
+async function analyzeMoreSpecies() {
     const result = appState.analysisResults[currentViewerIndex];
-    
-    // 🔧 FIX: Usar formulário inline ao invés de prompt()
-    addEspecieToSubparcela(result.subparcela);
+
+    if (!appState.selectedAI || !appState.apiKeys[appState.selectedAI]) {
+        showAlert('error', 'Configure a API key para o modelo de IA antes de analisar');
+        return;
+    }
+
+    if (!confirm('A IA analisará a imagem novamente para detectar espécies adicionais. Continuar?')) {
+        return;
+    }
+
+    showAlert('info', '🤖 Analisando imagem com IA...');
+
+    try {
+        const geminiVersion = localStorage.getItem('geminiVersion') || 'gemini-flash-latest';
+        const claudeVersion = document.getElementById('claude-version')?.value || 'claude-sonnet-4-5-20250929';
+
+        const headers = { 'Content-Type': 'application/json' };
+
+        // Adicionar API keys
+        if (appState.selectedAI === 'claude') {
+            headers['X-API-Key-Claude'] = appState.apiKeys.claude;
+            headers['X-Claude-Version'] = claudeVersion;
+        } else if (appState.selectedAI === 'gpt4') {
+            headers['X-API-Key-GPT4'] = appState.apiKeys.gpt4;
+        } else if (appState.selectedAI === 'gemini') {
+            headers['X-API-Key-Gemini'] = appState.apiKeys.gemini;
+            headers['X-Gemini-Version'] = geminiVersion;
+        } else if (appState.selectedAI === 'deepseek') {
+            headers['X-API-Key-DeepSeek'] = appState.apiKeys.deepseek;
+        } else if (appState.selectedAI === 'qwen') {
+            headers['X-API-Key-Qwen'] = appState.apiKeys.qwen;
+        } else if (appState.selectedAI === 'huggingface') {
+            headers['X-API-Key-HuggingFace'] = appState.apiKeys.huggingface;
+        }
+
+        // Lista de espécies já existentes para evitar duplicatas
+        const existingSpecies = result.especies.map(e => e.apelido);
+
+        const response = await fetch(`/api/parcela/${appState.parcelaNome}/subparcela/${result.subparcela}/add-species-ai`, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+                ai_model: appState.selectedAI,
+                existing_species: existingSpecies
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Erro na análise');
+        }
+
+        if (data.new_species && data.new_species.length > 0) {
+            // Adicionar novas espécies ao resultado
+            result.especies.push(...data.new_species);
+
+            // Recarregar lista
+            loadViewerSpecies();
+
+            // Atualizar visualização principal
+            displaySubparcelas();
+            displayEspecies();
+
+            // Fechar formulário
+            toggleAddSpeciesForm();
+
+            showAlert('success', `✅ ${data.new_species.length} nova(s) espécie(s) detectada(s) pela IA!`);
+        } else {
+            showAlert('info', 'A IA não detectou espécies adicionais nesta imagem.');
+        }
+
+    } catch (error) {
+        console.error('Erro na análise IA:', error);
+        showAlert('error', `Erro: ${error.message}`);
+    }
+}
+
+async function saveManualSpecies() {
+    console.log('='.repeat(60));
+    console.log('🌿 saveManualSpecies() INICIO');
+    console.log('='.repeat(60));
+
+    try {
+        // 1. Verificar elementos do formulário
+        const apelidoEl = document.getElementById('manual-apelido');
+        const coberturaEl = document.getElementById('manual-cobertura');
+        const alturaEl = document.getElementById('manual-altura');
+        const formaVidaEl = document.getElementById('manual-forma-vida');
+        const generoEl = document.getElementById('manual-genero');
+        const familiaEl = document.getElementById('manual-familia');
+        const observacoesEl = document.getElementById('manual-observacoes');
+
+        console.log('📋 Verificando elementos do formulário:');
+        console.log(`   - manual-apelido: ${apelidoEl ? 'ENCONTRADO' : '❌ NÃO ENCONTRADO'}`);
+        console.log(`   - manual-cobertura: ${coberturaEl ? 'ENCONTRADO' : '❌ NÃO ENCONTRADO'}`);
+        console.log(`   - manual-altura: ${alturaEl ? 'ENCONTRADO' : '❌ NÃO ENCONTRADO'}`);
+        console.log(`   - manual-forma-vida: ${formaVidaEl ? 'ENCONTRADO' : '❌ NÃO ENCONTRADO'}`);
+
+        if (!apelidoEl || !coberturaEl || !alturaEl || !formaVidaEl) {
+            throw new Error('Elementos do formulário não encontrados! Verifique os IDs dos campos.');
+        }
+
+        // 2. Ler valores
+        const apelido = apelidoEl.value.trim();
+        const cobertura = parseInt(coberturaEl.value);
+        const altura = parseInt(alturaEl.value);
+        const formaVida = formaVidaEl.value;
+        const genero = generoEl ? generoEl.value.trim() : '';
+        const familia = familiaEl ? familiaEl.value.trim() : '';
+        const observacoes = observacoesEl ? observacoesEl.value.trim() : '';
+
+        console.log('📝 Valores lidos do formulário:');
+        console.log(`   - Apelido: "${apelido}"`);
+        console.log(`   - Cobertura: ${cobertura}%`);
+        console.log(`   - Altura: ${altura}cm`);
+        console.log(`   - Forma de Vida: ${formaVida}`);
+        console.log(`   - Gênero: "${genero}"`);
+        console.log(`   - Família: "${familia}"`);
+        console.log(`   - Observações: "${observacoes}"`);
+
+        // 3. Validações
+        if (!apelido) {
+            console.error('❌ ERRO: Apelido vazio');
+            showAlert('error', 'Preencha o apelido da espécie');
+            return;
+        }
+
+        if (isNaN(cobertura) || cobertura < 0 || cobertura > 100) {
+            console.error(`❌ ERRO: Cobertura inválida (${cobertura})`);
+            showAlert('error', 'Cobertura deve estar entre 0 e 100%');
+            return;
+        }
+
+        // 4. Verificar estado da aplicação
+        console.log('🔍 Verificando estado da aplicação:');
+        console.log(`   - appState existe? ${appState ? 'SIM' : '❌ NÃO'}`);
+        console.log(`   - appState.analysisResults existe? ${appState && appState.analysisResults ? 'SIM' : '❌ NÃO'}`);
+        console.log(`   - currentViewerIndex: ${currentViewerIndex}`);
+        console.log(`   - appState.parcelaNome: "${appState ? appState.parcelaNome : 'UNDEFINED'}"`);
+
+        if (!appState || !appState.analysisResults) {
+            throw new Error('Estado da aplicação não inicializado');
+        }
+
+        const result = appState.analysisResults[currentViewerIndex];
+
+        if (!result) {
+            throw new Error(`Resultado não encontrado para currentViewerIndex ${currentViewerIndex}`);
+        }
+
+        console.log('📊 Dados do resultado:');
+        console.log(`   - result completo:`, result);
+        console.log(`   - Subparcela: ${result.subparcela}`);
+        console.log(`   - Número de espécies atual: ${result.especies ? result.especies.length : 0}`);
+        console.log(`   - Parcela: ${appState.parcelaNome}`);
+
+        // CRITICAL FIX: Verificar se subparcela está definida
+        if (!result.subparcela && result.subparcela !== 0) {
+            throw new Error(`❌ Campo 'subparcela' está undefined no resultado! Verifique se você abriu o modal "Ver e Editar" de uma subparcela válida.`);
+        }
+
+        // 5. Criar objeto da nova espécie
+        const novaEspecie = {
+            apelido: apelido,
+            genero: genero || '',
+            familia: familia || '',
+            observacoes: observacoes || '',
+            cobertura: cobertura,
+            altura: altura,
+            forma_vida: formaVida,
+            indice: result.especies.length + 1
+        };
+
+        console.log('🆕 Nova espécie criada:', JSON.stringify(novaEspecie, null, 2));
+
+        // 6. Enviar para API
+        const url = `/api/parcela/${appState.parcelaNome}/subparcela/${result.subparcela}/especie`;
+        console.log(`📡 Enviando POST para: ${url}`);
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(novaEspecie)
+        });
+
+        console.log(`📥 Resposta HTTP: Status ${response.status} (${response.statusText})`);
+
+        const data = await response.json();
+        console.log('📥 Dados da resposta:', JSON.stringify(data, null, 2));
+
+        if (!response.ok) {
+            throw new Error(data.error || `Erro HTTP ${response.status}`);
+        }
+
+        if (!data.success) {
+            throw new Error(data.error || 'API retornou success=false');
+        }
+
+        // 7. Adicionar ao resultado local
+        result.especies.push(novaEspecie);
+        console.log(`✅ Espécie adicionada localmente. Total de espécies agora: ${result.especies.length}`);
+
+        // 7.5 Recalcular espécies unificadas
+        recalcularEspeciesUnificadas();
+
+        // 8. Recarregar visualizações
+        console.log('🔄 Atualizando visualizações...');
+        if (typeof loadViewerSpecies === 'function') {
+            loadViewerSpecies();
+            console.log('   ✓ loadViewerSpecies() chamada');
+        } else {
+            console.warn('   ⚠️ loadViewerSpecies() não está definida');
+        }
+
+        if (typeof displaySubparcelas === 'function') {
+            displaySubparcelas();
+            console.log('   ✓ displaySubparcelas() chamada');
+        } else {
+            console.warn('   ⚠️ displaySubparcelas() não está definida');
+        }
+
+        if (typeof displaySpeciesTable === 'function') {
+            displaySpeciesTable();
+            console.log('   ✓ displaySpeciesTable() chamada');
+        } else {
+            console.warn('   ⚠️ displaySpeciesTable() não está definida');
+        }
+
+        // 9. Limpar formulário
+        console.log('🧹 Limpando formulário...');
+        apelidoEl.value = '';
+        coberturaEl.value = '10';
+        alturaEl.value = '10';
+        formaVidaEl.value = 'Erva';
+        if (generoEl) generoEl.value = '';
+        if (familiaEl) familiaEl.value = '';
+        if (observacoesEl) observacoesEl.value = '';
+        console.log('   ✓ Formulário limpo');
+
+        // 10. Fechar formulário
+        console.log('🚪 Fechando formulário...');
+        if (typeof toggleAddSpeciesForm === 'function') {
+            toggleAddSpeciesForm();
+            console.log('   ✓ Formulário fechado');
+        } else {
+            console.warn('   ⚠️ toggleAddSpeciesForm() não está definida');
+        }
+
+        // 11. Mostrar mensagem de sucesso
+        showAlert('success', `✅ Espécie "${apelido}" adicionada com sucesso!`);
+
+        console.log('='.repeat(60));
+        console.log('✅ saveManualSpecies() CONCLUÍDA COM SUCESSO');
+        console.log('='.repeat(60));
+
+    } catch (error) {
+        console.log('='.repeat(60));
+        console.error('❌❌❌ ERRO EM saveManualSpecies() ❌❌❌');
+        console.error('Tipo do erro:', error.constructor.name);
+        console.error('Mensagem:', error.message);
+        console.error('Stack trace:', error.stack);
+        console.log('='.repeat(60));
+        showAlert('error', `Erro: ${error.message}`);
+    }
 }
 
 async function deleteSpeciesInViewer(especieIndex) {
@@ -2819,6 +3578,10 @@ async function deleteSpeciesInViewer(especieIndex) {
         
         if (data.success) {
             result.especies.splice(especieIndex, 1);
+            
+            // Recalcular espécies unificadas
+            recalcularEspeciesUnificadas();
+            
             loadViewerSpecies();
             
             // Atualizar visualização principal
@@ -2856,11 +3619,13 @@ function splitSpeciesInViewer(especieIndex) {
 function addViewerButtons() {
     document.querySelectorAll('.subparcela-card').forEach(card => {
         if (card.dataset.viewerBtnAdded) return;
-        
-        const h3 = card.querySelector('h3');
-        const subNum = parseInt(h3.textContent.match(/\d+/)[0]);
+
+        const headerSpan = card.querySelector('.subparcela-header span');
+        if (!headerSpan) return;
+
+        const subNum = parseInt(headerSpan.textContent.match(/\d+/)[0]);
         const img = card.querySelector('img');
-        
+
         if (!img) return;
         
         // Adicionar evento de click na imagem
@@ -2929,6 +3694,12 @@ function startNewAnalysis() {
         elements.analysisSection.style.display = 'none';
         elements.speciesSection.style.display = 'none';
         elements.exportSection.style.display = 'none';
+        if (elements.analyticsSection) {
+            elements.analyticsSection.style.display = 'none';
+        }
+        if (elements.exportFooter) {
+            elements.exportFooter.style.display = 'none';
+        }
         elements.addImagesBtn.style.display = 'none';
         elements.manualModeBtn.style.display = 'none';
         
@@ -2955,3 +3726,623 @@ function showAlert(type, message) {
 
     setTimeout(() => alert.remove(), 5000);
 }
+
+// ====== INTEGRAÇÃO COM COVERAGE DRAWER ======
+
+// Inicializar CoverageDrawer quando o viewer abre
+function initializeCoverageDrawer() {
+    const img = viewerModal.querySelector('#viewer-image');
+    const result = appState.analysisResults[currentViewerIndex];
+
+    if (img && result) {
+        // Preparar dados da subparcela para o drawer
+        const subparcelaData = {
+            id: result.subparcela,
+            subparcela: result.subparcela,
+            especies: result.especies || [],
+            area_shape: result.area_shape || null
+        };
+
+        // Aguardar imagem carregar
+        if (img.complete) {
+            CoverageDrawer.init(img, subparcelaData);
+        } else {
+            img.onload = () => {
+                CoverageDrawer.init(img, subparcelaData);
+            };
+        }
+    }
+}
+
+// Função global para desenhar área de cobertura para uma espécie
+function startDrawCoverageForSpecies(speciesIndex) {
+    CoverageDrawer.startDrawSpecies(speciesIndex, 'rectangle');
+}
+
+// Função para começar a desenhar a área da subparcela
+function startDrawSubparcelaArea() {
+    CoverageDrawer.startDrawSubparcela('rectangle');
+}
+
+function importAIAreas() {
+    if (!CoverageDrawer.svg) {
+        showAlert('error', 'Sistema de desenho não inicializado. Abra o modal de visualização primeiro.');
+        return;
+    }
+
+    if (!CoverageDrawer.subparcelaPolygon) {
+        showAlert('warning', '⚠️ Primeiro defina a área de 100% da subparcela antes de importar áreas da IA!');
+        return;
+    }
+
+    if (confirm('Importar áreas detectadas pela IA?\n\nIsso irá adicionar polígonos automaticamente para as espécies que tiverem coordenadas detectadas.')) {
+        CoverageDrawer.importAIDetectedAreas();
+    }
+}
+
+function clearSpeciesAreas(speciesIndex) {
+    const result = appState.analysisResults[currentViewerIndex];
+    const species = result.especies[speciesIndex];
+
+    if (!CoverageDrawer.svg) {
+        showAlert('error', 'Sistema de desenho não inicializado');
+        return;
+    }
+
+    // Verificar se há áreas para esta espécie
+    const hasAreas = CoverageDrawer.speciesPolygons[speciesIndex]?.length > 0;
+    if (!hasAreas) {
+        showAlert('info', `A espécie "${species.apelido}" não possui áreas desenhadas`);
+        return;
+    }
+
+    const numAreas = CoverageDrawer.speciesPolygons[speciesIndex].length;
+    if (confirm(`Limpar todas as ${numAreas} área(s) desenhada(s) de "${species.apelido}"?`)) {
+        // Remover todas as áreas desta espécie
+        delete CoverageDrawer.speciesPolygons[speciesIndex];
+
+        // Renderizar e persistir
+        CoverageDrawer.render();
+        CoverageDrawer.persistSpeciesArea(speciesIndex, []);
+
+        showAlert('success', `Todas as áreas de "${species.apelido}" foram removidas`);
+    }
+}
+
+// Funções para controlar visualização dos polígonos
+
+function toggleGrid() {
+    const gridToggle = document.getElementById('grid-toggle');
+    if (gridToggle && typeof CoverageDrawer !== 'undefined' && CoverageDrawer.svg) {
+        CoverageDrawer.gridEnabled = gridToggle.checked;
+        console.log('⊞ Grid', CoverageDrawer.gridEnabled ? 'ativado' : 'desativado');
+        CoverageDrawer.render();
+    }
+}
+
+function togglePolygonSettings() {
+    const panel = document.getElementById('polygon-settings-panel');
+    const isOpening = panel.style.display === 'none';
+    
+    panel.style.display = isOpening ? 'block' : 'none';
+    
+    // Se está abrindo o painel, garantir que os event listeners estão ativos
+    if (isOpening) {
+        console.log('🔧 Painel de configurações aberto, verificando event listeners...');
+        
+        setTimeout(() => {
+            const polygonFillToggle = document.getElementById('polygon-fill-toggle');
+            const subparcelaFillToggle = document.getElementById('subparcela-fill-toggle');
+            const gridToggle = document.getElementById('grid-toggle');
+            
+            if (polygonFillToggle) {
+                console.log('✅ Checkbox polygon-fill-toggle encontrado no painel');
+                // Remover listeners antigos (se existirem) e adicionar novo
+                const newCheckbox = polygonFillToggle.cloneNode(true);
+                polygonFillToggle.parentNode.replaceChild(newCheckbox, polygonFillToggle);
+                
+                newCheckbox.addEventListener('change', function() {
+                    console.log('🌿 Toggle Espécies mudou para:', this.checked);
+                    updatePolygonDisplay();
+                });
+            } else {
+                console.error('❌ Checkbox polygon-fill-toggle NÃO encontrado no painel');
+            }
+            
+            if (subparcelaFillToggle) {
+                console.log('✅ Checkbox subparcela-fill-toggle encontrado no painel');
+                // Remover listeners antigos (se existirem) e adicionar novo
+                const newCheckbox = subparcelaFillToggle.cloneNode(true);
+                subparcelaFillToggle.parentNode.replaceChild(newCheckbox, subparcelaFillToggle);
+                
+                newCheckbox.addEventListener('change', function() {
+                    console.log('📐 Toggle Área 100% mudou para:', this.checked);
+                    updateSubparcelaDisplay();
+                });
+            } else {
+                console.error('❌ Checkbox subparcela-fill-toggle NÃO encontrado no painel');
+            }
+            
+            if (gridToggle) {
+                console.log('✅ Checkbox grid-toggle encontrado no painel');
+                const newCheckbox = gridToggle.cloneNode(true);
+                gridToggle.parentNode.replaceChild(newCheckbox, gridToggle);
+                
+                newCheckbox.addEventListener('change', function() {
+                    console.log('⊞ Toggle Grid mudou para:', this.checked);
+                    toggleGrid();
+                });
+            }
+        }, 50);
+    }
+}
+
+function updatePolygonDisplay() {
+    const checkbox = document.getElementById('polygon-fill-toggle');
+    console.log('🌿 Toggle Espécies:', checkbox ? `checked=${checkbox.checked}` : 'CHECKBOX NÃO ENCONTRADO');
+    
+    if (!checkbox) {
+        console.error('❌ Checkbox polygon-fill-toggle não existe no DOM');
+        return;
+    }
+    
+    const fillEnabled = checkbox.checked;
+    console.log('🌿 Alterando CoverageDrawer.fillEnabled para:', fillEnabled);
+    CoverageDrawer.fillEnabled = fillEnabled;
+    CoverageDrawer.render();
+}
+
+function updateSubparcelaDisplay() {
+    const checkbox = document.getElementById('subparcela-fill-toggle');
+    console.log('📐 Toggle Área 100%:', checkbox ? `checked=${checkbox.checked}` : 'CHECKBOX NÃO ENCONTRADO');
+    
+    if (!checkbox) {
+        console.error('❌ Checkbox subparcela-fill-toggle não existe no DOM');
+        return;
+    }
+    
+    const fillEnabled = checkbox.checked;
+    console.log('📐 Alterando CoverageDrawer.subparcelaFillEnabled para:', fillEnabled);
+    CoverageDrawer.subparcelaFillEnabled = fillEnabled;
+    CoverageDrawer.render();
+}
+
+function updatePolygonOpacity(value) {
+    document.getElementById('opacity-value').textContent = value;
+    CoverageDrawer.fillOpacity = value / 100;
+    CoverageDrawer.render();
+}
+
+function updatePolygonStroke(value) {
+    document.getElementById('stroke-value').textContent = value;
+    CoverageDrawer.strokeWidth = parseInt(value);
+    CoverageDrawer.render();
+}
+
+function updateGridCellSize(value) {
+    document.getElementById('grid-size-value').textContent = value;
+    CoverageDrawer.gridCellSize = parseInt(value);
+    if (CoverageDrawer.gridEnabled) {
+        CoverageDrawer.render();
+    }
+}
+
+function updateGridLineWidth(value) {
+    document.getElementById('grid-line-value').textContent = value;
+    CoverageDrawer.gridLineWidth = parseInt(value);
+    if (CoverageDrawer.gridEnabled) {
+        CoverageDrawer.render();
+    }
+}
+
+// Modal de seleção de forma geométrica
+function showShapeSelectionModal(speciesIndex) {
+    const result = appState.analysisResults[currentViewerIndex];
+    const isSubparcela = speciesIndex === null;
+
+    const title = isSubparcela
+        ? 'Definir Área da Subparcela'
+        : `Desenhar Área de ${result.especies[speciesIndex].apelido}`;
+
+    const message = isSubparcela
+        ? 'Escolha uma forma para definir a área que representa 100% da subparcela:'
+        : 'Escolha uma forma para indicar a área ocupada por esta espécie:';
+
+    const modalHTML = `
+        <div class="shape-selection-modal" id="shape-selection-modal">
+            <div class="shape-selection-overlay" onclick="closeShapeSelectionModal()"></div>
+            <div class="shape-selection-content">
+                <div class="shape-selection-header">
+                    <h3>${title}</h3>
+                    <button onclick="closeShapeSelectionModal()" class="shape-close-btn">✕</button>
+                </div>
+                <div class="shape-selection-body">
+                    <p style="margin-bottom: 20px; color: #cbd5e0;">${message}</p>
+                    <div class="shape-options">
+                        <button class="shape-option-btn" onclick="selectShape(${speciesIndex}, 'rectangle')">
+                            <div class="shape-icon">▭</div>
+                            <div class="shape-name">Retângulo</div>
+                            <div class="shape-desc">Áreas regulares e quadradas</div>
+                        </button>
+                        <button class="shape-option-btn" onclick="selectShape(${speciesIndex}, 'circle')">
+                            <div class="shape-icon">●</div>
+                            <div class="shape-name">Círculo</div>
+                            <div class="shape-desc">Áreas circulares uniformes</div>
+                        </button>
+                        <button class="shape-option-btn" onclick="selectShape(${speciesIndex}, 'ellipse')">
+                            <div class="shape-icon">⬭</div>
+                            <div class="shape-name">Elipse</div>
+                            <div class="shape-desc">Áreas ovais alongadas</div>
+                        </button>
+                        <button class="shape-option-btn" onclick="selectShape(${speciesIndex}, 'polygon')">
+                            <div class="shape-icon">⬟</div>
+                            <div class="shape-name">Polígono Livre</div>
+                            <div class="shape-desc">Áreas irregulares customizadas</div>
+                        </button>
+                    </div>
+                    <div class="shape-instructions">
+                        <h4>Instruções:</h4>
+                        <ul>
+                            <li><strong>Retângulo/Círculo/Elipse:</strong> Clique e arraste para desenhar</li>
+                            <li><strong>Polígono:</strong> Clique para adicionar pontos, clique duplo para finalizar</li>
+                            <li><strong>Botão direito:</strong> Remove forma ou último ponto do polígono</li>
+                            <li>Você pode desenhar múltiplas formas para a mesma espécie</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remover modal antigo se existir
+    const oldModal = document.getElementById('shape-selection-modal');
+    if (oldModal) oldModal.remove();
+
+    // Adicionar novo modal
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function closeShapeSelectionModal() {
+    const modal = document.getElementById('shape-selection-modal');
+    if (modal) modal.remove();
+}
+
+function selectShape(speciesIndex, shapeType) {
+    closeShapeSelectionModal();
+
+    if (speciesIndex === null) {
+        // Desenhar área da subparcela
+        CoverageDrawer.startDrawSubparcela(shapeType);
+    } else {
+        // Desenhar área da espécie
+        CoverageDrawer.startDrawSpecies(speciesIndex, shapeType);
+    }
+}
+
+// Modificar updateViewerContent para inicializar o drawer
+const originalUpdateViewerContent = updateViewerContent;
+updateViewerContent = function() {
+    originalUpdateViewerContent();
+
+    // Inicializar Coverage Drawer após atualizar conteúdo
+    setTimeout(() => {
+        initializeCoverageDrawer();
+    }, 100);
+};
+
+// Modificar closeImageViewer para destruir o drawer
+const originalCloseImageViewer = closeImageViewer;
+closeImageViewer = function() {
+    CoverageDrawer.destroy();
+    originalCloseImageViewer();
+};
+
+// Tornar funções globais
+window.startDrawCoverageForSpecies = startDrawCoverageForSpecies;
+window.startDrawSubparcelaArea = startDrawSubparcelaArea;
+window.showShapeSelectionModal = showShapeSelectionModal;
+window.closeShapeSelectionModal = closeShapeSelectionModal;
+window.selectShape = selectShape;
+
+// === FUNÇÕES DE EXPORTAÇÃO AVANÇADA ===
+
+async function exportToPDF() {
+    const btn = elements.exportPdfBtn;
+    const originalText = btn.textContent;
+    
+    try {
+        btn.disabled = true;
+        btn.textContent = '🔄 Gerando PDF completo...';
+        
+        showNotification('📸 Capturando screenshots... Isso pode levar alguns momentos.', 'info');
+        
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        let yOffset = 10;
+        
+        // Função auxiliar para adicionar imagem ao PDF
+        const addImageToPDF = async (element, title) => {
+            try {
+                const canvas = await html2canvas(element, {
+                    scale: 2,
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: '#ffffff'
+                });
+                
+                const imgData = canvas.toDataURL('image/png');
+                const imgWidth = pageWidth - 20;
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                
+                // Adicionar nova página se necessário
+                if (yOffset + imgHeight > pageHeight - 10) {
+                    pdf.addPage();
+                    yOffset = 10;
+                }
+                
+                // Adicionar título
+                if (title) {
+                    pdf.setFontSize(12);
+                    pdf.setFont(undefined, 'bold');
+                    pdf.text(title, 10, yOffset);
+                    yOffset += 7;
+                }
+                
+                pdf.addImage(imgData, 'PNG', 10, yOffset, imgWidth, imgHeight);
+                yOffset += imgHeight + 10;
+                
+                return true;
+            } catch (error) {
+                console.error('Erro ao capturar:', title, error);
+                return false;
+            }
+        };
+        
+        // 1. CAPA
+        pdf.setFontSize(24);
+        pdf.setFont(undefined, 'bold');
+        pdf.text('🌿 Relatório de Análise', pageWidth / 2, 30, { align: 'center' });
+        pdf.setFontSize(18);
+        pdf.text(`${appState.parcelaNome}`, pageWidth / 2, 45, { align: 'center' });
+        
+        pdf.setFontSize(12);
+        pdf.setFont(undefined, 'normal');
+        const now = new Date();
+        const dateStr = now.toLocaleString('pt-BR');
+        pdf.text(`Gerado em: ${dateStr}`, pageWidth / 2, 60, { align: 'center' });
+        
+        pdf.setFontSize(10);
+        pdf.text(`Total de Subparcelas: ${appState.analysisResults.length}`, pageWidth / 2, 75, { align: 'center' });
+        pdf.text(`Total de Espécies: ${Object.keys(appState.especies).length}`, pageWidth / 2, 82, { align: 'center' });
+        
+        pdf.addPage();
+        yOffset = 10;
+        
+        // 2. LISTA DE ESPÉCIES
+        btn.textContent = '📸 Capturando lista de espécies...';
+        const speciesSection = document.getElementById('species-section');
+        if (speciesSection && speciesSection.style.display !== 'none') {
+            await addImageToPDF(speciesSection, 'Lista de Espécies Identificadas');
+        }
+        
+        // 3. ANÁLISES AVANÇADAS (todas as abas)
+        btn.textContent = '📸 Capturando análises avançadas...';
+        const analyticsSection = document.getElementById('advanced-analytics-section');
+        if (analyticsSection && analyticsSection.style.display !== 'none') {
+            // Capturar cada aba
+            const tabs = ['ecological', 'phytosociological', 'monitoring', 'comparative', 'accumulated'];
+            const tabNames = ['Análises Ecológicas', 'Análises Fitossociológicas', 'Monitoramento', 'Análises Comparativas', 'Dados Acumulados'];
+            
+            for (let i = 0; i < tabs.length; i++) {
+                const tabContent = document.getElementById(`tab-${tabs[i]}`);
+                if (tabContent) {
+                    // Tornar aba visível temporariamente
+                    const wasActive = tabContent.classList.contains('active');
+                    tabContent.classList.add('active');
+                    tabContent.style.display = 'block';
+                    
+                    await new Promise(resolve => setTimeout(resolve, 300)); // Aguardar renderização
+                    await addImageToPDF(tabContent, tabNames[i]);
+                    
+                    if (!wasActive) {
+                        tabContent.classList.remove('active');
+                        tabContent.style.display = 'none';
+                    }
+                }
+            }
+        }
+        
+        // 4. MODAIS DE CADA ESPÉCIE (dashboard completo)
+        btn.textContent = '📸 Capturando detalhes das espécies...';
+        const especies = Object.keys(appState.especies);
+        for (let i = 0; i < especies.length; i++) {
+            const apelido = especies[i];
+            btn.textContent = `📸 Espécie ${i + 1}/${especies.length}: ${apelido}...`;
+            
+            // Abrir modal
+            SpeciesDetailsModal.open(apelido);
+            await new Promise(resolve => setTimeout(resolve, 500)); // Aguardar abertura
+            
+            const modal = document.getElementById('species-details-modal');
+            if (modal && modal.style.display !== 'none') {
+                // Capturar cada aba do modal
+                const modalTabs = ['dashboard', 'comparison', 'timeline', 'photos'];
+                const modalTabNames = ['Dashboard', 'Comparação', 'Linha do Tempo', 'Galeria de Fotos'];
+                
+                for (let j = 0; j < modalTabs.length; j++) {
+                    const tabBtn = modal.querySelector(`[data-modal-tab="${modalTabs[j]}"]`);
+                    if (tabBtn) {
+                        tabBtn.click();
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                        
+                        const modalContent = modal.querySelector('.species-modal-content');
+                        if (modalContent) {
+                            await addImageToPDF(modalContent, `${apelido} - ${modalTabNames[j]}`);
+                        }
+                    }
+                }
+                
+                SpeciesDetailsModal.close();
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+        }
+        
+        // 5. MODAIS DE CADA SUBPARCELA (ver e editar)
+        btn.textContent = '📸 Capturando subparcelas...';
+        for (let i = 0; i < appState.analysisResults.length; i++) {
+            btn.textContent = `📸 Subparcela ${i + 1}/${appState.analysisResults.length}...`;
+            
+            // Simular clique no botão "Ver e Editar"
+            const viewBtn = document.querySelector(`[onclick="viewResult(${i})"]`);
+            if (viewBtn) {
+                viewBtn.click();
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                const editPanel = document.getElementById('edit-panel');
+                if (editPanel && editPanel.style.display !== 'none') {
+                    await addImageToPDF(editPanel, `Subparcela ${i + 1} - Detalhes`);
+                    
+                    // Fechar painel
+                    const closeBtn = editPanel.querySelector('.close-btn');
+                    if (closeBtn) closeBtn.click();
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+            }
+        }
+        
+        // Salvar PDF
+        btn.textContent = '💾 Salvando PDF...';
+        pdf.save(`${appState.parcelaNome}_relatorio_completo_${Date.now()}.pdf`);
+        
+        showNotification('✅ PDF completo exportado com sucesso!', 'success');
+        
+    } catch (error) {
+        console.error('Erro ao exportar PDF:', error);
+        showNotification('❌ Erro ao exportar PDF: ' + error.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
+async function exportToZip() {
+    const btn = elements.exportZipBtn;
+    const originalText = btn.textContent;
+    
+    try {
+        btn.disabled = true;
+        btn.textContent = '🔄 Gerando ZIP...';
+        
+        const response = await fetch('/export_zip', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                parcela: appState.parcelaNome,
+                especies: appState.especies,
+                analysisResults: appState.analysisResults,
+                analytics: {
+                    diversity: AdvancedAnalytics.calculateShannonDiversity(),
+                    richness: AdvancedAnalytics.calculateSpeciesRichness(),
+                    eveness: AdvancedAnalytics.calculateEveness(),
+                    simpson: AdvancedAnalytics.calculateSimpsonDominance()
+                }
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Erro ao gerar ZIP');
+        }
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${appState.parcelaNome}_pacote_completo.zip`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        showNotification('✅ ZIP exportado com sucesso!', 'success');
+        
+    } catch (error) {
+        console.error('Erro ao exportar ZIP:', error);
+        showNotification('❌ Erro ao exportar ZIP: ' + error.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
+function showNotification(message, type) {
+    // Criar elemento de notificação
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 15px 25px;
+        background: ${type === 'success' ? '#4CAF50' : '#f44336'};
+        color: white;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 100000;
+        font-size: 14px;
+        animation: slideIn 0.3s ease;
+    `;
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
+
+// ========================================
+// PROPAGAÇÃO DE COBERTURA
+// ========================================
+
+window.updateSpeciesCoverageInTables = function(subparcelaId, speciesIndex, percentage) {
+    console.log(`🔄 Propagando cobertura ${percentage.toFixed(1)}% para subparcela ${subparcelaId}, espécie ${speciesIndex}`);
+
+    // Encontrar resultado da subparcela
+    const result = appState.analysisResults.find(r => r.subparcela === subparcelaId);
+    if (!result) {
+        console.warn(`⚠️ Subparcela ${subparcelaId} não encontrada`);
+        return;
+    }
+
+    // Atualizar espécie no resultado
+    if (result.especies && result.especies[speciesIndex]) {
+        result.especies[speciesIndex].cobertura = parseFloat(percentage.toFixed(1));
+        console.log(`✅ Cobertura atualizada no resultado da subparcela ${subparcelaId}`);
+    }
+
+    // Atualizar card da subparcela na grid
+    const subparcelaCard = document.querySelector(`.subparcela-card[data-subparcela="${subparcelaId}"]`);
+    if (subparcelaCard) {
+        const speciesListItem = subparcelaCard.querySelector(`[data-species-index="${speciesIndex}"]`);
+        if (speciesListItem) {
+            const coverageSpan = speciesListItem.querySelector('.species-coverage');
+            if (coverageSpan) {
+                coverageSpan.textContent = `${percentage.toFixed(1)}%`;
+            }
+        }
+    }
+
+    // Atualizar análises avançadas se estiverem visíveis
+    if (window.AdvancedAnalytics && typeof window.AdvancedAnalytics.refreshAnalytics === 'function') {
+        window.AdvancedAnalytics.refreshAnalytics();
+        console.log('✅ Análises avançadas atualizadas');
+    }
+
+    // Persistir no backend
+    saveAnalysisResults();
+};

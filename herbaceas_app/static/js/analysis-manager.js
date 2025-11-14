@@ -31,6 +31,8 @@ const AnalysisManager = {
             }
         }
         
+        // Botões agora estão no footer fixo, não precisamos criar dinamicamente
+        /*
         const saveBtn = document.createElement('button');
         saveBtn.className = 'btn btn-secondary';
         saveBtn.innerHTML = '💾 Salvar Análise';
@@ -49,14 +51,15 @@ const AnalysisManager = {
         
         const importZipBtn = document.createElement('button');
         importZipBtn.className = 'btn btn-info';
-        importZipBtn.innerHTML = '📥 Importar ZIP Completo';
+        importZipBtn.innerHTML = '📥 Importar Projeto';
         importZipBtn.onclick = () => this.importCompleteZip();
-        importZipBtn.title = 'Importar análise completa de arquivo ZIP';
+        importZipBtn.title = 'Importar projeto completo de arquivo ZIP';
         
         btnContainer.appendChild(saveBtn);
         btnContainer.appendChild(loadBtn);
         btnContainer.appendChild(exportZipBtn);
         btnContainer.appendChild(importZipBtn);
+        */
     },
     
     async showSaveDialog() {
@@ -652,7 +655,7 @@ const AnalysisManager = {
             if (!file) return;
             
             try {
-                showAlert('info', 'Importando análise... Aguarde...');
+                showNotification('📥 Importando projeto completo... Aguarde...', 'info');
                 
                 const formData = new FormData();
                 formData.append('file', file);
@@ -665,18 +668,60 @@ const AnalysisManager = {
                 const result = await response.json();
                 
                 if (result.success) {
-                    showAlert('success', `Análise "${result.parcela}" importada com sucesso! Recarregando página...`);
+                    showNotification(`✅ Projeto "${result.parcela}" importado! Restaurando interface...`, 'success');
                     
-                    // Recarregar página para exibir dados importados
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 2000);
+                    // Restaurar estado completo da aplicação
+                    appState.parcelaNome = result.parcela;
+                    appState.analysisResults = result.analysis_results || [];
+                    appState.uploadedFiles = result.subparcelas || [];
+                    
+                    // Restaurar espécies
+                    appState.especies = {};
+                    appState.especiesUnificadas = result.especies || {};
+                    Object.entries(appState.especiesUnificadas).forEach(([apelido, espData]) => {
+                        appState.especies[apelido] = {
+                            apelido_original: apelido,
+                            apelido_usuario: espData.apelido_usuario || apelido,
+                            genero: espData.genero || '',
+                            especie: espData.especie || '',
+                            familia: espData.familia || '',
+                            ocorrencias: espData.ocorrencias || 0
+                        };
+                    });
+                    
+                    console.log('✅ Estado restaurado:', {
+                        parcela: appState.parcelaNome,
+                        subparcelas: appState.analysisResults.length,
+                        especies: Object.keys(appState.especies).length
+                    });
+                    
+                    // Atualizar campo de nome da parcela
+                    const parcelaInput = document.getElementById('parcela-name');
+                    if (parcelaInput) {
+                        parcelaInput.value = appState.parcelaNome;
+                    }
+                    
+                    // Mostrar todas as seções
+                    elements.analysisSection.style.display = 'block';
+                    elements.speciesSection.style.display = 'block';
+                    elements.visualizationSection.style.display = 'block';
+                    elements.analyticsSection.style.display = 'block';
+                    elements.exportFooter.style.display = 'block';
+                    
+                    // Renderizar interface completa
+                    displayResults();
+                    
+                    // Atualizar lista de análises salvas
+                    this.listSavedAnalyses();
+                    
+                    showNotification(`🎉 Projeto completo importado! ${appState.analysisResults.length} subparcelas, ${Object.keys(appState.especies).length} espécies.`, 'success');
+                    
                 } else {
-                    alert('Erro: ' + (result.error || 'Erro ao importar'));
+                    showNotification('❌ Erro ao importar projeto: ' + (result.error || 'Erro desconhecido'), 'error');
                 }
             } catch (error) {
-                console.error('Erro ao importar ZIP:', error);
-                alert('Erro ao importar ZIP: ' + error.message);
+                console.error('Erro ao importar projeto:', error);
+                showNotification('❌ Erro ao importar projeto: ' + error.message, 'error');
             }
         };
         
