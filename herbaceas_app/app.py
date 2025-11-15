@@ -2920,7 +2920,17 @@ def export_excel():
 
         parcela = analysis_data['parcelas'][parcela_nome]
         subparcelas_data = data.get('subparcelas', [])
-        especies_unificadas = data.get('especies_unificadas', [])
+        especies_unificadas_raw = data.get('especies_unificadas', [])
+
+        # Normalizar especies_unificadas (pode vir como array ou objeto)
+        if isinstance(especies_unificadas_raw, dict):
+            # Converter objeto para array
+            especies_unificadas = list(especies_unificadas_raw.values())
+            print(f"🔄 Especies unificadas convertida de dict para list: {len(especies_unificadas)} espécies")
+        else:
+            especies_unificadas = especies_unificadas_raw
+            print(f"✓ Especies unificadas recebida como list: {len(especies_unificadas)} espécies")
+
         estatisticas = data.get('estatisticas', {})
 
         # Criar workbook
@@ -3081,7 +3091,175 @@ def export_excel():
         
         ws_stats.column_dimensions['A'].width = 30
         ws_stats.column_dimensions['B'].width = 20
-        
+
+        # ==== ABAS DE ANÁLISES AVANÇADAS (SE DISPONÍVEIS) ====
+        analises_avancadas = data.get('analises_avancadas', {})
+
+        if analises_avancadas and any(analises_avancadas.values()):
+            print(f"📊 Adicionando análises avançadas ao Excel...")
+
+            # ABA: IVI (Índice de Valor de Importância)
+            if analises_avancadas.get('ivi'):
+                ws_ivi = wb.create_sheet("IVI - Valor de Importância")
+                ws_ivi['A1'] = "ÍNDICE DE VALOR DE IMPORTÂNCIA (IVI)"
+                ws_ivi['A1'].font = Font(bold=True, size=14, color="FFFFFF")
+                ws_ivi['A1'].fill = PatternFill(start_color="00897B", end_color="00897B", fill_type="solid")
+                ws_ivi.merge_cells('A1:G1')
+
+                ivi_headers = ['Espécie', 'Freq. Abs.', 'Freq. Rel. (%)', 'Dens. Rel. (%)', 'Dom. Rel. (%)', 'IVI', 'IVI (%)']
+                ws_ivi.append(ivi_headers)
+
+                for cell in ws_ivi[2]:
+                    cell.fill = PatternFill(start_color="B2DFDB", end_color="B2DFDB", fill_type="solid")
+                    cell.font = Font(bold=True)
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+
+                # Ordenar por IVI decrescente
+                ivi_sorted = sorted(analises_avancadas['ivi'].items(),
+                                   key=lambda x: x[1].get('ivi', 0), reverse=True)
+
+                for especie, dados in ivi_sorted:
+                    ws_ivi.append([
+                        especie,
+                        dados.get('frequency_abs', 0),
+                        round(dados.get('frequency_rel', 0), 2),
+                        round(dados.get('density_rel', 0), 2),
+                        round(dados.get('dominance_rel', 0), 2),
+                        round(dados.get('ivi', 0), 2),
+                        round(dados.get('ivi_percent', 0), 2)
+                    ])
+
+                # Larguras de colunas
+                ivi_widths = [30, 12, 14, 14, 14, 12, 12]
+                for idx, width in enumerate(ivi_widths, 1):
+                    ws_ivi.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+
+            # ABA: Frequência
+            if analises_avancadas.get('frequency'):
+                ws_freq = wb.create_sheet("Frequência")
+                ws_freq['A1'] = "ANÁLISE DE FREQUÊNCIA"
+                ws_freq['A1'].font = Font(bold=True, size=14, color="FFFFFF")
+                ws_freq['A1'].fill = PatternFill(start_color="1976D2", end_color="1976D2", fill_type="solid")
+                ws_freq.merge_cells('A1:D1')
+
+                freq_headers = ['Espécie', 'Freq. Absoluta', 'Freq. Relativa (%)', 'Classificação']
+                ws_freq.append(freq_headers)
+
+                for cell in ws_freq[2]:
+                    cell.fill = PatternFill(start_color="BBDEFB", end_color="BBDEFB", fill_type="solid")
+                    cell.font = Font(bold=True)
+
+                freq_sorted = sorted(analises_avancadas['frequency'].items(),
+                                    key=lambda x: x[1].get('relative', 0), reverse=True)
+
+                for especie, dados in freq_sorted:
+                    rel = dados.get('relative', 0)
+                    if rel < 20:
+                        classif = 'Muito Rara'
+                    elif rel < 40:
+                        classif = 'Rara'
+                    elif rel < 60:
+                        classif = 'Comum'
+                    elif rel < 80:
+                        classif = 'Frequente'
+                    else:
+                        classif = 'Muito Frequente'
+
+                    ws_freq.append([
+                        especie,
+                        dados.get('absolute', 0),
+                        round(rel, 2),
+                        classif
+                    ])
+
+                for idx, width in enumerate([30, 15, 18, 18], 1):
+                    ws_freq.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+
+            # ABA: Densidade
+            if analises_avancadas.get('density'):
+                ws_dens = wb.create_sheet("Densidade")
+                ws_dens['A1'] = "ANÁLISE DE DENSIDADE"
+                ws_dens['A1'].font = Font(bold=True, size=14, color="FFFFFF")
+                ws_dens['A1'].fill = PatternFill(start_color="F57C00", end_color="F57C00", fill_type="solid")
+                ws_dens.merge_cells('A1:C1')
+
+                dens_headers = ['Espécie', 'Densidade Absoluta', 'Densidade Relativa (%)']
+                ws_dens.append(dens_headers)
+
+                for cell in ws_dens[2]:
+                    cell.fill = PatternFill(start_color="FFE0B2", end_color="FFE0B2", fill_type="solid")
+                    cell.font = Font(bold=True)
+
+                dens_sorted = sorted(analises_avancadas['density'].items(),
+                                    key=lambda x: x[1].get('relative', 0), reverse=True)
+
+                for especie, dados in dens_sorted:
+                    ws_dens.append([
+                        especie,
+                        dados.get('absolute', 0),
+                        round(dados.get('relative', 0), 2)
+                    ])
+
+                for idx, width in enumerate([30, 18, 20], 1):
+                    ws_dens.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+
+            # ABA: Dominância
+            if analises_avancadas.get('dominance'):
+                ws_dom = wb.create_sheet("Dominância")
+                ws_dom['A1'] = "ANÁLISE DE DOMINÂNCIA"
+                ws_dom['A1'].font = Font(bold=True, size=14, color="FFFFFF")
+                ws_dom['A1'].fill = PatternFill(start_color="7B1FA2", end_color="7B1FA2", fill_type="solid")
+                ws_dom.merge_cells('A1:C1')
+
+                dom_headers = ['Espécie', 'Dominância Absoluta', 'Dominância Relativa (%)']
+                ws_dom.append(dom_headers)
+
+                for cell in ws_dom[2]:
+                    cell.fill = PatternFill(start_color="E1BEE7", end_color="E1BEE7", fill_type="solid")
+                    cell.font = Font(bold=True)
+
+                dom_sorted = sorted(analises_avancadas['dominance'].items(),
+                                   key=lambda x: x[1].get('relative', 0), reverse=True)
+
+                for especie, dados in dom_sorted:
+                    ws_dom.append([
+                        especie,
+                        round(dados.get('absolute', 0), 2),
+                        round(dados.get('relative', 0), 2)
+                    ])
+
+                for idx, width in enumerate([30, 18, 20], 1):
+                    ws_dom.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+
+            # ABA: Índices de Diversidade
+            if analises_avancadas.get('diversity'):
+                ws_div = wb.create_sheet("Índices de Diversidade")
+                ws_div['A1'] = "ÍNDICES DE DIVERSIDADE ECOLÓGICA"
+                ws_div['A1'].font = Font(bold=True, size=14, color="FFFFFF")
+                ws_div['A1'].fill = PatternFill(start_color="388E3C", end_color="388E3C", fill_type="solid")
+                ws_div.merge_cells('A1:B1')
+
+                div_data = analises_avancadas['diversity']
+                diversity_rows = [
+                    ['Índice', 'Valor'],
+                    ['Índice de Shannon (H\')', round(div_data.get('shannon', 0), 4)],
+                    ['Índice de Simpson (D)', round(div_data.get('simpson', 0), 4)],
+                    ['Equitabilidade de Pielou (J\')', round(div_data.get('evenness', 0), 4)],
+                    ['Riqueza de Espécies (S)', div_data.get('richness', 0)],
+                    ['Índice de Margalef', round(div_data.get('margalef', 0), 4)]
+                ]
+
+                for row_idx, row_data in enumerate(diversity_rows, 3):
+                    ws_div.append(row_data)
+                    if row_idx == 3:
+                        ws_div[f'A{row_idx}'].font = Font(bold=True)
+                        ws_div[f'B{row_idx}'].font = Font(bold=True)
+                        ws_div[f'A{row_idx}'].fill = PatternFill(start_color="C8E6C9", end_color="C8E6C9", fill_type="solid")
+                        ws_div[f'B{row_idx}'].fill = PatternFill(start_color="C8E6C9", end_color="C8E6C9", fill_type="solid")
+
+                ws_div.column_dimensions['A'].width = 30
+                ws_div.column_dimensions['B'].width = 20
+
         # Salvar arquivo
         os.makedirs('exports', exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -3741,12 +3919,18 @@ def import_complete_analysis():
             else:
                 print(f"⚠️ Nenhuma imagem encontrada no ZIP")
             
-            # Atualizar paths das imagens nas subparcelas
+            # Atualizar paths das imagens nas subparcelas com URLs válidas
             for subparcela_id, subparcela in imported_data['subparcelas'].items():
                 old_path = subparcela.get('image_path', '')
                 filename = os.path.basename(old_path)
                 if filename in image_mapping:
-                    subparcela['image_path'] = image_mapping[filename]
+                    # Converter caminho absoluto para URL relativa
+                    abs_path = image_mapping[filename]
+                    # Caminho relativo: /static/uploads/{parcela_nome}/{filename}
+                    rel_url = f'/static/uploads/{parcela_name}/{filename}'
+                    subparcela['image_path'] = rel_url
+                    # Também atualizar o mapping para usar URL
+                    image_mapping[filename] = rel_url
             
             # Reconstruir lista de images com estrutura correta
             images_list = []
@@ -3963,114 +4147,296 @@ load_species_photos()
 
 @app.route('/export_pdf', methods=['POST'])
 def export_pdf():
-    """Exporta análise completa para PDF"""
+    """Exporta análise completa para PDF otimizado e profissional"""
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib import colors
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import cm
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+        from reportlab.lib.units import cm, mm
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+        from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, Paragraph,
+                                       Spacer, PageBreak, Image as RLImage, KeepTogether)
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.utils import ImageReader
         from io import BytesIO
-        
+        from PIL import Image
+        import os
+
         data = request.json
         parcela_nome = data.get('parcela', 'Parcela')
         especies = data.get('especies', {})
         analytics = data.get('analytics', {})
-        
-        # Criar PDF em memória
+        analises_avancadas = data.get('analises_avancadas', {})
+        analysis_results = data.get('analysisResults', [])
+
+        # Criar PDF em memória com compressão
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4,
-                                rightMargin=2*cm, leftMargin=2*cm,
-                                topMargin=2*cm, bottomMargin=2*cm)
-        
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=2*cm, leftMargin=2*cm,
+            topMargin=2*cm, bottomMargin=2*cm,
+            compress=1  # Ativar compressão
+        )
+
         story = []
         styles = getSampleStyleSheet()
-        
-        # Título
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            textColor=colors.HexColor('#2196F3'),
-            spaceAfter=30,
-            alignment=1  # Center
+
+        # ===== CAPA PROFISSIONAL =====
+        cover_title_style = ParagraphStyle(
+            'CoverTitle',
+            parent=styles['Title'],
+            fontSize=32,
+            textColor=colors.HexColor('#1565C0'),
+            spaceAfter=10*mm,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold',
+            leading=38
         )
-        
-        story.append(Paragraph(f"Relatório de Análise de Vegetação Herbácea", title_style))
-        story.append(Paragraph(f"<b>Parcela:</b> {parcela_nome}", styles['Heading2']))
-        story.append(Spacer(1, 20))
-        
-        # Análises Ecológicas
-        story.append(Paragraph("Análises Ecológicas", styles['Heading2']))
-        
-        analytics_data = [
-            ['Índice', 'Valor', 'Interpretação'],
-            ['Diversidade de Shannon (H\')', f"{analytics.get('diversity', 0):.3f}", 'Indica diversidade de espécies'],
-            ['Riqueza de Espécies (S)', str(analytics.get('richness', 0)), 'Número total de espécies'],
-            ['Equitabilidade de Pielou (J\')', f"{analytics.get('eveness', 0):.3f}", 'Uniformidade da distribuição'],
-            ['Dominância de Simpson (D)', f"{analytics.get('simpson', 0):.3f}", 'Probabilidade de dominância']
-        ]
-        
-        t = Table(analytics_data, colWidths=[6*cm, 4*cm, 8*cm])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4CAF50')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        
-        story.append(t)
-        story.append(Spacer(1, 30))
-        
-        # Tabela de Espécies
-        story.append(Paragraph("Lista de Espécies Identificadas", styles['Heading2']))
+
+        cover_subtitle_style = ParagraphStyle(
+            'CoverSubtitle',
+            parent=styles['Normal'],
+            fontSize=18,
+            textColor=colors.HexColor('#424242'),
+            spaceAfter=5*mm,
+            alignment=TA_CENTER,
+            fontName='Helvetica'
+        )
+
+        cover_info_style = ParagraphStyle(
+            'CoverInfo',
+            parent=styles['Normal'],
+            fontSize=12,
+            textColor=colors.HexColor('#757575'),
+            alignment=TA_CENTER,
+            fontName='Helvetica'
+        )
+
+        # Spacer para centralizar verticalmente
+        story.append(Spacer(1, 6*cm))
+
+        # Título principal
+        story.append(Paragraph("Relatório de Análise<br/>de Vegetação Herbácea", cover_title_style))
+
+        # Nome da parcela em destaque
+        story.append(Paragraph(f"<b>{parcela_nome}</b>", cover_subtitle_style))
+
+        story.append(Spacer(1, 2*cm))
+
+        # Informações principais
+        num_especies = len(especies)
+        num_subparcelas = len(analysis_results)
+        data_atual = datetime.now().strftime("%d/%m/%Y")
+
+        info_text = f"""
+        <para alignment="center">
+        <b>Total de Espécies:</b> {num_especies}<br/>
+        <b>Total de Subparcelas:</b> {num_subparcelas}<br/>
+        <b>Data do Relatório:</b> {data_atual}
+        </para>
+        """
+        story.append(Paragraph(info_text, cover_info_style))
+
+        story.append(Spacer(1, 3*cm))
+
+        # Rodapé da capa
+        footer_style = ParagraphStyle(
+            'Footer',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#9E9E9E'),
+            alignment=TA_CENTER,
+            fontName='Helvetica-Oblique'
+        )
+        story.append(Paragraph("Gerado automaticamente pelo Sistema de Análise de Vegetação Herbácea", footer_style))
+
+        story.append(PageBreak())
+
+        # ===== SUMÁRIO / RESUMO EXECUTIVO =====
+        section_title_style = ParagraphStyle(
+            'SectionTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            textColor=colors.HexColor('#1565C0'),
+            spaceAfter=15,
+            spaceBefore=10,
+            fontName='Helvetica-Bold',
+            borderWidth=2,
+            borderColor=colors.HexColor('#1565C0'),
+            borderPadding=8,
+            backColor=colors.HexColor('#E3F2FD')
+        )
+
+        story.append(Paragraph("📊 Resumo Executivo", section_title_style))
         story.append(Spacer(1, 10))
-        
-        especies_data = [['Apelido', 'Gênero', 'Espécie', 'Família', 'Cobertura (%)', 'Ocorrências']]
-        
+
+        # Tabela de estatísticas principais
+        if analytics:
+            analytics_data = [
+                ['Índice Ecológico', 'Valor', 'Interpretação'],
+                ['Diversidade de Shannon (H\')', f"{analytics.get('diversity', 0):.4f}", 'Mede a diversidade considerando riqueza e equitabilidade'],
+                ['Riqueza de Espécies (S)', str(analytics.get('richness', 0)), 'Número total de espécies diferentes encontradas'],
+                ['Equitabilidade de Pielou (J\')', f"{analytics.get('eveness', 0):.4f}", 'Uniformidade da distribuição das espécies (0-1)'],
+                ['Dominância de Simpson (D)', f"{analytics.get('simpson', 0):.4f}", 'Probabilidade de duas amostras serem da mesma espécie']
+            ]
+
+            t = Table(analytics_data, colWidths=[6*cm, 3.5*cm, 8*cm])
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976D2')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (1, -1), 'LEFT'),
+                ('ALIGN', (1, 1), (1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 11),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('TOPPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F5F5F5')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#FAFAFA')]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#BDBDBD')),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
+            ]))
+
+            story.append(t)
+            story.append(Spacer(1, 20))
+
+        # ===== LISTA DE ESPÉCIES =====
+        story.append(PageBreak())
+        story.append(Paragraph("🌿 Espécies Identificadas", section_title_style))
+        story.append(Spacer(1, 10))
+
+        if especies:
+            especies_data = [['Apelido', 'Gênero', 'Espécie', 'Família', 'Cobertura (%)', 'Ocorrências']]
+
+            for esp_nome, esp_info in sorted(especies.items(), key=lambda x: x[1].get('cobertura', 0), reverse=True):
+                especies_data.append([
+                    esp_info.get('apelido_usuario', esp_nome),
+                    esp_info.get('genero', '-'),
+                    esp_info.get('especie', '-'),
+                    esp_info.get('familia', '-'),
+                    f"{esp_info.get('cobertura', 0):.2f}",
+                    str(esp_info.get('ocorrencias', 0))
+                ])
+
+            t_especies = Table(especies_data, colWidths=[3.5*cm, 3*cm, 3*cm, 3.5*cm, 2.5*cm, 2.5*cm])
+            t_especies.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#388E3C')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('TOPPADDING', (0, 0), (-1, 0), 10),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F1F8E9')]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#81C784')),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
+            ]))
+
+            story.append(t_especies)
+
+        # ===== ANÁLISES FITOSSOCIOLÓGICAS =====
+        if analises_avancadas and analises_avancadas.get('ivi'):
+            story.append(PageBreak())
+            story.append(Paragraph("📈 Análises Fitossociológicas", section_title_style))
+            story.append(Spacer(1, 10))
+
+            # IVI - Top 10
+            story.append(Paragraph("<b>Índice de Valor de Importância (IVI) - Top 10 Espécies</b>", styles['Heading2']))
+            story.append(Spacer(1, 5))
+
+            ivi_data = [['Espécie', 'Freq. Rel.', 'Dens. Rel.', 'Dom. Rel.', 'IVI', 'IVI %']]
+            ivi_sorted = sorted(analises_avancadas['ivi'].items(),
+                               key=lambda x: x[1].get('ivi', 0), reverse=True)[:10]
+
+            for especie, dados in ivi_sorted:
+                ivi_data.append([
+                    especie[:20],  # Limitar tamanho do nome
+                    f"{dados.get('frequency_rel', 0):.1f}%",
+                    f"{dados.get('density_rel', 0):.1f}%",
+                    f"{dados.get('dominance_rel', 0):.1f}%",
+                    f"{dados.get('ivi', 0):.2f}",
+                    f"{dados.get('ivi_percent', 0):.1f}%"
+                ])
+
+            t_ivi = Table(ivi_data, colWidths=[5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm])
+            t_ivi.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#00897B')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#E0F2F1')]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#4DB6AC')),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
+            ]))
+
+            story.append(t_ivi)
+
+        # ===== DETALHES POR ESPÉCIE =====
+        story.append(PageBreak())
+        story.append(Paragraph("🔍 Detalhamento por Espécie", section_title_style))
+        story.append(Spacer(1, 10))
+
         for esp_nome, esp_info in sorted(especies.items(), key=lambda x: x[1].get('cobertura', 0), reverse=True):
-            especies_data.append([
-                esp_info.get('apelido_usuario', esp_nome),
-                esp_info.get('genero', '-'),
-                esp_info.get('especie', '-'),
-                esp_info.get('familia', '-'),
-                f"{esp_info.get('cobertura', 0):.2f}",
-                str(esp_info.get('ocorrencias', 0))
-            ])
-        
-        t_especies = Table(especies_data, colWidths=[4*cm, 3*cm, 3*cm, 3*cm, 2.5*cm, 2.5*cm])
-        t_especies.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2196F3')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.lightgrey),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('FONTSIZE', (0, 1), (-1, -1), 9)
-        ]))
-        
-        story.append(t_especies)
-        
-        # Construir PDF
+            # Card de espécie
+            card_style = ParagraphStyle(
+                'SpeciesCard',
+                parent=styles['Normal'],
+                fontSize=10,
+                leftIndent=10,
+                rightIndent=10,
+                spaceAfter=10
+            )
+
+            apelido = esp_info.get('apelido_usuario', esp_nome)
+            genero = esp_info.get('genero', 'Não identificado')
+            especie = esp_info.get('especie', 'sp.')
+            familia = esp_info.get('familia', 'Não identificada')
+            cobertura = esp_info.get('cobertura', 0)
+            ocorrencias = esp_info.get('ocorrencias', 0)
+
+            card_data = [[
+                Paragraph(f"<b>{apelido}</b>", card_style),
+                f"{genero} {especie}",
+                familia,
+                f"{cobertura:.2f}%",
+                f"{ocorrencias}x"
+            ]]
+
+            t_card = Table(card_data, colWidths=[4*cm, 4.5*cm, 3.5*cm, 2.5*cm, 2.5*cm])
+            t_card.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FAFAFA')),
+                ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#BDBDBD')),
+                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8)
+            ]))
+
+            story.append(t_card)
+            story.append(Spacer(1, 3))
+
+        # Construir PDF com compressão
         doc.build(story)
-        
+
         # Retornar PDF
         buffer.seek(0)
-        return send_file(buffer, 
+        return send_file(buffer,
                         mimetype='application/pdf',
                         as_attachment=True,
                         download_name=f'{parcela_nome}_relatorio_completo.pdf')
-    
+
     except Exception as e:
         print(f"Erro ao gerar PDF: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/export_zip', methods=['POST'])

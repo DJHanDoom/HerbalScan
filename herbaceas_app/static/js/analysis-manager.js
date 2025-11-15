@@ -713,10 +713,7 @@ const AnalysisManager = {
                     
                     // Renderizar interface completa
                     displayResults();
-                    
-                    // Atualizar lista de análises salvas
-                    this.listSavedAnalyses();
-                    
+
                     showNotification(`🎉 Projeto completo importado! ${appState.analysisResults.length} subparcelas, ${Object.keys(appState.especies).length} espécies.`, 'success');
                     
                 } else {

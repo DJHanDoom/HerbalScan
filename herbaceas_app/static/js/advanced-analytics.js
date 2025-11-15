@@ -1193,5 +1193,27 @@ const AdvancedAnalytics = {
                 scales: { y: { beginAtZero: true } }
             }
         });
+    },
+
+    // === EXPORT DATA FOR XLSX ===
+    getExportData() {
+        if (!this.data) {
+            console.warn('⚠️ Não há dados para exportar');
+            return {};
+        }
+
+        const frequency = this.calculateFrequency();
+        const density = this.calculateDensity();
+        const dominance = this.calculateDominance();
+        const ivi = this.calculateIVI(frequency, density, dominance);
+        const diversity = this.calculateDiversity();
+
+        return {
+            diversity: diversity,
+            frequency: frequency,
+            density: density,
+            dominance: dominance,
+            ivi: ivi
+        };
     }
 };
