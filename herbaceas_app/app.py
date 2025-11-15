@@ -3661,56 +3661,85 @@ def import_complete_analysis():
                     rel_path = os.path.relpath(os.path.join(root, file), temp_dir)
                     print(f"   - {rel_path}")
 
-            # Ler analysis_data.json
-            json_path = os.path.join(temp_dir, 'analysis_data.json')
-
-            # Se não encontrou, procurar em subdiretórios
-            if not os.path.exists(json_path):
-                print(f"⚠️ analysis_data.json não encontrado em {json_path}")
-                # Procurar recursivamente
+            # Procurar arquivo JSON - pode ser {parcela}_dados.json ou analysis_data.json
+            json_path = None
+            json_patterns = ['*_dados.json', 'analysis_data.json']
+            
+            for pattern in json_patterns:
                 for root, dirs, files in os.walk(temp_dir):
-                    if 'analysis_data.json' in files:
-                        json_path = os.path.join(root, 'analysis_data.json')
-                        print(f"✓ Encontrado em: {json_path}")
+                    for file in files:
+                        if file.endswith('_dados.json') or file == 'analysis_data.json':
+                            json_path = os.path.join(root, file)
+                            print(f"✓ JSON encontrado: {json_path}")
+                            break
+                    if json_path:
                         break
-                else:
-                    return jsonify({'error': 'Arquivo analysis_data.json não encontrado no ZIP'}), 400
+                if json_path:
+                    break
+            
+            if not json_path:
+                return jsonify({'error': 'Arquivo JSON de dados não encontrado no ZIP. Procurado: *_dados.json ou analysis_data.json'}), 400
             
             with open(json_path, 'r', encoding='utf-8') as f:
                 imported_data = json.load(f)
             
+            # Validar estrutura do JSON
+            if 'parcela' not in imported_data:
+                return jsonify({'error': 'JSON inválido: campo "parcela" não encontrado'}), 400
+            
+            # Aceitar tanto formato novo (subparcelas) quanto legado (analysisResults)
+            if 'subparcelas' not in imported_data and 'analysisResults' not in imported_data:
+                return jsonify({'error': 'JSON inválido: nem "subparcelas" nem "analysisResults" encontrado'}), 400
+            
+            # Converter formato legado para novo se necessário
+            if 'analysisResults' in imported_data and 'subparcelas' not in imported_data:
+                print("🔄 Convertendo formato legado (analysisResults) para novo (subparcelas)")
+                subparcelas_dict = {}
+                for idx, result in enumerate(imported_data['analysisResults'], 1):
+                    subparcela_id = f"sub_{idx}"
+                    subparcelas_dict[subparcela_id] = {
+                        'nome': result.get('subparcela', f'Sub {idx}'),
+                        'image_path': result.get('image_path', ''),
+                        'especies': result.get('especies', []),
+                        'cobertura_total': result.get('cobertura_total', 0),
+                        'area_descoberta': result.get('area_descoberta', 0)
+                    }
+                imported_data['subparcelas'] = subparcelas_dict
+                
+                # Converter especies para especies_unificadas se necessário
+                if 'especies' in imported_data and 'especies_unificadas' not in imported_data:
+                    imported_data['especies_unificadas'] = imported_data['especies']
+            
             parcela_name = imported_data['parcela']
+            print(f"✓ Parcela: {parcela_name}")
+            print(f"✓ Subparcelas no JSON: {len(imported_data.get('subparcelas', {}))}")
             
             # Criar diretório de uploads para esta parcela
             upload_dir = os.path.join(app.config['UPLOAD_FOLDER'], parcela_name)
             os.makedirs(upload_dir, exist_ok=True)
             
             # Copiar imagens para local permanente
-            # Procurar diretório 'images' (pode estar no temp_dir ou em subdiretório)
-            images_dir = os.path.join(temp_dir, 'images')
-
-            # Se não encontrou, procurar recursivamente
-            if not os.path.exists(images_dir):
-                for root, dirs, files in os.walk(temp_dir):
-                    if 'images' in dirs:
-                        images_dir = os.path.join(root, 'images')
-                        print(f"✓ Diretório de imagens encontrado em: {images_dir}")
-                        break
-
+            # Procurar QUALQUER diretório com imagens (subparcelas, images, especies, etc)
             image_mapping = {}  # filename -> new_path
-
-            if os.path.exists(images_dir):
-                print(f"📷 Copiando imagens de {images_dir} para {upload_dir}")
-                for filename in os.listdir(images_dir):
-                    src = os.path.join(images_dir, filename)
-                    if os.path.isfile(src):  # Só copiar arquivos, não diretórios
+            images_found = False
+            
+            # Buscar recursivamente por todos os arquivos de imagem
+            print(f"🔍 Procurando imagens em {temp_dir}...")
+            for root, dirs, files in os.walk(temp_dir):
+                for filename in files:
+                    # Verificar se é arquivo de imagem
+                    if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
+                        src = os.path.join(root, filename)
                         dst = os.path.join(upload_dir, filename)
                         shutil.copy2(src, dst)
                         image_mapping[filename] = dst
                         print(f"   ✓ {filename}")
+                        images_found = True
+            
+            if images_found:
                 print(f"✓ {len(image_mapping)} imagens copiadas")
             else:
-                print(f"⚠️ Diretório de imagens não encontrado")
+                print(f"⚠️ Nenhuma imagem encontrada no ZIP")
             
             # Atualizar paths das imagens nas subparcelas
             for subparcela_id, subparcela in imported_data['subparcelas'].items():
@@ -4062,12 +4091,28 @@ def export_zip():
         
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             # 1. Adicionar JSON com todos os dados
+            # Converter analysisResults para formato subparcelas
+            subparcelas_dict = {}
+            for idx, result in enumerate(analysis_results, 1):
+                subparcela_id = f"sub_{idx}"
+                subparcelas_dict[subparcela_id] = {
+                    'nome': result.get('subparcela', f'Sub {idx}'),
+                    'image_path': result.get('image_path', ''),
+                    'especies': result.get('especies', []),
+                    'cobertura_total': result.get('cobertura_total', 0),
+                    'area_descoberta': result.get('area_descoberta', 0)
+                }
+            
             json_data = {
                 'parcela': parcela_nome,
-                'especies': especies,
-                'analysisResults': analysis_results,
+                'especies_unificadas': especies,
+                'subparcelas': subparcelas_dict,
                 'analytics': analytics,
-                'data_exportacao': datetime.now().isoformat()
+                'data_exportacao': datetime.now().isoformat(),
+                'metadata': {
+                    'versao': '2.0',
+                    'total_subparcelas': len(analysis_results)
+                }
             }
             zip_file.writestr(f'{parcela_nome}_dados.json', 
                             json.dumps(json_data, indent=2, ensure_ascii=False))
@@ -4075,15 +4120,27 @@ def export_zip():
             # 2. Adicionar Excel (chamando a função existente)
             # TODO: Implementar geração de Excel com analytics
             
-            # 3. Adicionar fotos das subparcelas
+            # 3. Adicionar fotos das subparcelas (APENAS as da análise atual)
             upload_folder = app.config['UPLOAD_FOLDER']
             parcela_folder = os.path.join(upload_folder, parcela_nome)
             
-            if os.path.exists(parcela_folder):
+            # Criar conjunto com apenas os nomes de arquivo das subparcelas na análise
+            current_images = set()
+            for result in analysis_results:
+                image_path = result.get('image_path', '')
+                if image_path:
+                    filename = os.path.basename(image_path)
+                    current_images.add(filename)
+            
+            print(f"📁 Exportando {len(current_images)} imagens da análise atual")
+            
+            if os.path.exists(parcela_folder) and current_images:
                 for filename in os.listdir(parcela_folder):
-                    if filename.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    # Incluir APENAS as imagens que estão na análise atual
+                    if filename in current_images and filename.lower().endswith(('.jpg', '.jpeg', '.png')):
                         file_path = os.path.join(parcela_folder, filename)
-                        zip_file.write(file_path, f'subparcelas/{filename}')
+                        zip_file.write(file_path, f'images/{filename}')
+                        print(f"   ✓ {filename}")
             
             # 4. Adicionar fotos das espécies
             species_photos_folder = os.path.join(upload_folder, 'species_photos')

@@ -184,6 +184,9 @@ async function checkLoadedAnalysis() {
                 elements.analysisSection.style.display = 'block';
                 elements.speciesSection.style.display = 'block';
                 elements.exportSection.style.display = 'block';
+                if (elements.exportFooter) {
+                    elements.exportFooter.style.display = 'block';
+                }
                 
                 // Mostrar botão de adicionar imagens
                 elements.addImagesBtn.style.display = 'inline-block';
@@ -3656,7 +3659,12 @@ function addViewerButtons() {
 
 // Nova Análise - Limpa todo o sistema
 function startNewAnalysis() {
-    if (!confirm('⚠️ Tem certeza que deseja iniciar uma nova análise?\n\nTodos os dados da análise atual serão perdidos (espécies, subparcelas, configurações).\n\nRecomendamos exportar um ZIP antes de continuar.')) {
+    if (!confirm('⚠️ TEM CERTEZA que deseja iniciar uma nova análise?\n\n🚨 ATENÇÃO: Todos os dados serão PERDIDOS!\n- Espécies identificadas\n- Subparcelas analisadas\n- Configurações e estatísticas\n\n💾 IMPORTANTE: Gere um backup ZIP AGORA se quiser preservar esta análise!\n\nClique em CANCELAR para voltar e gerar o backup.\nClique em OK apenas se tiver certeza.')) {
+        return;
+    }
+    
+    // Segunda confirmação
+    if (!confirm('❗ Última chance!\n\nVocê gerou o backup ZIP?\n\nClique OK para APAGAR TUDO e começar do zero.')) {
         return;
     }
     
@@ -3697,9 +3705,7 @@ function startNewAnalysis() {
         if (elements.analyticsSection) {
             elements.analyticsSection.style.display = 'none';
         }
-        if (elements.exportFooter) {
-            elements.exportFooter.style.display = 'none';
-        }
+        // Footer de exportação/importação permanece sempre visível
         elements.addImagesBtn.style.display = 'none';
         elements.manualModeBtn.style.display = 'none';
         
@@ -3756,12 +3762,12 @@ function initializeCoverageDrawer() {
 
 // Função global para desenhar área de cobertura para uma espécie
 function startDrawCoverageForSpecies(speciesIndex) {
-    CoverageDrawer.startDrawSpecies(speciesIndex, 'rectangle');
+    CoverageDrawer.startDrawSpecies(speciesIndex); // Sem ferramenta padrão
 }
 
 // Função para começar a desenhar a área da subparcela
 function startDrawSubparcelaArea() {
-    CoverageDrawer.startDrawSubparcela('rectangle');
+    CoverageDrawer.startDrawSubparcela(); // Sem ferramenta padrão
 }
 
 function importAIAreas() {
@@ -4343,6 +4349,6 @@ window.updateSpeciesCoverageInTables = function(subparcelaId, speciesIndex, perc
         console.log('✅ Análises avançadas atualizadas');
     }
 
-    // Persistir no backend
-    saveAnalysisResults();
+    // Persistência já é feita automaticamente pelo backend via persistSpeciesArea
+    console.log('💾 Dados já persistidos automaticamente no backend');
 };
