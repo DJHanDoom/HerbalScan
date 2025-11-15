@@ -3900,7 +3900,7 @@ def import_complete_analysis():
             # Procurar QUALQUER diretório com imagens (subparcelas, images, especies, etc)
             image_mapping = {}  # filename -> new_path
             images_found = False
-            
+
             # Buscar recursivamente por todos os arquivos de imagem
             print(f"🔍 Procurando imagens em {temp_dir}...")
             for root, dirs, files in os.walk(temp_dir):
@@ -3909,28 +3909,52 @@ def import_complete_analysis():
                     if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
                         src = os.path.join(root, filename)
                         dst = os.path.join(upload_dir, filename)
-                        shutil.copy2(src, dst)
-                        image_mapping[filename] = dst
-                        print(f"   ✓ {filename}")
-                        images_found = True
-            
+
+                        try:
+                            shutil.copy2(src, dst)
+                            # Verificar se o arquivo foi realmente copiado
+                            if os.path.exists(dst):
+                                file_size = os.path.getsize(dst)
+                                image_mapping[filename] = dst
+                                print(f"   ✓ {filename} ({file_size} bytes) -> {dst}")
+                                images_found = True
+                            else:
+                                print(f"   ✗ Falha ao copiar {filename}")
+                        except Exception as copy_error:
+                            print(f"   ✗ Erro ao copiar {filename}: {copy_error}")
+
             if images_found:
-                print(f"✓ {len(image_mapping)} imagens copiadas")
+                print(f"✓ {len(image_mapping)} imagens copiadas para {upload_dir}")
+                # Verificar se o diretório está acessível via web
+                rel_check = upload_dir.replace(app.config['UPLOAD_FOLDER'], '/static/uploads')
+                print(f"   Caminho web: {rel_check}")
             else:
                 print(f"⚠️ Nenhuma imagem encontrada no ZIP")
             
             # Atualizar paths das imagens nas subparcelas com URLs válidas
+            print(f"\n🔗 Atualizando URLs das imagens...")
             for subparcela_id, subparcela in imported_data['subparcelas'].items():
                 old_path = subparcela.get('image_path', '')
-                filename = os.path.basename(old_path)
-                if filename in image_mapping:
-                    # Converter caminho absoluto para URL relativa
-                    abs_path = image_mapping[filename]
-                    # Caminho relativo: /static/uploads/{parcela_nome}/{filename}
-                    rel_url = f'/static/uploads/{parcela_name}/{filename}'
-                    subparcela['image_path'] = rel_url
-                    # Também atualizar o mapping para usar URL
-                    image_mapping[filename] = rel_url
+                if old_path:
+                    filename = os.path.basename(old_path)
+                    print(f"   Subparcela {subparcela_id}: {filename}")
+
+                    if filename in image_mapping:
+                        # Caminho relativo: /static/uploads/{parcela_nome}/{filename}
+                        rel_url = f'/static/uploads/{parcela_name}/{filename}'
+                        subparcela['image_path'] = rel_url
+                        print(f"   ✓ URL atualizada: {rel_url}")
+                        # Também atualizar o mapping para usar URL
+                        image_mapping[filename] = rel_url
+                    else:
+                        print(f"   ⚠️ Imagem não encontrada no mapping: {filename}")
+                        # Tentar encontrar qualquer imagem com nome similar
+                        for mapped_filename in image_mapping.keys():
+                            if mapped_filename.lower() == filename.lower():
+                                rel_url = f'/static/uploads/{parcela_name}/{mapped_filename}'
+                                subparcela['image_path'] = rel_url
+                                print(f"   ✓ URL atualizada (case-insensitive): {rel_url}")
+                                break
             
             # Reconstruir lista de images com estrutura correta
             images_list = []
@@ -3963,21 +3987,24 @@ def import_complete_analysis():
             
             # Preparar dados de resposta completos para restaurar a interface
             analysis_results = []
+            print(f"\n📤 Preparando resposta para frontend...")
             for subparcela_id, subparcela_data in sorted(imported_data['subparcelas'].items()):
-                analysis_results.append({
+                result_data = {
                     'subparcela': subparcela_data.get('nome', f'Sub {len(analysis_results) + 1}'),
                     'image_path': subparcela_data.get('image_path', ''),
                     'especies': subparcela_data.get('especies', []),
                     'cobertura_total': subparcela_data.get('cobertura_total', 0),
                     'area_descoberta': subparcela_data.get('area_descoberta', 0)
-                })
-            
+                }
+                analysis_results.append(result_data)
+                print(f"   {result_data['subparcela']}: {result_data['image_path']}")
+
             subparcelas_list = [
                 {'name': f"Subparcela {i+1}", 'path': r['image_path']}
                 for i, r in enumerate(analysis_results)
             ]
-            
-            return jsonify({
+
+            response_data = {
                 'success': True,
                 'message': f'Análise "{parcela_name}" importada com sucesso',
                 'parcela': parcela_name,
@@ -3985,7 +4012,15 @@ def import_complete_analysis():
                 'analysis_results': analysis_results,
                 'especies': imported_data.get('especies_unificadas', {}),
                 'subparcelas': subparcelas_list
-            })
+            }
+
+            print(f"\n✅ Importação concluída com sucesso!")
+            print(f"   Parcela: {parcela_name}")
+            print(f"   Subparcelas: {len(analysis_results)}")
+            print(f"   Espécies: {len(response_data['especies'])}")
+            print(f"   Imagens com URL: {sum(1 for r in analysis_results if r['image_path'])}")
+
+            return jsonify(response_data)
             
         except Exception as e:
             # Limpar em caso de erro
