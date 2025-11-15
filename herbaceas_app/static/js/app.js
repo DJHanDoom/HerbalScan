@@ -184,6 +184,9 @@ async function checkLoadedAnalysis() {
                 elements.analysisSection.style.display = 'block';
                 elements.speciesSection.style.display = 'block';
                 elements.exportSection.style.display = 'block';
+                if (elements.exportFooter) {
+                    elements.exportFooter.style.display = 'block';
+                }
                 
                 // Mostrar botão de adicionar imagens
                 elements.addImagesBtn.style.display = 'inline-block';
@@ -3656,7 +3659,12 @@ function addViewerButtons() {
 
 // Nova Análise - Limpa todo o sistema
 function startNewAnalysis() {
-    if (!confirm('⚠️ Tem certeza que deseja iniciar uma nova análise?\n\nTodos os dados da análise atual serão perdidos (espécies, subparcelas, configurações).\n\nRecomendamos exportar um ZIP antes de continuar.')) {
+    if (!confirm('⚠️ TEM CERTEZA que deseja iniciar uma nova análise?\n\n🚨 ATENÇÃO: Todos os dados serão PERDIDOS!\n- Espécies identificadas\n- Subparcelas analisadas\n- Configurações e estatísticas\n\n💾 IMPORTANTE: Gere um backup ZIP AGORA se quiser preservar esta análise!\n\nClique em CANCELAR para voltar e gerar o backup.\nClique em OK apenas se tiver certeza.')) {
+        return;
+    }
+    
+    // Segunda confirmação
+    if (!confirm('❗ Última chance!\n\nVocê gerou o backup ZIP?\n\nClique OK para APAGAR TUDO e começar do zero.')) {
         return;
     }
     
@@ -3697,9 +3705,7 @@ function startNewAnalysis() {
         if (elements.analyticsSection) {
             elements.analyticsSection.style.display = 'none';
         }
-        if (elements.exportFooter) {
-            elements.exportFooter.style.display = 'none';
-        }
+        // Footer de exportação/importação permanece sempre visível
         elements.addImagesBtn.style.display = 'none';
         elements.manualModeBtn.style.display = 'none';
         
@@ -3756,12 +3762,12 @@ function initializeCoverageDrawer() {
 
 // Função global para desenhar área de cobertura para uma espécie
 function startDrawCoverageForSpecies(speciesIndex) {
-    CoverageDrawer.startDrawSpecies(speciesIndex, 'rectangle');
+    CoverageDrawer.startDrawSpecies(speciesIndex); // Sem ferramenta padrão
 }
 
 // Função para começar a desenhar a área da subparcela
 function startDrawSubparcelaArea() {
-    CoverageDrawer.startDrawSubparcela('rectangle');
+    CoverageDrawer.startDrawSubparcela(); // Sem ferramenta padrão
 }
 
 function importAIAreas() {
@@ -4049,175 +4055,66 @@ window.selectShape = selectShape;
 async function exportToPDF() {
     const btn = elements.exportPdfBtn;
     const originalText = btn.textContent;
-    
+
     try {
         btn.disabled = true;
-        btn.textContent = '🔄 Gerando PDF completo...';
-        
-        showNotification('📸 Capturando screenshots... Isso pode levar alguns momentos.', 'info');
-        
-        const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF('p', 'mm', 'a4');
-        const pageWidth = pdf.internal.pageSize.getWidth();
-        const pageHeight = pdf.internal.pageSize.getHeight();
-        let yOffset = 10;
-        
-        // Função auxiliar para adicionar imagem ao PDF
-        const addImageToPDF = async (element, title) => {
+        btn.textContent = '🔄 Gerando PDF profissional...';
+
+        showNotification('📄 Gerando relatório PDF otimizado...', 'info');
+
+        // Coletar dados de análises avançadas
+        let analises_avancadas = {};
+        if (typeof AdvancedAnalytics !== 'undefined' && typeof AdvancedAnalytics.getExportData === 'function') {
             try {
-                const canvas = await html2canvas(element, {
-                    scale: 2,
-                    useCORS: true,
-                    logging: false,
-                    backgroundColor: '#ffffff'
-                });
-                
-                const imgData = canvas.toDataURL('image/png');
-                const imgWidth = pageWidth - 20;
-                const imgHeight = (canvas.height * imgWidth) / canvas.width;
-                
-                // Adicionar nova página se necessário
-                if (yOffset + imgHeight > pageHeight - 10) {
-                    pdf.addPage();
-                    yOffset = 10;
-                }
-                
-                // Adicionar título
-                if (title) {
-                    pdf.setFontSize(12);
-                    pdf.setFont(undefined, 'bold');
-                    pdf.text(title, 10, yOffset);
-                    yOffset += 7;
-                }
-                
-                pdf.addImage(imgData, 'PNG', 10, yOffset, imgWidth, imgHeight);
-                yOffset += imgHeight + 10;
-                
-                return true;
-            } catch (error) {
-                console.error('Erro ao capturar:', title, error);
-                return false;
+                analises_avancadas = AdvancedAnalytics.getExportData();
+                console.log('✅ Dados de análises avançadas coletados para PDF');
+            } catch (e) {
+                console.warn('⚠️ Não foi possível coletar análises avançadas:', e.message);
             }
+        }
+
+        // Preparar dados para enviar ao backend
+        const pdfData = {
+            parcela: appState.parcelaNome,
+            especies: appState.especies || {},
+            analytics: {
+                diversity: analises_avancadas.diversity?.shannon || 0,
+                richness: analises_avancadas.diversity?.richness || 0,
+                eveness: analises_avancadas.diversity?.evenness || 0,
+                simpson: analises_avancadas.diversity?.simpson || 0
+            },
+            analises_avancadas: analises_avancadas,
+            analysisResults: appState.analysisResults || []
         };
-        
-        // 1. CAPA
-        pdf.setFontSize(24);
-        pdf.setFont(undefined, 'bold');
-        pdf.text('🌿 Relatório de Análise', pageWidth / 2, 30, { align: 'center' });
-        pdf.setFontSize(18);
-        pdf.text(`${appState.parcelaNome}`, pageWidth / 2, 45, { align: 'center' });
-        
-        pdf.setFontSize(12);
-        pdf.setFont(undefined, 'normal');
-        const now = new Date();
-        const dateStr = now.toLocaleString('pt-BR');
-        pdf.text(`Gerado em: ${dateStr}`, pageWidth / 2, 60, { align: 'center' });
-        
-        pdf.setFontSize(10);
-        pdf.text(`Total de Subparcelas: ${appState.analysisResults.length}`, pageWidth / 2, 75, { align: 'center' });
-        pdf.text(`Total de Espécies: ${Object.keys(appState.especies).length}`, pageWidth / 2, 82, { align: 'center' });
-        
-        pdf.addPage();
-        yOffset = 10;
-        
-        // 2. LISTA DE ESPÉCIES
-        btn.textContent = '📸 Capturando lista de espécies...';
-        const speciesSection = document.getElementById('species-section');
-        if (speciesSection && speciesSection.style.display !== 'none') {
-            await addImageToPDF(speciesSection, 'Lista de Espécies Identificadas');
+
+        console.log('📦 Enviando dados para gerar PDF:', pdfData);
+
+        // Enviar para backend
+        const response = await fetch('/export_pdf', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(pdfData)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Erro HTTP ${response.status}: ${await response.text()}`);
         }
-        
-        // 3. ANÁLISES AVANÇADAS (todas as abas)
-        btn.textContent = '📸 Capturando análises avançadas...';
-        const analyticsSection = document.getElementById('advanced-analytics-section');
-        if (analyticsSection && analyticsSection.style.display !== 'none') {
-            // Capturar cada aba
-            const tabs = ['ecological', 'phytosociological', 'monitoring', 'comparative', 'accumulated'];
-            const tabNames = ['Análises Ecológicas', 'Análises Fitossociológicas', 'Monitoramento', 'Análises Comparativas', 'Dados Acumulados'];
-            
-            for (let i = 0; i < tabs.length; i++) {
-                const tabContent = document.getElementById(`tab-${tabs[i]}`);
-                if (tabContent) {
-                    // Tornar aba visível temporariamente
-                    const wasActive = tabContent.classList.contains('active');
-                    tabContent.classList.add('active');
-                    tabContent.style.display = 'block';
-                    
-                    await new Promise(resolve => setTimeout(resolve, 300)); // Aguardar renderização
-                    await addImageToPDF(tabContent, tabNames[i]);
-                    
-                    if (!wasActive) {
-                        tabContent.classList.remove('active');
-                        tabContent.style.display = 'none';
-                    }
-                }
-            }
-        }
-        
-        // 4. MODAIS DE CADA ESPÉCIE (dashboard completo)
-        btn.textContent = '📸 Capturando detalhes das espécies...';
-        const especies = Object.keys(appState.especies);
-        for (let i = 0; i < especies.length; i++) {
-            const apelido = especies[i];
-            btn.textContent = `📸 Espécie ${i + 1}/${especies.length}: ${apelido}...`;
-            
-            // Abrir modal
-            SpeciesDetailsModal.open(apelido);
-            await new Promise(resolve => setTimeout(resolve, 500)); // Aguardar abertura
-            
-            const modal = document.getElementById('species-details-modal');
-            if (modal && modal.style.display !== 'none') {
-                // Capturar cada aba do modal
-                const modalTabs = ['dashboard', 'comparison', 'timeline', 'photos'];
-                const modalTabNames = ['Dashboard', 'Comparação', 'Linha do Tempo', 'Galeria de Fotos'];
-                
-                for (let j = 0; j < modalTabs.length; j++) {
-                    const tabBtn = modal.querySelector(`[data-modal-tab="${modalTabs[j]}"]`);
-                    if (tabBtn) {
-                        tabBtn.click();
-                        await new Promise(resolve => setTimeout(resolve, 300));
-                        
-                        const modalContent = modal.querySelector('.species-modal-content');
-                        if (modalContent) {
-                            await addImageToPDF(modalContent, `${apelido} - ${modalTabNames[j]}`);
-                        }
-                    }
-                }
-                
-                SpeciesDetailsModal.close();
-                await new Promise(resolve => setTimeout(resolve, 200));
-            }
-        }
-        
-        // 5. MODAIS DE CADA SUBPARCELA (ver e editar)
-        btn.textContent = '📸 Capturando subparcelas...';
-        for (let i = 0; i < appState.analysisResults.length; i++) {
-            btn.textContent = `📸 Subparcela ${i + 1}/${appState.analysisResults.length}...`;
-            
-            // Simular clique no botão "Ver e Editar"
-            const viewBtn = document.querySelector(`[onclick="viewResult(${i})"]`);
-            if (viewBtn) {
-                viewBtn.click();
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-                const editPanel = document.getElementById('edit-panel');
-                if (editPanel && editPanel.style.display !== 'none') {
-                    await addImageToPDF(editPanel, `Subparcela ${i + 1} - Detalhes`);
-                    
-                    // Fechar painel
-                    const closeBtn = editPanel.querySelector('.close-btn');
-                    if (closeBtn) closeBtn.click();
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                }
-            }
-        }
-        
-        // Salvar PDF
-        btn.textContent = '💾 Salvando PDF...';
-        pdf.save(`${appState.parcelaNome}_relatorio_completo_${Date.now()}.pdf`);
-        
-        showNotification('✅ PDF completo exportado com sucesso!', 'success');
-        
+
+        // Download do arquivo
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${appState.parcelaNome}_relatorio_completo.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        showNotification('✅ PDF profissional exportado com sucesso!', 'success');
+
     } catch (error) {
         console.error('Erro ao exportar PDF:', error);
         showNotification('❌ Erro ao exportar PDF: ' + error.message, 'error');
@@ -4343,6 +4240,6 @@ window.updateSpeciesCoverageInTables = function(subparcelaId, speciesIndex, perc
         console.log('✅ Análises avançadas atualizadas');
     }
 
-    // Persistir no backend
-    saveAnalysisResults();
+    // Persistência já é feita automaticamente pelo backend via persistSpeciesArea
+    console.log('💾 Dados já persistidos automaticamente no backend');
 };

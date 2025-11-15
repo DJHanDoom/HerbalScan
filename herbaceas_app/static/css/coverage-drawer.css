@@ -358,3 +358,30 @@
         width: 100%;
     }
 }
+
+/* Rótulos de polígonos */
+.polygon-label {
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s ease;
+}
+
+.polygon-label:hover rect {
+    fill-opacity: 1;
+    filter: brightness(1.2);
+}
+
+.polygon-label:hover text {
+    font-size: 24px;
+    font-weight: 900;
+}
+
+.polygon-label text {
+    pointer-events: none;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+
+.polygon-label rect {
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+}
+

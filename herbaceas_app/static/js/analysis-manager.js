@@ -704,16 +704,16 @@ const AnalysisManager = {
                     // Mostrar todas as seções
                     elements.analysisSection.style.display = 'block';
                     elements.speciesSection.style.display = 'block';
-                    elements.visualizationSection.style.display = 'block';
-                    elements.analyticsSection.style.display = 'block';
-                    elements.exportFooter.style.display = 'block';
+                    if (elements.analyticsSection) {
+                        elements.analyticsSection.style.display = 'block';
+                    }
+                    if (elements.exportFooter) {
+                        elements.exportFooter.style.display = 'block';
+                    }
                     
                     // Renderizar interface completa
                     displayResults();
-                    
-                    // Atualizar lista de análises salvas
-                    this.listSavedAnalyses();
-                    
+
                     showNotification(`🎉 Projeto completo importado! ${appState.analysisResults.length} subparcelas, ${Object.keys(appState.especies).length} espécies.`, 'success');
                     
                 } else {
