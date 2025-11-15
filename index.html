@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Sistema web para análise automatizada de cobertura vegetal em quadrados de 1x1m utilizando Inteligência Artificial">
+    <title>HerbalScan - Sistema de Análise de Vegetação Herbácea</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <nav class="container">
+            <div class="logo">
+                <h1>🌿 HerbalScan</h1>
+            </div>
+            <ul class="nav-links">
+                <li><a href="#features">Funcionalidades</a></li>
+                <li><a href="#models">Modelos IA</a></li>
+                <li><a href="#installation">Instalação</a></li>
+                <li><a href="https://github.com/DJHanDoom/HerbalScan" target="_blank">GitHub</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h2>Sistema de Análise de Vegetação Herbácea</h2>
+                <p class="subtitle">Análise automatizada de cobertura vegetal em quadrados de 1x1m utilizando Inteligência Artificial</p>
+                <div class="hero-buttons">
+                    <a href="https://github.com/DJHanDoom/HerbalScan" class="btn btn-primary" target="_blank">Ver no GitHub</a>
+                    <a href="#installation" class="btn btn-secondary">Começar</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="features" class="features">
+        <div class="container">
+            <h2>Funcionalidades Principais</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">📤</div>
+                    <h3>Upload e Organização</h3>
+                    <ul>
+                        <li>Upload de múltiplas imagens</li>
+                        <li>Preview antes do envio</li>
+                        <li>Organização automática por parcela</li>
+                    </ul>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <h3>Análise com IA</h3>
+                    <ul>
+                        <li>Suporte a múltiplos modelos de IA</li>
+                        <li>Detecção de formas vegetais</li>
+                        <li>Cálculo de métricas automatizado</li>
+                    </ul>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔧</div>
+                    <h3>Gerenciamento de Espécies</h3>
+                    <ul>
+                        <li>Edição individual de espécies</li>
+                        <li>Unificação e subdivisão</li>
+                        <li>Adição e remoção manual</li>
+                    </ul>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Visualização e Exportação</h3>
+                    <ul>
+                        <li>Cards visuais por subparcela</li>
+                        <li>Resumo estatístico</li>
+                        <li>Exportação para Excel</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="models" class="models">
+        <div class="container">
+            <h2>Modelos de IA Suportados</h2>
+            <div class="models-container">
+                <div class="models-section">
+                    <h3>Modelos Premium</h3>
+                    <div class="model-list">
+                        <div class="model-item">
+                            <span class="model-icon">🤖</span>
+                            <div>
+                                <strong>Claude 3.5 Sonnet</strong>
+                                <p>Excelente para análise detalhada</p>
+                            </div>
+                        </div>
+                        <div class="model-item">
+                            <span class="model-icon">🧠</span>
+                            <div>
+                                <strong>GPT-4 Vision</strong>
+                                <p>Ótimo reconhecimento de padrões</p>
+                            </div>
+                        </div>
+                        <div class="model-item">
+                            <span class="model-icon">✨</span>
+                            <div>
+                                <strong>Gemini 1.5 Pro</strong>
+                                <p>Rápido e eficiente</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="models-section">
+                    <h3>Modelos Gratuitos</h3>
+                    <div class="model-list">
+                        <div class="model-item">
+                            <span class="model-icon">🚀</span>
+                            <div>
+                                <strong>DeepSeek Chat</strong>
+                                <p>Totalmente gratuito (US$ 0.14/1M tokens)</p>
+                            </div>
+                        </div>
+                        <div class="model-item">
+                            <span class="model-icon">🌐</span>
+                            <div>
+                                <strong>Alibaba Qwen VL</strong>
+                                <p>Free tier com limites generosos</p>
+                            </div>
+                        </div>
+                        <div class="model-item">
+                            <span class="model-icon">🤗</span>
+                            <div>
+                                <strong>HuggingFace LLaVA</strong>
+                                <p>100% open source e gratuito</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="vegetation-types">
+        <div class="container">
+            <h2>Formas Vegetais Detectadas</h2>
+            <div class="types-grid">
+                <div class="type-badge">🌾 Gramíneas</div>
+                <div class="type-badge">🌿 Leguminosas</div>
+                <div class="type-badge">🍃 Herbáceas de folha larga</div>
+                <div class="type-badge">🌱 Arbustos jovens</div>
+                <div class="type-badge">🎋 Lianas e trepadeiras</div>
+                <div class="type-badge">🌳 Plântulas arbóreas</div>
+                <div class="type-badge">🌺 Bromélias</div>
+                <div class="type-badge">🌵 Cactáceas</div>
+                <div class="type-badge">🪴 Pteridófitas (samambaias)</div>
+            </div>
+        </div>
+    </section>
+
+    <section id="installation" class="installation">
+        <div class="container">
+            <h2>Como Instalar</h2>
+            <div class="install-steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>Clone o repositório</h3>
+                        <pre><code>git clone https://github.com/DJHanDoom/HerbalScan.git
+cd HerbalScan</code></pre>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>Instale as dependências</h3>
+                        <pre><code>pip install -r requirements.txt</code></pre>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>Configure as API keys</h3>
+                        <p>Configure suas API keys via variáveis de ambiente ou diretamente na interface web</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <h3>Execute a aplicação</h3>
+                        <pre><code>python app.py</code></pre>
+                        <p>Acesse em <strong>http://localhost:5000</strong></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="tech-stack">
+        <div class="container">
+            <h2>Tecnologias Utilizadas</h2>
+            <div class="tech-grid">
+                <div class="tech-item">
+                    <strong>Backend</strong>
+                    <p>Flask (Python)</p>
+                </div>
+                <div class="tech-item">
+                    <strong>IA</strong>
+                    <p>Claude, GPT-4, Gemini</p>
+                </div>
+                <div class="tech-item">
+                    <strong>Frontend</strong>
+                    <p>HTML5, CSS3, JavaScript</p>
+                </div>
+                <div class="tech-item">
+                    <strong>Exportação</strong>
+                    <p>OpenPyXL</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2024 HerbalScan - Sistema de Análise de Vegetação Herbácea</p>
+            <p>Uso acadêmico e científico</p>
+            <p>
+                <a href="https://github.com/DJHanDoom/HerbalScan" target="_blank">GitHub</a> |
+                <a href="https://github.com/DJHanDoom/HerbalScan/blob/main/README.md" target="_blank">Documentação</a>
+            </p>
+        </div>
+    </footer>
+</body>
+</html>

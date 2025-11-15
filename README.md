@@ -2,6 +2,12 @@
 
 Sistema web para análise automatizada de cobertura vegetal em quadrados de 1x1m utilizando Inteligência Artificial (Claude).
 
+## 🌐 Site do Projeto
+
+Visite a página do projeto: **[https://djhandoom.github.io/HerbalScan/](https://djhandoom.github.io/HerbalScan/)**
+
+> **Nota:** O site GitHub Pages serve como uma landing page com documentação. Para executar o sistema completo com análise de IA, você precisa instalar e executar localmente conforme as instruções abaixo.
+
 ## Funcionalidades
 
 ### 1. Upload e Organização
