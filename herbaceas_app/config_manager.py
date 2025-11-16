@@ -3,6 +3,7 @@ Gerenciador de configuração para o aplicativo HerbalScan.
 Cria e gerencia o arquivo .env automaticamente.
 """
 import os
+import sys
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -92,14 +93,14 @@ class ConfigWizard:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("HerbalScan - Configuração Inicial")
-        self.root.geometry("700x650")
-        self.root.resizable(False, False)
+        self.root.geometry("750x700")
+        self.root.resizable(True, True)
 
         # Centralizar janela
         self.root.update_idletasks()
-        x = (self.root.winfo_screenwidth() // 2) - (700 // 2)
-        y = (self.root.winfo_screenheight() // 2) - (650 // 2)
-        self.root.geometry(f"700x650+{x}+{y}")
+        x = (self.root.winfo_screenwidth() // 2) - (750 // 2)
+        y = (self.root.winfo_screenheight() // 2) - (700 // 2)
+        self.root.geometry(f"750x700+{x}+{y}")
 
         self.config = load_env()
         self.entries = {}
@@ -161,7 +162,7 @@ class ConfigWizard:
         keys_frame.pack(fill='both', expand=True)
 
         # Criar canvas com scrollbar
-        canvas = tk.Canvas(keys_frame, height=250)
+        canvas = tk.Canvas(keys_frame, height=200)
         scrollbar = ttk.Scrollbar(keys_frame, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
 
@@ -207,9 +208,12 @@ class ConfigWizard:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        # Separator antes dos botões
+        ttk.Separator(self.root, orient='horizontal').pack(fill='x', padx=20, pady=10)
+
         # Buttons
         button_frame = ttk.Frame(self.root)
-        button_frame.pack(fill='x', padx=20, pady=(0, 20))
+        button_frame.pack(fill='x', padx=20, pady=15, side='bottom')
 
         ttk.Button(
             button_frame,
@@ -271,8 +275,14 @@ def ensure_config():
     Se não existir, abre o wizard de configuração.
     """
     if not env_exists():
-        wizard = ConfigWizard()
-        wizard.run()
+        try:
+            wizard = ConfigWizard()
+            wizard.run()
+        except Exception as e:
+            # Se falhar ao criar wizard, criar .env básico
+            print(f"Aviso: Não foi possível abrir wizard de configuração: {e}")
+            print("Criando configuração padrão...")
+            save_env({'DEFAULT_AI': 'gemini'})
 
     # Carregar as variáveis de ambiente
     env_vars = load_env()

@@ -16,12 +16,23 @@ from prompt_templates import build_prompt, get_template_list, get_template_param
 
 # Garantir que a configuração existe antes de iniciar
 try:
+    print("Iniciando HerbalScan...")
+    print("Verificando configuração...")
     from config_manager import ensure_config
     ensure_config()
-except ImportError:
+    print("Configuração OK!")
+except ImportError as e:
+    print(f"Aviso: config_manager não disponível: {e}")
     # Se config_manager não estiver disponível, carregar .env manualmente
-    from dotenv import load_dotenv
-    load_dotenv()
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        print("Aviso: python-dotenv não disponível, continuando sem .env")
+except Exception as e:
+    print(f"Erro ao carregar configuração: {e}")
+    import traceback
+    traceback.print_exc()
 
 # Importações condicionais para diferentes IAs
 try:
@@ -4732,25 +4743,37 @@ if __name__ == '__main__':
     # Detectar se está rodando como executável
     is_frozen = getattr(sys, 'frozen', False)
 
-    if is_frozen:
-        # Modo produção (executável)
-        def open_browser():
-            webbrowser.open('http://127.0.0.1:5000')
+    try:
+        if is_frozen:
+            # Modo produção (executável)
+            def open_browser():
+                webbrowser.open('http://127.0.0.1:5000')
 
-        # Abrir navegador após 1.5 segundos
-        Timer(1.5, open_browser).start()
+            # Abrir navegador após 1.5 segundos
+            Timer(1.5, open_browser).start()
 
-        print("=" * 60)
-        print("🌿 HerbalScan - Sistema de Análise de Cobertura")
-        print("=" * 60)
-        print("\nServidor iniciado com sucesso!")
-        print("📍 Endereço: http://127.0.0.1:5000")
-        print("\n⚡ O navegador será aberto automaticamente...")
-        print("\n⚠️  NÃO FECHE ESTA JANELA enquanto usar o aplicativo!")
-        print("=" * 60)
-        print()
+            print("=" * 60)
+            print("🌿 HerbalScan - Sistema de Análise de Cobertura")
+            print("=" * 60)
+            print("\nServidor iniciado com sucesso!")
+            print("📍 Endereço: http://127.0.0.1:5000")
+            print("\n⚡ O navegador será aberto automaticamente...")
+            print("\n⚠️  NÃO FECHE ESTA JANELA enquanto usar o aplicativo!")
+            print("=" * 60)
+            print()
 
-        app.run(debug=False, host='127.0.0.1', port=5000, use_reloader=False)
-    else:
-        # Modo desenvolvimento
-        app.run(debug=True, host='0.0.0.0', port=5000)
+            app.run(debug=False, host='127.0.0.1', port=5000, use_reloader=False)
+        else:
+            # Modo desenvolvimento
+            app.run(debug=True, host='0.0.0.0', port=5000)
+    except Exception as e:
+        print("\n" + "=" * 60)
+        print("ERRO FATAL!")
+        print("=" * 60)
+        print(f"\n{e}\n")
+        import traceback
+        traceback.print_exc()
+        print("\n" + "=" * 60)
+        print("Pressione ENTER para fechar...")
+        input()
+        sys.exit(1)
