@@ -14,6 +14,15 @@ from pathlib import Path
 import time
 from prompt_templates import build_prompt, get_template_list, get_template_params, PROMPT_TEMPLATES
 
+# Garantir que a configuração existe antes de iniciar
+try:
+    from config_manager import ensure_config
+    ensure_config()
+except ImportError:
+    # Se config_manager não estiver disponível, carregar .env manualmente
+    from dotenv import load_dotenv
+    load_dotenv()
+
 # Importações condicionais para diferentes IAs
 try:
     import anthropic
@@ -496,7 +505,7 @@ def analyze_image_with_claude(image_path, api_key=None, model_version=None, temp
             ]
         }
 
-def analyze_image_with_gpt4(image_path, api_key=None, template_config=None):
+def analyze_image_with_gpt4(image_path, api_key=None, model_version=None, template_config=None):
     """Analisa uma imagem usando GPT-4 Vision"""
     try:
         key = api_key or os.environ.get("OPENAI_API_KEY")
@@ -522,15 +531,25 @@ def analyze_image_with_gpt4(image_path, api_key=None, template_config=None):
         ext = image_path.split('.')[-1].lower()
         media_type = f"image/{ext}" if ext != 'jpg' else "image/jpeg"
 
-        # Tentar múltiplos modelos GPT-4 com suporte a visão
-        models_to_try = ["gpt-4o", "gpt-4-turbo", "gpt-4-vision-preview"]
+        # Usar modelo selecionado ou padrão
+        model_name = model_version or "gpt-4o"
+
+        # Fallback: se o modelo selecionado falhar, tentar outros
+        models_to_try = [model_name]
+        if model_name != "gpt-4o":
+            models_to_try.append("gpt-4o")
+        if model_name != "gpt-4o-mini":
+            models_to_try.append("gpt-4o-mini")
+        if "gpt-4-turbo" not in model_name:
+            models_to_try.append("gpt-4-turbo-2024-04-09")
+
         last_error = None
 
-        for model_name in models_to_try:
+        for current_model in models_to_try:
             try:
-                print(f"Tentando modelo: {model_name}")
+                print(f"Tentando modelo: {current_model}")
                 response = client.chat.completions.create(
-                    model=model_name,
+                    model=current_model,
                     messages=[
                         {
                             "role": "user",
@@ -550,10 +569,10 @@ def analyze_image_with_gpt4(image_path, api_key=None, template_config=None):
                     ],
                     max_tokens=2000
                 )
-                print(f"✓ Sucesso com modelo: {model_name}")
+                print(f"✓ Sucesso com modelo: {current_model}")
                 break  # Sucesso, sair do loop
             except Exception as model_error:
-                print(f"✗ Falha com {model_name}: {str(model_error)}")
+                print(f"✗ Falha com {current_model}: {str(model_error)}")
                 last_error = model_error
                 continue
         else:
@@ -1040,16 +1059,17 @@ def analyze_image_with_huggingface(image_path, api_key=None, template_config=Non
             }]
         }
 
-def analyze_image_with_ai(image_path, ai_model='claude', api_key=None, gemini_version=None, claude_version=None, template_config=None):
+def analyze_image_with_ai(image_path, ai_model='claude', api_key=None, gemini_version=None, claude_version=None, gpt_version=None, template_config=None):
     """
     Analisa imagem com a IA selecionada
-    
+
     Args:
         image_path: caminho da imagem
         ai_model: modelo de IA a usar
         api_key: chave API
         gemini_version: versão do Gemini (se aplicável)
         claude_version: versão do Claude (se aplicável)
+        gpt_version: versão do GPT (se aplicável)
         template_config: dict com 'template' e/ou 'params' para customizar prompt
     """
     # Configuração de template padrão se não fornecida
@@ -1059,7 +1079,7 @@ def analyze_image_with_ai(image_path, ai_model='claude', api_key=None, gemini_ve
     if ai_model == 'claude' and CLAUDE_AVAILABLE:
         return analyze_image_with_claude(image_path, api_key, claude_version, template_config)
     elif ai_model == 'gpt4' and GPT_AVAILABLE:
-        return analyze_image_with_gpt4(image_path, api_key, template_config)
+        return analyze_image_with_gpt4(image_path, api_key, gpt_version, template_config)
     elif ai_model == 'gemini' and GEMINI_AVAILABLE:
         return analyze_image_with_gemini(image_path, api_key, gemini_version, template_config)
     elif ai_model == 'deepseek' and DEEPSEEK_AVAILABLE:
@@ -1372,11 +1392,16 @@ def analyze_parcela(parcela):
     gemini_version = request.headers.get('X-Gemini-Version', 'gemini-flash-latest')
     if ai_model == 'gemini':
         print(f"Versão do Gemini selecionada: {gemini_version}")
-    
+
     # Obter versão específica do Claude (se aplicável)
     claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-4-5-20250929')
     if ai_model == 'claude':
         print(f"Versão do Claude selecionada: {claude_version}")
+
+    # Obter versão específica do GPT (se aplicável)
+    gpt_version = request.headers.get('X-GPT-Version', 'gpt-4o')
+    if ai_model == 'gpt4':
+        print(f"Versão do GPT selecionada: {gpt_version}")
 
     # Obter API keys dos headers (decodificar de Base64)
     api_key = None
@@ -1491,11 +1516,13 @@ def analyze_parcela(parcela):
                         sys.stdout.flush()  # Forçar envio imediato
 
                     if ai_model == 'gemini':
-                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, template_config)
+                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, None, template_config)
                     elif ai_model == 'claude':
-                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, template_config)
+                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, None, template_config)
+                    elif ai_model == 'gpt4':
+                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, gpt_version, template_config)
                     else:
-                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, template_config)
+                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config)
                     
                     # Validar se retornou espécies válidas
                     especies_validas = []
@@ -2477,9 +2504,12 @@ def reanalyze_subparcela(parcela, subparcela):
     
     # Obter versão do Gemini
     gemini_version = request.headers.get('X-Gemini-Version', 'gemini-flash-latest')
-    
+
     # Obter versão do Claude
     claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-4-5-20250929')
+
+    # Obter versão do GPT
+    gpt_version = request.headers.get('X-GPT-Version', 'gpt-4o')
     
     # Obter API key (decodificar de Base64)
     api_key = None
@@ -2512,11 +2542,13 @@ def reanalyze_subparcela(parcela, subparcela):
                 print(f"⚠️ Tentativa {retry + 1}/{max_retries + 1}")
             
             if ai_model == 'gemini':
-                analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, template_config)
+                analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, None, template_config)
             elif ai_model == 'claude':
-                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, template_config)
+                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, None, template_config)
+            elif ai_model == 'gpt4':
+                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, gpt_version, template_config)
             else:
-                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, template_config)
+                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config)
             
             # Validar espécies
             especies_validas = []
@@ -2784,6 +2816,7 @@ def add_species_with_ai(parcela, subparcela):
     api_key = None
     gemini_version = request.headers.get('X-Gemini-Version', 'gemini-flash-latest')
     claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-4-5-20250929')
+    gpt_version = request.headers.get('X-GPT-Version', 'gpt-4o')
 
     if ai_model == 'claude':
         api_key = decode_api_key(request.headers.get('X-API-Key-Claude'))
@@ -2818,11 +2851,13 @@ def add_species_with_ai(parcela, subparcela):
 
         # Analisar
         if ai_model == 'gemini':
-            analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, template_config)
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, None, template_config)
         elif ai_model == 'claude':
-            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, template_config)
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, None, template_config)
+        elif ai_model == 'gpt4':
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, gpt_version, template_config)
         else:
-            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, template_config)
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config)
 
         # Filtrar apenas espécies novas (não detectadas anteriormente)
         new_species = []
@@ -4200,10 +4235,70 @@ def export_pdf():
 
         data = request.json
         parcela_nome = data.get('parcela', 'Parcela')
-        especies = data.get('especies', {})
-        analytics = data.get('analytics', {})
+        especies_raw = data.get('especies', {})
+        analytics_raw = data.get('analytics', {})
         analises_avancadas = data.get('analises_avancadas', {})
         analysis_results = data.get('analysisResults', [])
+
+        print(f"\n📄 Gerando PDF para {parcela_nome}")
+        print(f"   Subparcelas recebidas: {len(analysis_results)}")
+        print(f"   Espécies recebidas: {len(especies_raw)}")
+        print(f"   Análises avançadas: {list(analises_avancadas.keys())}")
+
+        # RECALCULAR TUDO A PARTIR DAS SUBPARCELAS
+        especies = {}
+        total_area = len(analysis_results) * 100  # Assumindo 100% por subparcela
+
+        # Processar cada subparcela para calcular cobertura real
+        for result in analysis_results:
+            for esp in result.get('especies', []):
+                apelido = esp.get('apelido', esp.get('nome', 'Desconhecida'))
+                cobertura = float(esp.get('cobertura', 0))
+
+                if apelido not in especies:
+                    especies[apelido] = {
+                        'apelido_usuario': especies_raw.get(apelido, {}).get('apelido_usuario', apelido),
+                        'genero': esp.get('genero', especies_raw.get(apelido, {}).get('genero', '')),
+                        'especie': esp.get('especie', especies_raw.get(apelido, {}).get('especie', 'sp.')),
+                        'familia': esp.get('familia', especies_raw.get(apelido, {}).get('familia', '')),
+                        'cobertura': 0,
+                        'ocorrencias': 0
+                    }
+
+                especies[apelido]['cobertura'] += cobertura
+                especies[apelido]['ocorrencias'] += 1
+
+        # Calcular analytics reais
+        if len(especies) > 0 and analises_avancadas.get('diversity'):
+            analytics = {
+                'diversity': analises_avancadas['diversity'].get('shannon', 0),
+                'richness': analises_avancadas['diversity'].get('richness', len(especies)),
+                'eveness': analises_avancadas['diversity'].get('evenness', 0),
+                'simpson': analises_avancadas['diversity'].get('simpson', 0)
+            }
+        else:
+            # Calcular Shannon básico se não tiver
+            from math import log
+            total_cobertura = sum(e['cobertura'] for e in especies.values())
+            if total_cobertura > 0:
+                shannon = 0
+                for esp in especies.values():
+                    if esp['cobertura'] > 0:
+                        p = esp['cobertura'] / total_cobertura
+                        shannon -= p * log(p)
+                analytics = {
+                    'diversity': shannon,
+                    'richness': len(especies),
+                    'eveness': shannon / log(len(especies)) if len(especies) > 1 else 0,
+                    'simpson': sum((e['cobertura'] / total_cobertura) ** 2 for e in especies.values() if total_cobertura > 0)
+                }
+            else:
+                analytics = {'diversity': 0, 'richness': len(especies), 'eveness': 0, 'simpson': 0}
+
+        print(f"\n✅ Dados recalculados:")
+        print(f"   Espécies processadas: {len(especies)}")
+        print(f"   Shannon: {analytics.get('diversity', 0):.4f}")
+        print(f"   Riqueza: {analytics.get('richness', 0)}")
 
         # Criar PDF em memória com compressão
         buffer = BytesIO()
@@ -4304,7 +4399,7 @@ def export_pdf():
             backColor=colors.HexColor('#E3F2FD')
         )
 
-        story.append(Paragraph("📊 Resumo Executivo", section_title_style))
+        story.append(Paragraph("RESUMO EXECUTIVO", section_title_style))
         story.append(Spacer(1, 10))
 
         # Tabela de estatísticas principais
@@ -4339,7 +4434,7 @@ def export_pdf():
 
         # ===== LISTA DE ESPÉCIES =====
         story.append(PageBreak())
-        story.append(Paragraph("🌿 Espécies Identificadas", section_title_style))
+        story.append(Paragraph("ESPECIES IDENTIFICADAS", section_title_style))
         story.append(Spacer(1, 10))
 
         if especies:
@@ -4375,7 +4470,7 @@ def export_pdf():
         # ===== ANÁLISES FITOSSOCIOLÓGICAS =====
         if analises_avancadas and analises_avancadas.get('ivi'):
             story.append(PageBreak())
-            story.append(Paragraph("📈 Análises Fitossociológicas", section_title_style))
+            story.append(Paragraph("ANALISES FITOSSOCIOLOGICAS", section_title_style))
             story.append(Spacer(1, 10))
 
             # IVI - Top 10
@@ -4412,9 +4507,49 @@ def export_pdf():
 
             story.append(t_ivi)
 
+        # ===== ANÁLISE POR SUBPARCELA =====
+        if analysis_results:
+            story.append(PageBreak())
+            story.append(Paragraph("ANALISE POR SUBPARCELA", section_title_style))
+            story.append(Spacer(1, 10))
+
+            subp_data = [['Subparcela', 'N Especies', 'Cobertura Total (%)', 'Especies Presentes']]
+
+            for idx, result in enumerate(analysis_results, 1):
+                especies_list = result.get('especies', [])
+                cobertura_total = sum(float(e.get('cobertura', 0)) for e in especies_list)
+                especies_nomes = ', '.join([e.get('apelido', 'N/A')[:15] for e in especies_list[:3]])
+                if len(especies_list) > 3:
+                    especies_nomes += f' (+{len(especies_list)-3})'
+
+                subp_data.append([
+                    result.get('subparcela', f'Sub {idx}'),
+                    str(len(especies_list)),
+                    f"{cobertura_total:.1f}",
+                    especies_nomes
+                ])
+
+            t_subp = Table(subp_data, colWidths=[4*cm, 3*cm, 4*cm, 6.5*cm])
+            t_subp.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FF9800')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('ALIGN', (3, 1), (3, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#FFF3E0')]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#FF9800')),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8)
+            ]))
+
+            story.append(t_subp)
+
         # ===== DETALHES POR ESPÉCIE =====
         story.append(PageBreak())
-        story.append(Paragraph("🔍 Detalhamento por Espécie", section_title_style))
+        story.append(Paragraph("DETALHAMENTO POR ESPECIE", section_title_style))
         story.append(Spacer(1, 10))
 
         for esp_nome, esp_info in sorted(especies.items(), key=lambda x: x[1].get('cobertura', 0), reverse=True):
@@ -4429,9 +4564,9 @@ def export_pdf():
             )
 
             apelido = esp_info.get('apelido_usuario', esp_nome)
-            genero = esp_info.get('genero', 'Não identificado')
+            genero = esp_info.get('genero', 'Nao identificado')
             especie = esp_info.get('especie', 'sp.')
-            familia = esp_info.get('familia', 'Não identificada')
+            familia = esp_info.get('familia', 'Nao identificada')
             cobertura = esp_info.get('cobertura', 0)
             ocorrencias = esp_info.get('ocorrencias', 0)
 
@@ -4591,4 +4726,31 @@ Para reimportar esta análise no sistema, use a opção "Importar ZIP" e selecio
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    import webbrowser
+    from threading import Timer
+
+    # Detectar se está rodando como executável
+    is_frozen = getattr(sys, 'frozen', False)
+
+    if is_frozen:
+        # Modo produção (executável)
+        def open_browser():
+            webbrowser.open('http://127.0.0.1:5000')
+
+        # Abrir navegador após 1.5 segundos
+        Timer(1.5, open_browser).start()
+
+        print("=" * 60)
+        print("🌿 HerbalScan - Sistema de Análise de Cobertura")
+        print("=" * 60)
+        print("\nServidor iniciado com sucesso!")
+        print("📍 Endereço: http://127.0.0.1:5000")
+        print("\n⚡ O navegador será aberto automaticamente...")
+        print("\n⚠️  NÃO FECHE ESTA JANELA enquanto usar o aplicativo!")
+        print("=" * 60)
+        print()
+
+        app.run(debug=False, host='127.0.0.1', port=5000, use_reloader=False)
+    else:
+        # Modo desenvolvimento
+        app.run(debug=True, host='0.0.0.0', port=5000)

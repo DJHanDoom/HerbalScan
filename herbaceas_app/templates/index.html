@@ -80,6 +80,19 @@
                 <p class="ai-info-small">💡 Sonnet 4.5 é o melhor custo-benefício! Opus 4.1 é o mais preciso. Haiku 4.5 é o mais rápido.</p>
             </div>
 
+            <!-- Seletor de versão do modelo GPT -->
+            <div class="form-group" id="gpt-model-group" style="display: none;">
+                <label for="gpt-version">Versão do GPT:</label>
+                <select id="gpt-version" class="ai-select">
+                    <option value="gpt-4o" selected>GPT-4o (Mais Recente - Recomendado) 🔥</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini (Econômico e Rápido) ⚡</option>
+                    <option value="gpt-4-turbo-2024-04-09">GPT-4 Turbo (Abr/2024)</option>
+                    <option value="gpt-4-turbo">GPT-4 Turbo (Latest)</option>
+                    <option value="gpt-4">GPT-4 (Clássico)</option>
+                </select>
+                <p class="ai-info-small">💡 GPT-4o é o mais eficiente. GPT-4o Mini é mais econômico e rápido.</p>
+            </div>
+
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                 <button id="config-prompt-btn" class="btn btn-secondary" onclick="PromptConfig.open()" style="flex: 0 0 auto;">
                     ⚙️ Configurar Prompt
