@@ -1,18 +1,118 @@
 import os
+import sys
+import traceback
+import time
 import json
 import zipfile
 import io
 import shutil
-import sys
-from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
-from werkzeug.utils import secure_filename
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment
-from datetime import datetime
-import base64
-from pathlib import Path
-import time
-from prompt_templates import build_prompt, get_template_list, get_template_params, PROMPT_TEMPLATES
+
+# Tratamento de erro global para capturar falhas silenciosas
+# Deve ser configurado o mais cedo possível
+def handle_global_exception(exc_type, exc_value, exc_traceback):
+    """Captura exceções não tratadas e as registra"""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    
+    try:
+        error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    except:
+        error_msg = f"{exc_type.__name__}: {exc_value}"
+    
+    # Tentar escrever em arquivo de log (método mais básico possível)
+    try:
+        if getattr(sys, 'frozen', False):
+            log_dir = os.path.dirname(sys.executable)
+        else:
+            try:
+                log_dir = os.path.dirname(os.path.abspath(__file__))
+            except:
+                log_dir = os.getcwd()
+        
+        # Garantir que o diretório existe
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+        except:
+            pass
+        
+        log_file = os.path.join(log_dir, 'herbalscan_error.log')
+        try:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"ERRO FATAL - {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"{'='*60}\n")
+                f.write(error_msg)
+                f.write(f"\n{'='*60}\n")
+        except:
+            # Se não conseguir escrever, pelo menos tentar criar um arquivo simples
+            try:
+                with open(log_file, 'w') as f:
+                    f.write(error_msg)
+            except:
+                pass
+    except:
+        pass
+    
+    # Exibir no console
+    try:
+        print("\n" + "="*60)
+        print("ERRO FATAL!")
+        print("="*60)
+        print(error_msg)
+        print("="*60)
+        if 'log_dir' in locals():
+            print(f"\nArquivo de log: {log_file}")
+        print("\nPressione ENTER para fechar...")
+        try:
+            input()
+        except:
+            pass
+    except:
+        pass
+    
+    sys.exit(1)
+
+# Configurar handler global de exceções ANTES de qualquer outra coisa
+sys.excepthook = handle_global_exception
+
+try:
+    from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
+    from werkzeug.utils import secure_filename
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from datetime import datetime
+    import base64
+    from pathlib import Path
+    from prompt_templates import build_prompt, get_template_list, get_template_params, PROMPT_TEMPLATES
+except Exception as e:
+    print(f"ERRO ao importar módulos principais: {e}")
+    traceback.print_exc()
+    print("\nPressione ENTER para fechar...")
+    try:
+        input()
+    except:
+        pass
+    sys.exit(1)
+
+# Garantir que a configuração existe antes de iniciar
+try:
+    print("Iniciando HerbalScan...")
+    print("Verificando configuração...")
+    from config_manager import ensure_config
+    ensure_config()
+    print("Configuração OK!")
+except ImportError as e:
+    print(f"Aviso: config_manager não disponível: {e}")
+    # Se config_manager não estiver disponível, carregar .env manualmente
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        print("Aviso: python-dotenv não disponível, continuando sem .env")
+except Exception as e:
+    print(f"Erro ao carregar configuração: {e}")
+    traceback.print_exc()
 
 # Importações condicionais para diferentes IAs
 try:
@@ -47,21 +147,96 @@ try:
 except ImportError:
     HUGGINGFACE_AVAILABLE = False
 
-app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'static/uploads'
+# Detectar se está rodando como executável e ajustar caminhos
+if getattr(sys, 'frozen', False):
+    # Rodando como executável PyInstaller
+    # _MEIPASS é onde estão os arquivos empacotados (somente leitura)
+    try:
+        bundle_dir = sys._MEIPASS
+    except AttributeError:
+        # Fallback se _MEIPASS não estiver disponível
+        bundle_dir = os.path.dirname(sys.executable)
+    
+    # Diretório de trabalho é onde está o executável (dados do usuário)
+    work_dir = os.path.dirname(sys.executable)
+    
+    # Garantir que work_dir existe e é acessível
+    try:
+        os.makedirs(work_dir, exist_ok=True)
+    except Exception as e:
+        print(f"AVISO: Não foi possível criar/verificar work_dir: {e}")
+
+    template_folder = os.path.join(bundle_dir, 'templates')
+    static_folder = os.path.join(bundle_dir, 'static')
+    
+    # Verificar se os diretórios existem
+    if not os.path.exists(template_folder):
+        print(f"ERRO: template_folder não encontrado: {template_folder}")
+    if not os.path.exists(static_folder):
+        print(f"ERRO: static_folder não encontrado: {static_folder}")
+
+    # Configurar codificação UTF-8 para console Windows
+    if sys.platform == 'win32':
+        try:
+            import codecs
+            # Tentar configurar UTF-8, mas não falhar se não conseguir
+            if hasattr(sys.stdout, 'detach'):
+                sys.stdout = codecs.getwriter('utf-8')(sys.stdout.detach())
+            if hasattr(sys.stderr, 'detach'):
+                sys.stderr = codecs.getwriter('utf-8')(sys.stderr.detach())
+        except Exception:
+            # Se falhar, apenas continuar sem emojis
+            pass
+else:
+    # Rodando como script Python normal
+    bundle_dir = os.path.dirname(os.path.abspath(__file__))
+    work_dir = bundle_dir
+
+    template_folder = 'templates'
+    static_folder = 'static'
+
+app = Flask(__name__,
+            template_folder=template_folder,
+            static_folder=static_folder)
+
+# Diretórios de dados do usuário (no diretório de trabalho)
+app.config['UPLOAD_FOLDER'] = os.path.join(work_dir, 'static', 'uploads')
+app.config['EXPORTS_FOLDER'] = os.path.join(work_dir, 'exports')
+app.config['SAVED_ANALYSES_FOLDER'] = os.path.join(work_dir, 'saved_analyses')
+app.config['CUSTOM_TEMPLATES_FOLDER'] = os.path.join(work_dir, 'custom_templates')
+
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
 app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg'}
 app.config['DEFAULT_AI'] = os.environ.get('DEFAULT_AI', 'gemini')  # gemini como padrão
 
 # Criar diretórios necessários
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-os.makedirs('exports', exist_ok=True)
+os.makedirs(app.config['EXPORTS_FOLDER'], exist_ok=True)
+os.makedirs(app.config['SAVED_ANALYSES_FOLDER'], exist_ok=True)
+os.makedirs(app.config['CUSTOM_TEMPLATES_FOLDER'], exist_ok=True)
 
 # Armazenamento em memória para dados da análise
 analysis_data = {
     'parcelas': {},
     'especies_unificadas': {}
 }
+
+# Rota para servir arquivos de upload (dados do usuário)
+@app.route('/static/uploads/<path:filename>')
+def serve_upload(filename):
+    """Serve arquivos de upload do diretório de trabalho do usuário"""
+    # Validar filename
+    if not filename or filename == 'undefined' or filename.endswith('/undefined'):
+        return '', 204  # No Content - imagem não disponível
+
+    upload_dir = app.config['UPLOAD_FOLDER']
+    filepath = os.path.join(upload_dir, filename)
+
+    # Verificar se arquivo existe
+    if not os.path.exists(filepath):
+        return '', 404
+
+    return send_file(filepath)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
@@ -496,7 +671,7 @@ def analyze_image_with_claude(image_path, api_key=None, model_version=None, temp
             ]
         }
 
-def analyze_image_with_gpt4(image_path, api_key=None, template_config=None):
+def analyze_image_with_gpt4(image_path, api_key=None, model_version=None, template_config=None):
     """Analisa uma imagem usando GPT-4 Vision"""
     try:
         key = api_key or os.environ.get("OPENAI_API_KEY")
@@ -522,15 +697,25 @@ def analyze_image_with_gpt4(image_path, api_key=None, template_config=None):
         ext = image_path.split('.')[-1].lower()
         media_type = f"image/{ext}" if ext != 'jpg' else "image/jpeg"
 
-        # Tentar múltiplos modelos GPT-4 com suporte a visão
-        models_to_try = ["gpt-4o", "gpt-4-turbo", "gpt-4-vision-preview"]
+        # Usar modelo selecionado ou padrão
+        model_name = model_version or "gpt-4o"
+
+        # Fallback: se o modelo selecionado falhar, tentar outros
+        models_to_try = [model_name]
+        if model_name != "gpt-4o":
+            models_to_try.append("gpt-4o")
+        if model_name != "gpt-4o-mini":
+            models_to_try.append("gpt-4o-mini")
+        if "gpt-4-turbo" not in model_name:
+            models_to_try.append("gpt-4-turbo-2024-04-09")
+
         last_error = None
 
-        for model_name in models_to_try:
+        for current_model in models_to_try:
             try:
-                print(f"Tentando modelo: {model_name}")
+                print(f"Tentando modelo: {current_model}")
                 response = client.chat.completions.create(
-                    model=model_name,
+                    model=current_model,
                     messages=[
                         {
                             "role": "user",
@@ -550,10 +735,10 @@ def analyze_image_with_gpt4(image_path, api_key=None, template_config=None):
                     ],
                     max_tokens=2000
                 )
-                print(f"✓ Sucesso com modelo: {model_name}")
+                print(f"✓ Sucesso com modelo: {current_model}")
                 break  # Sucesso, sair do loop
             except Exception as model_error:
-                print(f"✗ Falha com {model_name}: {str(model_error)}")
+                print(f"✗ Falha com {current_model}: {str(model_error)}")
                 last_error = model_error
                 continue
         else:
@@ -1040,16 +1225,17 @@ def analyze_image_with_huggingface(image_path, api_key=None, template_config=Non
             }]
         }
 
-def analyze_image_with_ai(image_path, ai_model='claude', api_key=None, gemini_version=None, claude_version=None, template_config=None):
+def analyze_image_with_ai(image_path, ai_model='claude', api_key=None, gemini_version=None, claude_version=None, gpt_version=None, template_config=None):
     """
     Analisa imagem com a IA selecionada
-    
+
     Args:
         image_path: caminho da imagem
         ai_model: modelo de IA a usar
         api_key: chave API
         gemini_version: versão do Gemini (se aplicável)
         claude_version: versão do Claude (se aplicável)
+        gpt_version: versão do GPT (se aplicável)
         template_config: dict com 'template' e/ou 'params' para customizar prompt
     """
     # Configuração de template padrão se não fornecida
@@ -1059,7 +1245,7 @@ def analyze_image_with_ai(image_path, ai_model='claude', api_key=None, gemini_ve
     if ai_model == 'claude' and CLAUDE_AVAILABLE:
         return analyze_image_with_claude(image_path, api_key, claude_version, template_config)
     elif ai_model == 'gpt4' and GPT_AVAILABLE:
-        return analyze_image_with_gpt4(image_path, api_key, template_config)
+        return analyze_image_with_gpt4(image_path, api_key, gpt_version, template_config)
     elif ai_model == 'gemini' and GEMINI_AVAILABLE:
         return analyze_image_with_gemini(image_path, api_key, gemini_version, template_config)
     elif ai_model == 'deepseek' and DEEPSEEK_AVAILABLE:
@@ -1372,11 +1558,16 @@ def analyze_parcela(parcela):
     gemini_version = request.headers.get('X-Gemini-Version', 'gemini-flash-latest')
     if ai_model == 'gemini':
         print(f"Versão do Gemini selecionada: {gemini_version}")
-    
+
     # Obter versão específica do Claude (se aplicável)
     claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-4-5-20250929')
     if ai_model == 'claude':
         print(f"Versão do Claude selecionada: {claude_version}")
+
+    # Obter versão específica do GPT (se aplicável)
+    gpt_version = request.headers.get('X-GPT-Version', 'gpt-4o')
+    if ai_model == 'gpt4':
+        print(f"Versão do GPT selecionada: {gpt_version}")
 
     # Obter API keys dos headers (decodificar de Base64)
     api_key = None
@@ -1491,11 +1682,13 @@ def analyze_parcela(parcela):
                         sys.stdout.flush()  # Forçar envio imediato
 
                     if ai_model == 'gemini':
-                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, template_config)
+                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, None, template_config)
                     elif ai_model == 'claude':
-                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, template_config)
+                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, None, template_config)
+                    elif ai_model == 'gpt4':
+                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, gpt_version, template_config)
                     else:
-                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, template_config)
+                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config)
                     
                     # Validar se retornou espécies válidas
                     especies_validas = []
@@ -1616,14 +1809,28 @@ def analyze_parcela(parcela):
                     'forma_vida': esp['forma_vida']
                 })
 
+            # Converter caminho absoluto para URL relativa
+            if filepath.startswith('/static/uploads/'):
+                # Já é URL relativa
+                image_url = filepath
+            elif os.path.isabs(filepath):
+                # É caminho absoluto, converter para URL relativa
+                rel_path = os.path.relpath(filepath, app.config['UPLOAD_FOLDER'])
+                image_url = f'/static/uploads/{rel_path.replace(os.sep, "/")}'
+            else:
+                # Assume que é relativo dentro de uploads
+                image_url = f'/static/uploads/{parcela}/{img_info["filename"]}'
+
             parcela_info['subparcelas'][subparcela] = {
                 'image': img_info['filename'],
+                'image_path': image_url,
                 'especies': especies_encontradas
             }
 
             results.append({
                 'subparcela': subparcela,
                 'image': img_info['filename'],
+                'image_path': image_url,
                 'especies': especies_encontradas
             })
             
@@ -1872,16 +2079,27 @@ def analyze_additional_images():
                 'forma_vida': esp['forma_vida']
             })
         
+        # Converter caminho absoluto para URL relativa
+        if filepath.startswith('/static/uploads/'):
+            # Já é URL relativa
+            image_url = filepath
+        elif os.path.isabs(filepath):
+            # É caminho absoluto, converter para URL relativa
+            rel_path = os.path.relpath(filepath, app.config['UPLOAD_FOLDER'])
+            image_url = f'/static/uploads/{rel_path.replace(os.sep, "/")}'
+        else:
+            image_url = filepath
+
         # Adicionar subparcela aos resultados
         parcela_info['subparcelas'][subparcela_id] = {
             'image': img_info['filename'],
-            'image_path': filepath,
+            'image_path': image_url,
             'especies': especies_encontradas
         }
-        
+
         novas_subparcelas.append({
             'subparcela_id': subparcela_id,
-            'image_path': filepath,
+            'image_path': image_url,
             'especies': especies_encontradas,
             'analise_completa': True
         })
@@ -2477,9 +2695,12 @@ def reanalyze_subparcela(parcela, subparcela):
     
     # Obter versão do Gemini
     gemini_version = request.headers.get('X-Gemini-Version', 'gemini-flash-latest')
-    
+
     # Obter versão do Claude
     claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-4-5-20250929')
+
+    # Obter versão do GPT
+    gpt_version = request.headers.get('X-GPT-Version', 'gpt-4o')
     
     # Obter API key (decodificar de Base64)
     api_key = None
@@ -2512,11 +2733,13 @@ def reanalyze_subparcela(parcela, subparcela):
                 print(f"⚠️ Tentativa {retry + 1}/{max_retries + 1}")
             
             if ai_model == 'gemini':
-                analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, template_config)
+                analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, None, template_config)
             elif ai_model == 'claude':
-                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, template_config)
+                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, None, template_config)
+            elif ai_model == 'gpt4':
+                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, gpt_version, template_config)
             else:
-                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, template_config)
+                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config)
             
             # Validar espécies
             especies_validas = []
@@ -2784,6 +3007,7 @@ def add_species_with_ai(parcela, subparcela):
     api_key = None
     gemini_version = request.headers.get('X-Gemini-Version', 'gemini-flash-latest')
     claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-4-5-20250929')
+    gpt_version = request.headers.get('X-GPT-Version', 'gpt-4o')
 
     if ai_model == 'claude':
         api_key = decode_api_key(request.headers.get('X-API-Key-Claude'))
@@ -2818,11 +3042,13 @@ def add_species_with_ai(parcela, subparcela):
 
         # Analisar
         if ai_model == 'gemini':
-            analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, template_config)
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, None, template_config)
         elif ai_model == 'claude':
-            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, template_config)
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, None, template_config)
+        elif ai_model == 'gpt4':
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, gpt_version, template_config)
         else:
-            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, template_config)
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config)
 
         # Filtrar apenas espécies novas (não detectadas anteriormente)
         new_species = []
@@ -2928,10 +3154,30 @@ def export_excel():
             especies_unificadas = list(especies_unificadas_raw.values())
             print(f"🔄 Especies unificadas convertida de dict para list: {len(especies_unificadas)} espécies")
         else:
-            especies_unificadas = especies_unificadas_raw
+            especies_unificadas = especies_unificadas_raw if especies_unificadas_raw else []
             print(f"✓ Especies unificadas recebida como list: {len(especies_unificadas)} espécies")
 
+        # FALLBACK: Se não veio do frontend, buscar do servidor
+        if not especies_unificadas and parcela_nome in analysis_data['especies_unificadas']:
+            especies_server = analysis_data['especies_unificadas'][parcela_nome]
+            if isinstance(especies_server, dict):
+                especies_unificadas = list(especies_server.values())
+                print(f"🔄 Usando espécies do servidor: {len(especies_unificadas)} espécies")
+
         estatisticas = data.get('estatisticas', {})
+
+        # Calcular estatísticas se não vieram
+        if not estatisticas:
+            total_cobertura = sum(sub.get('cobertura_total', 0) for sub in subparcelas_data)
+            total_especies_todas = sum(len(sub.get('especies', [])) for sub in subparcelas_data)
+            alturas = [esp.get('altura', 0) for sub in subparcelas_data for esp in sub.get('especies', []) if esp.get('altura')]
+
+            estatisticas = {
+                'total_subparcelas': len(subparcelas_data),
+                'total_especies_unicas': len(especies_unificadas),
+                'cobertura_total': total_cobertura / len(subparcelas_data) if subparcelas_data else 0,
+                'altura_media': sum(alturas) / len(alturas) if alturas else 0
+            }
 
         # Criar workbook
         wb = openpyxl.Workbook()
@@ -3091,6 +3337,226 @@ def export_excel():
         
         ws_stats.column_dimensions['A'].width = 30
         ws_stats.column_dimensions['B'].width = 20
+
+        # ==== ABA 6: RANKING DE ESPÉCIES ====
+        ws_ranking = wb.create_sheet("Ranking de Espécies")
+
+        ws_ranking['A1'] = "RANKING DE ESPÉCIES POR COBERTURA"
+        ws_ranking['A1'].font = Font(bold=True, size=14, color="FFFFFF")
+        ws_ranking['A1'].fill = PatternFill(start_color="E91E63", end_color="E91E63", fill_type="solid")
+        ws_ranking.merge_cells('A1:F1')
+
+        ranking_headers = ['Posição', 'Espécie', 'Cobertura Total (%)', 'Ocorrências', 'Cobertura Média (%)', 'Família']
+        ws_ranking.append(ranking_headers)
+
+        for cell in ws_ranking[2]:
+            cell.fill = PatternFill(start_color="FCE4EC", end_color="FCE4EC", fill_type="solid")
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal='center')
+
+        # Calcular cobertura total por espécie
+        especies_cobertura = {}
+        for sub in subparcelas_data:
+            for esp in sub.get('especies', []):
+                apelido = esp.get('apelido', 'Desconhecida')
+                if apelido not in especies_cobertura:
+                    especies_cobertura[apelido] = {
+                        'cobertura_total': 0,
+                        'ocorrencias': 0,
+                        'familia': esp.get('familia', ''),
+                        'coberturas': []
+                    }
+                especies_cobertura[apelido]['cobertura_total'] += esp.get('cobertura', 0)
+                especies_cobertura[apelido]['ocorrencias'] += 1
+                especies_cobertura[apelido]['coberturas'].append(esp.get('cobertura', 0))
+
+        # Ordenar por cobertura total
+        ranking = sorted(especies_cobertura.items(), key=lambda x: x[1]['cobertura_total'], reverse=True)
+
+        for pos, (especie, dados) in enumerate(ranking, 1):
+            cobertura_media = sum(dados['coberturas']) / len(dados['coberturas']) if dados['coberturas'] else 0
+            row = ws_ranking.max_row + 1
+            ws_ranking.append([
+                pos,
+                especie,
+                round(dados['cobertura_total'], 2),
+                dados['ocorrencias'],
+                round(cobertura_media, 2),
+                dados['familia']
+            ])
+
+            # Destacar top 3
+            if pos <= 3:
+                for col in range(1, 7):
+                    cell = ws_ranking.cell(row=row, column=col)
+                    if pos == 1:
+                        cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")  # Ouro
+                    elif pos == 2:
+                        cell.fill = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")  # Prata
+                    elif pos == 3:
+                        cell.fill = PatternFill(start_color="CD7F32", end_color="CD7F32", fill_type="solid")  # Bronze
+
+        ranking_widths = [10, 30, 18, 14, 18, 20]
+        for idx, width in enumerate(ranking_widths, 1):
+            ws_ranking.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+
+        # ==== ABA 7: ANÁLISE POR FORMA DE VIDA ====
+        ws_forma_vida = wb.create_sheet("Formas de Vida")
+
+        ws_forma_vida['A1'] = "DISTRIBUIÇÃO POR FORMA DE VIDA"
+        ws_forma_vida['A1'].font = Font(bold=True, size=14, color="FFFFFF")
+        ws_forma_vida['A1'].fill = PatternFill(start_color="009688", end_color="009688", fill_type="solid")
+        ws_forma_vida.merge_cells('A1:D1')
+
+        forma_vida_headers = ['Forma de Vida', 'Nº Espécies', 'Cobertura Total (%)', 'Percentual (%)']
+        ws_forma_vida.append(forma_vida_headers)
+
+        for cell in ws_forma_vida[2]:
+            cell.fill = PatternFill(start_color="B2DFDB", end_color="B2DFDB", fill_type="solid")
+            cell.font = Font(bold=True)
+
+        # Agrupar por forma de vida
+        formas_vida_stats = {}
+        total_cobertura_geral = 0
+
+        for sub in subparcelas_data:
+            for esp in sub.get('especies', []):
+                forma = esp.get('forma_vida', 'Erva')
+                cobertura = esp.get('cobertura', 0)
+
+                if forma not in formas_vida_stats:
+                    formas_vida_stats[forma] = {'count': 0, 'cobertura': 0}
+
+                formas_vida_stats[forma]['count'] += 1
+                formas_vida_stats[forma]['cobertura'] += cobertura
+                total_cobertura_geral += cobertura
+
+        for forma, dados in sorted(formas_vida_stats.items(), key=lambda x: x[1]['cobertura'], reverse=True):
+            percentual = (dados['cobertura'] / total_cobertura_geral * 100) if total_cobertura_geral > 0 else 0
+            ws_forma_vida.append([
+                forma,
+                dados['count'],
+                round(dados['cobertura'], 2),
+                round(percentual, 2)
+            ])
+
+        forma_vida_widths = [20, 14, 18, 14]
+        for idx, width in enumerate(forma_vida_widths, 1):
+            ws_forma_vida.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+
+        # ==== ABA 8: COMPARAÇÃO ENTRE SUBPARCELAS ====
+        ws_comparacao = wb.create_sheet("Comparação Subparcelas")
+
+        ws_comparacao['A1'] = "COMPARAÇÃO DETALHADA ENTRE SUBPARCELAS"
+        ws_comparacao['A1'].font = Font(bold=True, size=14, color="FFFFFF")
+        ws_comparacao['A1'].fill = PatternFill(start_color="FF5722", end_color="FF5722", fill_type="solid")
+        ws_comparacao.merge_cells('A1:G1')
+
+        comp_headers = ['Subparcela', 'Riqueza', 'Cobertura (%)', 'Altura Média (cm)',
+                        'Forma Dominante', 'Espécie + Coberta', 'Diversidade']
+        ws_comparacao.append(comp_headers)
+
+        for cell in ws_comparacao[2]:
+            cell.fill = PatternFill(start_color="FFCCBC", end_color="FFCCBC", fill_type="solid")
+            cell.font = Font(bold=True)
+
+        for sub in subparcelas_data:
+            especies = sub.get('especies', [])
+            if not especies:
+                continue
+
+            riqueza = len(especies)
+            cobertura_total = sum(e.get('cobertura', 0) for e in especies)
+            alturas = [e.get('altura', 0) for e in especies if e.get('altura')]
+            altura_media = sum(alturas) / len(alturas) if alturas else 0
+
+            # Forma de vida dominante
+            formas = [e.get('forma_vida', 'Erva') for e in especies]
+            forma_dominante = max(set(formas), key=formas.count) if formas else 'N/A'
+
+            # Espécie mais coberta
+            esp_mais_coberta = max(especies, key=lambda e: e.get('cobertura', 0))
+            esp_nome = esp_mais_coberta.get('apelido', 'N/A')
+
+            # Índice de Shannon (diversidade)
+            total_cob = sum(e.get('cobertura', 0) for e in especies)
+            if total_cob > 0:
+                import math
+                shannon = -sum((e.get('cobertura', 0)/total_cob) * math.log(e.get('cobertura', 0)/total_cob)
+                              for e in especies if e.get('cobertura', 0) > 0)
+            else:
+                shannon = 0
+
+            ws_comparacao.append([
+                sub.get('numero', 'N/A'),
+                riqueza,
+                round(cobertura_total, 2),
+                round(altura_media, 2),
+                forma_dominante,
+                esp_nome,
+                round(shannon, 3)
+            ])
+
+        comp_widths = [14, 10, 14, 16, 16, 25, 12]
+        for idx, width in enumerate(comp_widths, 1):
+            ws_comparacao.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+
+        # ==== ABA 9: ÍNDICES DE DIVERSIDADE ====
+        ws_diversidade = wb.create_sheet("Índices Diversidade")
+
+        ws_diversidade['A1'] = "ÍNDICES DE DIVERSIDADE ECOLÓGICA"
+        ws_diversidade['A1'].font = Font(bold=True, size=14, color="FFFFFF")
+        ws_diversidade['A1'].fill = PatternFill(start_color="3F51B5", end_color="3F51B5", fill_type="solid")
+        ws_diversidade.merge_cells('A1:C1')
+
+        # Calcular índices gerais
+        import math
+
+        # Dados para cálculo
+        especies_list = []
+        for sub in subparcelas_data:
+            especies_list.extend(sub.get('especies', []))
+
+        if especies_list:
+            # Shannon
+            especies_count = {}
+            for esp in especies_list:
+                nome = esp.get('apelido', 'Desconhecida')
+                especies_count[nome] = especies_count.get(nome, 0) + 1
+
+            total = len(especies_list)
+            shannon = -sum((count/total) * math.log(count/total) for count in especies_count.values())
+
+            # Simpson
+            simpson = 1 - sum((count/total)**2 for count in especies_count.values())
+
+            # Pielou (Equitabilidade)
+            S = len(especies_count)
+            pielou = shannon / math.log(S) if S > 1 else 0
+
+        else:
+            shannon = simpson = pielou = 0
+
+        div_headers = ['Índice', 'Valor', 'Interpretação']
+        ws_diversidade.append(div_headers)
+
+        for cell in ws_diversidade[2]:
+            cell.fill = PatternFill(start_color="C5CAE9", end_color="C5CAE9", fill_type="solid")
+            cell.font = Font(bold=True)
+
+        indices_data = [
+            ['Shannon (H\')', round(shannon, 3), 'Alto: > 3.0, Médio: 1.5-3.0, Baixo: < 1.5'],
+            ['Simpson (1-D)', round(simpson, 3), 'Varia de 0 (baixa) a 1 (alta diversidade)'],
+            ['Pielou (J)', round(pielou, 3), 'Varia de 0 (desigual) a 1 (igual distribuição)'],
+            ['Riqueza (S)', len(especies_unificadas), 'Número total de espécies únicas']
+        ]
+
+        for row_data in indices_data:
+            ws_diversidade.append(row_data)
+
+        div_widths = [20, 12, 50]
+        for idx, width in enumerate(div_widths, 1):
+            ws_diversidade.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
 
         # ==== ABAS DE ANÁLISES AVANÇADAS (SE DISPONÍVEIS) ====
         analises_avancadas = data.get('analises_avancadas', {})
@@ -3261,12 +3727,12 @@ def export_excel():
                 ws_div.column_dimensions['B'].width = 20
 
         # Salvar arquivo
-        os.makedirs('exports', exist_ok=True)
+        exports_folder = app.config['EXPORTS_FOLDER']
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{parcela_nome}_Relatorio_Completo_{timestamp}.xlsx"
-        filepath = os.path.join('exports', filename)
+        filepath = os.path.join(exports_folder, filename)
         wb.save(filepath)
-        
+
         print(f"✅ Arquivo Excel salvo: {filepath}")
 
         return jsonify({
@@ -3284,7 +3750,7 @@ def export_excel():
 @app.route('/api/download/<filename>')
 def download_file(filename):
     """Download do arquivo Excel exportado"""
-    filepath = os.path.join('exports', filename)
+    filepath = os.path.join(app.config['EXPORTS_FOLDER'], filename)
     if not os.path.exists(filepath):
         return jsonify({'error': 'Arquivo não encontrado'}), 404
 
@@ -3712,12 +4178,20 @@ def export_complete_analysis():
         zip_buffer = io.BytesIO()
         
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # 1. Salvar JSON com dados completos
+            # 1. Preparar dados com caminhos de imagem simplificados
+            subparcelas_export = {}
+            for sub_id, sub_data in parcela_data.get('subparcelas', {}).items():
+                sub_export = sub_data.copy()
+                # Simplificar image_path para apenas o nome do arquivo
+                if 'image_path' in sub_export and sub_export['image_path']:
+                    sub_export['image_path'] = os.path.basename(sub_export['image_path'])
+                subparcelas_export[sub_id] = sub_export
+
             analysis_json = {
                 'version': '2.0',
                 'exported_at': datetime.now().isoformat(),
                 'parcela': parcela_name,
-                'subparcelas': parcela_data.get('subparcelas', {}),
+                'subparcelas': subparcelas_export,
                 'especies_unificadas': analysis_data['especies_unificadas'].get(parcela_name, {}),
                 'metadata': {
                     'num_subparcelas': len(parcela_data.get('subparcelas', {})),
@@ -3725,29 +4199,56 @@ def export_complete_analysis():
                     'num_imagens': len(parcela_data.get('images', []))
                 }
             }
-            
+
             zip_file.writestr('analysis_data.json', json.dumps(analysis_json, ensure_ascii=False, indent=2))
             
             # 2. Copiar todas as imagens referenciadas
             images_copied = 0
             image_paths = set()
-            
+
+            # Função helper para converter URL relativa em caminho absoluto
+            def url_to_filepath(url_or_path):
+                """Converte URL relativa para caminho absoluto do arquivo"""
+                if not url_or_path:
+                    return None
+
+                # Se começa com /static/uploads/, converter para caminho real
+                if url_or_path.startswith('/static/uploads/'):
+                    # Remove /static/uploads/ e usa o work_dir
+                    rel_path = url_or_path.replace('/static/uploads/', '')
+                    return os.path.join(app.config['UPLOAD_FOLDER'], rel_path.replace('/', os.sep))
+
+                # Se já é caminho absoluto, retornar como está
+                if os.path.isabs(url_or_path):
+                    return url_or_path
+
+                return None
+
             # Coletar todas as imagens das subparcelas
             for subparcela_id, subparcela in parcela_data.get('subparcelas', {}).items():
-                img_path = subparcela.get('image_path')
-                if img_path and os.path.exists(img_path):
-                    image_paths.add(img_path)
-            
+                img_url = subparcela.get('image_path')
+                if img_url:
+                    img_path = url_to_filepath(img_url)
+                    if img_path and os.path.exists(img_path):
+                        image_paths.add(img_path)
+                        print(f"   ✓ Imagem encontrada para subparcela {subparcela_id}: {img_path}")
+                    else:
+                        print(f"   ✗ Imagem não encontrada: {img_url} -> {img_path}")
+
             # Adicionar imagens da parcela (se houver)
             for img in parcela_data.get('images', []):
                 if isinstance(img, dict):
-                    img_path = img.get('path')
+                    img_url = img.get('path')
                 else:
-                    img_path = str(img)
-                    
-                if img_path and os.path.exists(img_path):
-                    image_paths.add(img_path)
-            
+                    img_url = str(img)
+
+                if img_url:
+                    img_path = url_to_filepath(img_url)
+                    if img_path and os.path.exists(img_path):
+                        image_paths.add(img_path)
+
+            print(f"\n📦 Total de imagens a copiar: {len(image_paths)}")
+
             # Copiar imagens para o ZIP
             for img_path in image_paths:
                 try:
@@ -3755,8 +4256,11 @@ def export_complete_analysis():
                     filename = os.path.basename(img_path)
                     zip_file.write(img_path, f'images/{filename}')
                     images_copied += 1
+                    print(f"   ✓ Copiada: {filename}")
                 except Exception as e:
-                    print(f"Erro ao adicionar imagem {img_path}: {e}")
+                    print(f"   ✗ Erro ao adicionar imagem {img_path}: {e}")
+
+            print(f"✅ {images_copied} imagens copiadas para o ZIP")
             
             # 3. Adicionar README com instruções
             readme = f"""# Análise Exportada: {parcela_name}
@@ -3915,8 +4419,10 @@ def import_complete_analysis():
                             # Verificar se o arquivo foi realmente copiado
                             if os.path.exists(dst):
                                 file_size = os.path.getsize(dst)
-                                image_mapping[filename] = dst
-                                print(f"   ✓ {filename} ({file_size} bytes) -> {dst}")
+                                # Salvar URL relativa no mapping
+                                rel_url = f'/static/uploads/{parcela_name}/{filename}'
+                                image_mapping[filename] = rel_url
+                                print(f"   ✓ {filename} ({file_size} bytes) -> {rel_url}")
                                 images_found = True
                             else:
                                 print(f"   ✗ Falha ao copiar {filename}")
@@ -3940,21 +4446,30 @@ def import_complete_analysis():
                     print(f"   Subparcela {subparcela_id}: {filename}")
 
                     if filename in image_mapping:
-                        # Caminho relativo: /static/uploads/{parcela_nome}/{filename}
-                        rel_url = f'/static/uploads/{parcela_name}/{filename}'
-                        subparcela['image_path'] = rel_url
-                        print(f"   ✓ URL atualizada: {rel_url}")
-                        # Também atualizar o mapping para usar URL
-                        image_mapping[filename] = rel_url
+                        # Usar URL do mapping (já é relativa)
+                        subparcela['image_path'] = image_mapping[filename]
+                        print(f"   ✓ URL atualizada: {image_mapping[filename]}")
                     else:
                         print(f"   ⚠️ Imagem não encontrada no mapping: {filename}")
                         # Tentar encontrar qualquer imagem com nome similar
+                        found = False
                         for mapped_filename in image_mapping.keys():
                             if mapped_filename.lower() == filename.lower():
                                 rel_url = f'/static/uploads/{parcela_name}/{mapped_filename}'
                                 subparcela['image_path'] = rel_url
                                 print(f"   ✓ URL atualizada (case-insensitive): {rel_url}")
+                                found = True
                                 break
+
+                        # Se não encontrou, remover image_path inválido
+                        if not found:
+                            if 'image_path' in subparcela:
+                                del subparcela['image_path']
+                            print(f"   ✗ Imagem não encontrada, image_path removido")
+                else:
+                    # Sem image_path, garantir que não existe
+                    if 'image_path' in subparcela:
+                        del subparcela['image_path']
             
             # Reconstruir lista de images com estrutura correta
             images_list = []
@@ -4200,10 +4715,70 @@ def export_pdf():
 
         data = request.json
         parcela_nome = data.get('parcela', 'Parcela')
-        especies = data.get('especies', {})
-        analytics = data.get('analytics', {})
+        especies_raw = data.get('especies', {})
+        analytics_raw = data.get('analytics', {})
         analises_avancadas = data.get('analises_avancadas', {})
         analysis_results = data.get('analysisResults', [])
+
+        print(f"\n📄 Gerando PDF para {parcela_nome}")
+        print(f"   Subparcelas recebidas: {len(analysis_results)}")
+        print(f"   Espécies recebidas: {len(especies_raw)}")
+        print(f"   Análises avançadas: {list(analises_avancadas.keys())}")
+
+        # RECALCULAR TUDO A PARTIR DAS SUBPARCELAS
+        especies = {}
+        total_area = len(analysis_results) * 100  # Assumindo 100% por subparcela
+
+        # Processar cada subparcela para calcular cobertura real
+        for result in analysis_results:
+            for esp in result.get('especies', []):
+                apelido = esp.get('apelido', esp.get('nome', 'Desconhecida'))
+                cobertura = float(esp.get('cobertura', 0))
+
+                if apelido not in especies:
+                    especies[apelido] = {
+                        'apelido_usuario': especies_raw.get(apelido, {}).get('apelido_usuario', apelido),
+                        'genero': esp.get('genero', especies_raw.get(apelido, {}).get('genero', '')),
+                        'especie': esp.get('especie', especies_raw.get(apelido, {}).get('especie', 'sp.')),
+                        'familia': esp.get('familia', especies_raw.get(apelido, {}).get('familia', '')),
+                        'cobertura': 0,
+                        'ocorrencias': 0
+                    }
+
+                especies[apelido]['cobertura'] += cobertura
+                especies[apelido]['ocorrencias'] += 1
+
+        # Calcular analytics reais
+        if len(especies) > 0 and analises_avancadas.get('diversity'):
+            analytics = {
+                'diversity': analises_avancadas['diversity'].get('shannon', 0),
+                'richness': analises_avancadas['diversity'].get('richness', len(especies)),
+                'eveness': analises_avancadas['diversity'].get('evenness', 0),
+                'simpson': analises_avancadas['diversity'].get('simpson', 0)
+            }
+        else:
+            # Calcular Shannon básico se não tiver
+            from math import log
+            total_cobertura = sum(e['cobertura'] for e in especies.values())
+            if total_cobertura > 0:
+                shannon = 0
+                for esp in especies.values():
+                    if esp['cobertura'] > 0:
+                        p = esp['cobertura'] / total_cobertura
+                        shannon -= p * log(p)
+                analytics = {
+                    'diversity': shannon,
+                    'richness': len(especies),
+                    'eveness': shannon / log(len(especies)) if len(especies) > 1 else 0,
+                    'simpson': sum((e['cobertura'] / total_cobertura) ** 2 for e in especies.values() if total_cobertura > 0)
+                }
+            else:
+                analytics = {'diversity': 0, 'richness': len(especies), 'eveness': 0, 'simpson': 0}
+
+        print(f"\n✅ Dados recalculados:")
+        print(f"   Espécies processadas: {len(especies)}")
+        print(f"   Shannon: {analytics.get('diversity', 0):.4f}")
+        print(f"   Riqueza: {analytics.get('richness', 0)}")
 
         # Criar PDF em memória com compressão
         buffer = BytesIO()
@@ -4304,7 +4879,7 @@ def export_pdf():
             backColor=colors.HexColor('#E3F2FD')
         )
 
-        story.append(Paragraph("📊 Resumo Executivo", section_title_style))
+        story.append(Paragraph("RESUMO EXECUTIVO", section_title_style))
         story.append(Spacer(1, 10))
 
         # Tabela de estatísticas principais
@@ -4339,7 +4914,7 @@ def export_pdf():
 
         # ===== LISTA DE ESPÉCIES =====
         story.append(PageBreak())
-        story.append(Paragraph("🌿 Espécies Identificadas", section_title_style))
+        story.append(Paragraph("ESPECIES IDENTIFICADAS", section_title_style))
         story.append(Spacer(1, 10))
 
         if especies:
@@ -4375,7 +4950,7 @@ def export_pdf():
         # ===== ANÁLISES FITOSSOCIOLÓGICAS =====
         if analises_avancadas and analises_avancadas.get('ivi'):
             story.append(PageBreak())
-            story.append(Paragraph("📈 Análises Fitossociológicas", section_title_style))
+            story.append(Paragraph("ANALISES FITOSSOCIOLOGICAS", section_title_style))
             story.append(Spacer(1, 10))
 
             # IVI - Top 10
@@ -4412,9 +4987,49 @@ def export_pdf():
 
             story.append(t_ivi)
 
+        # ===== ANÁLISE POR SUBPARCELA =====
+        if analysis_results:
+            story.append(PageBreak())
+            story.append(Paragraph("ANALISE POR SUBPARCELA", section_title_style))
+            story.append(Spacer(1, 10))
+
+            subp_data = [['Subparcela', 'N Especies', 'Cobertura Total (%)', 'Especies Presentes']]
+
+            for idx, result in enumerate(analysis_results, 1):
+                especies_list = result.get('especies', [])
+                cobertura_total = sum(float(e.get('cobertura', 0)) for e in especies_list)
+                especies_nomes = ', '.join([e.get('apelido', 'N/A')[:15] for e in especies_list[:3]])
+                if len(especies_list) > 3:
+                    especies_nomes += f' (+{len(especies_list)-3})'
+
+                subp_data.append([
+                    result.get('subparcela', f'Sub {idx}'),
+                    str(len(especies_list)),
+                    f"{cobertura_total:.1f}",
+                    especies_nomes
+                ])
+
+            t_subp = Table(subp_data, colWidths=[4*cm, 3*cm, 4*cm, 6.5*cm])
+            t_subp.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FF9800')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('ALIGN', (3, 1), (3, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#FFF3E0')]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#FF9800')),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8)
+            ]))
+
+            story.append(t_subp)
+
         # ===== DETALHES POR ESPÉCIE =====
         story.append(PageBreak())
-        story.append(Paragraph("🔍 Detalhamento por Espécie", section_title_style))
+        story.append(Paragraph("DETALHAMENTO POR ESPECIE", section_title_style))
         story.append(Spacer(1, 10))
 
         for esp_nome, esp_info in sorted(especies.items(), key=lambda x: x[1].get('cobertura', 0), reverse=True):
@@ -4429,9 +5044,9 @@ def export_pdf():
             )
 
             apelido = esp_info.get('apelido_usuario', esp_nome)
-            genero = esp_info.get('genero', 'Não identificado')
+            genero = esp_info.get('genero', 'Nao identificado')
             especie = esp_info.get('especie', 'sp.')
-            familia = esp_info.get('familia', 'Não identificada')
+            familia = esp_info.get('familia', 'Nao identificada')
             cobertura = esp_info.get('cobertura', 0)
             ocorrencias = esp_info.get('ocorrencias', 0)
 
@@ -4486,6 +5101,12 @@ def export_zip():
         especies = data.get('especies', {})
         analysis_results = data.get('analysisResults', [])
         analytics = data.get('analytics', {})
+
+        print(f"\n📦 EXPORT ZIP - Dados recebidos:")
+        print(f"   Parcela: {parcela_nome}")
+        print(f"   Nº analysisResults: {len(analysis_results)}")
+        for idx, result in enumerate(analysis_results, 1):
+            print(f"   Result {idx}: image_path = {result.get('image_path', 'VAZIO')}")
         
         # Criar ZIP em memória
         zip_buffer = BytesIO()
@@ -4496,9 +5117,14 @@ def export_zip():
             subparcelas_dict = {}
             for idx, result in enumerate(analysis_results, 1):
                 subparcela_id = f"sub_{idx}"
+                img_path = result.get('image_path', '')
+                # Converter para apenas nome do arquivo (basename)
+                if img_path:
+                    img_path = os.path.basename(img_path)
+
                 subparcelas_dict[subparcela_id] = {
                     'nome': result.get('subparcela', f'Sub {idx}'),
-                    'image_path': result.get('image_path', ''),
+                    'image_path': img_path,
                     'especies': result.get('especies', []),
                     'cobertura_total': result.get('cobertura_total', 0),
                     'area_descoberta': result.get('area_descoberta', 0)
@@ -4522,29 +5148,52 @@ def export_zip():
             # TODO: Implementar geração de Excel com analytics
             
             # 3. Adicionar fotos das subparcelas (APENAS as da análise atual)
-            upload_folder = app.config['UPLOAD_FOLDER']
-            parcela_folder = os.path.join(upload_folder, parcela_nome)
-            
-            # Criar conjunto com apenas os nomes de arquivo das subparcelas na análise
-            current_images = set()
-            for result in analysis_results:
-                image_path = result.get('image_path', '')
-                if image_path:
-                    filename = os.path.basename(image_path)
-                    current_images.add(filename)
-            
-            print(f"📁 Exportando {len(current_images)} imagens da análise atual")
-            
-            if os.path.exists(parcela_folder) and current_images:
-                for filename in os.listdir(parcela_folder):
-                    # Incluir APENAS as imagens que estão na análise atual
-                    if filename in current_images and filename.lower().endswith(('.jpg', '.jpeg', '.png')):
-                        file_path = os.path.join(parcela_folder, filename)
-                        zip_file.write(file_path, f'images/{filename}')
-                        print(f"   ✓ {filename}")
-            
+            # Função helper para converter URL relativa em caminho absoluto
+            def url_to_filepath(url_or_path):
+                """Converte URL relativa para caminho absoluto do arquivo"""
+                if not url_or_path:
+                    return None
+
+                # Se começa com /static/uploads/, converter para caminho real
+                if url_or_path.startswith('/static/uploads/'):
+                    rel_path = url_or_path.replace('/static/uploads/', '')
+                    return os.path.join(app.config['UPLOAD_FOLDER'], rel_path.replace('/', os.sep))
+
+                # Se já é caminho absoluto, retornar como está
+                if os.path.isabs(url_or_path):
+                    return url_or_path
+
+                return None
+
+            # Coletar imagens das subparcelas
+            images_copied = 0
+            print(f"\n🔍 Exportando imagens das subparcelas...")
+            print(f"   Total de subparcelas: {len(analysis_results)}")
+
+            for idx, result in enumerate(analysis_results, 1):
+                img_url = result.get('image_path', '')
+                print(f"\n   Subparcela {idx}:")
+                print(f"      image_path original: {img_url}")
+
+                if img_url:
+                    img_path = url_to_filepath(img_url)
+                    print(f"      Caminho convertido: {img_path}")
+                    print(f"      Arquivo existe? {os.path.exists(img_path) if img_path else 'N/A'}")
+
+                    if img_path and os.path.exists(img_path):
+                        filename = os.path.basename(img_path)
+                        zip_file.write(img_path, f'images/{filename}')
+                        images_copied += 1
+                        print(f"      ✓ Copiada: {filename}")
+                    else:
+                        print(f"      ✗ Imagem não encontrada!")
+                else:
+                    print(f"      ⚠️ Sem image_path definido")
+
+            print(f"\n📁 {images_copied} imagens exportadas para o ZIP")
+
             # 4. Adicionar fotos das espécies
-            species_photos_folder = os.path.join(upload_folder, 'species_photos')
+            species_photos_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'species_photos')
             
             if os.path.exists(species_photos_folder):
                 for species_folder in os.listdir(species_photos_folder):
@@ -4591,4 +5240,137 @@ Para reimportar esta análise no sistema, use a opção "Importar ZIP" e selecio
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    import webbrowser
+    from threading import Timer
+    import logging
+
+    # Detectar se está rodando como executável
+    is_frozen = getattr(sys, 'frozen', False)
+
+    # Garantir que o console permaneça visível no Windows
+    # Nota: Se console=True no PyInstaller, o console já deve estar visível
+    # Este código só é necessário se console=False, mas pode causar problemas
+    # Por isso, vamos apenas garantir que stdout/stderr estejam configurados
+    if is_frozen and sys.platform == 'win32':
+        try:
+            # Tentar configurar codificação UTF-8 para o console
+            import codecs
+            if sys.stdout.encoding != 'utf-8':
+                try:
+                    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+                except:
+                    pass
+            if sys.stderr.encoding != 'utf-8':
+                try:
+                    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+                except:
+                    pass
+        except Exception as e:
+            # Se falhar, continuar normalmente
+            pass
+
+    # Configurar logging para arquivo quando instalado
+    if is_frozen:
+        log_file = os.path.join(work_dir, 'herbalscan.log')
+        error_log_file = os.path.join(work_dir, 'herbalscan_error.log')
+        
+        # Criar diretório se não existir
+        os.makedirs(work_dir, exist_ok=True)
+        
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file, mode='w', encoding='utf-8'),
+                logging.StreamHandler()
+            ]
+        )
+        logging.info(f"=== HerbalScan iniciando ===")
+        logging.info(f"Executável: {sys.executable}")
+        logging.info(f"Work dir: {work_dir}")
+        logging.info(f"Bundle dir: {bundle_dir}")
+        logging.info(f"Log file: {log_file}")
+        logging.info(f"Python version: {sys.version}")
+        logging.info(f"Platform: {sys.platform}")
+        
+        # Verificar se diretórios existem
+        logging.info(f"Template folder existe: {os.path.exists(template_folder)}")
+        logging.info(f"Static folder existe: {os.path.exists(static_folder)}")
+        
+        print("=" * 60)
+        print("Iniciando HerbalScan...")
+        print("=" * 60)
+        print(f"Diretório de trabalho: {work_dir}")
+        print(f"Diretório do bundle: {bundle_dir}")
+        print(f"Arquivo de log: {log_file}")
+        print("=" * 60)
+        print()
+
+    try:
+        if is_frozen:
+            # Modo produção (executável)
+            def open_browser():
+                try:
+                    webbrowser.open('http://127.0.0.1:5000')
+                except Exception as e:
+                    logging.warning(f"Erro ao abrir navegador: {e}")
+                    print(f"⚠️  Não foi possível abrir o navegador automaticamente.")
+                    print(f"   Acesse manualmente: http://127.0.0.1:5000")
+
+            # Abrir navegador após 1.5 segundos
+            Timer(1.5, open_browser).start()
+
+            print("=" * 60)
+            print("🌿 HerbalScan - Sistema de Análise de Cobertura")
+            print("=" * 60)
+            print("\nServidor iniciado com sucesso!")
+            print("📍 Endereço: http://127.0.0.1:5000")
+            print("\n⚡ O navegador será aberto automaticamente...")
+            print("\n⚠️  NÃO FECHE ESTA JANELA enquanto usar o aplicativo!")
+            print("=" * 60)
+            print()
+
+            app.run(debug=False, host='127.0.0.1', port=5000, use_reloader=False)
+        else:
+            # Modo desenvolvimento
+            app.run(debug=True, host='0.0.0.0', port=5000)
+    except KeyboardInterrupt:
+        print("\n\nAplicativo encerrado pelo usuário.")
+        if is_frozen:
+            logging.info("Aplicativo encerrado pelo usuário")
+        sys.exit(0)
+    except Exception as e:
+        error_msg = f"\n{'=' * 60}\nERRO FATAL!\n{'=' * 60}\n\n{e}\n"
+        print(error_msg)
+
+        if is_frozen:
+            logging.error(error_msg)
+            logging.error("Stack trace:", exc_info=True)
+            
+            # Escrever também no arquivo de erro
+            try:
+                with open(error_log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"\n{'='*60}\n")
+                    f.write(f"ERRO FATAL - {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"{'='*60}\n")
+                    f.write(error_msg)
+                    traceback.print_exc(file=f)
+                    f.write(f"\n{'='*60}\n")
+            except:
+                pass
+
+        traceback.print_exc()
+
+        print("\n" + "=" * 60)
+
+        if is_frozen:
+            print(f"Verifique os arquivos de log:")
+            print(f"  - {log_file}")
+            print(f"  - {error_log_file}")
+
+        print("\nPressione ENTER para fechar...")
+        try:
+            input()
+        except:
+            pass
+        sys.exit(1)

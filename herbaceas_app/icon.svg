@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="128" cy="128" r="120" fill="#2d5016" stroke="#1a3009" stroke-width="4"/>
+
+  <!-- Leaf design -->
+  <g transform="translate(128, 128)">
+    <!-- Center stem -->
+    <rect x="-4" y="-60" width="8" height="120" fill="#4a7c2a" rx="2"/>
+
+    <!-- Left leaves -->
+    <ellipse cx="-35" cy="-30" rx="30" ry="20" fill="#6ba83e" transform="rotate(-45 -35 -30)"/>
+    <ellipse cx="-40" cy="0" rx="35" ry="22" fill="#7dc24a" transform="rotate(-35 -40 0)"/>
+    <ellipse cx="-35" cy="30" rx="30" ry="20" fill="#6ba83e" transform="rotate(-25 -35 30)"/>
+
+    <!-- Right leaves -->
+    <ellipse cx="35" cy="-30" rx="30" ry="20" fill="#6ba83e" transform="rotate(45 35 -30)"/>
+    <ellipse cx="40" cy="0" rx="35" ry="22" fill="#7dc24a" transform="rotate(35 40 0)"/>
+    <ellipse cx="35" cy="30" rx="30" ry="20" fill="#6ba83e" transform="rotate(25 35 30)"/>
+
+    <!-- Leaf veins (decorative lines) -->
+    <line x1="0" y1="-60" x2="-35" y2="-30" stroke="#4a7c2a" stroke-width="2" opacity="0.6"/>
+    <line x1="0" y1="-30" x2="-40" y2="0" stroke="#5a8c3a" stroke-width="2" opacity="0.6"/>
+    <line x1="0" y1="0" x2="-35" y2="30" stroke="#4a7c2a" stroke-width="2" opacity="0.6"/>
+    <line x1="0" y1="-60" x2="35" y2="-30" stroke="#4a7c2a" stroke-width="2" opacity="0.6"/>
+    <line x1="0" y1="-30" x2="40" y2="0" stroke="#5a8c3a" stroke-width="2" opacity="0.6"/>
+    <line x1="0" y1="0" x2="35" y2="30" stroke="#4a7c2a" stroke-width="2" opacity="0.6"/>
+  </g>
+
+  <!-- Highlight for 3D effect -->
+  <ellipse cx="90" cy="70" rx="40" ry="30" fill="white" opacity="0.15"/>
+</svg>

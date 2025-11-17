@@ -8,7 +8,9 @@
       "WebFetch(domain:annotorious.github.io)",
       "WebFetch(domain:konvajs.org)",
       "WebFetch(domain:blog.faltutech.com)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(dir /B:*)",
+      "Bash(pip freeze:*)"
     ],
     "deny": [],
     "ask": []

@@ -291,6 +291,14 @@ function handleAIModelChange() {
         claudeModelGroup.style.display = 'none';
     }
 
+    // Mostrar/ocultar seletor de versão do GPT
+    const gptModelGroup = document.getElementById('gpt-model-group');
+    if (appState.selectedAI === 'gpt4') {
+        gptModelGroup.style.display = 'block';
+    } else {
+        gptModelGroup.style.display = 'none';
+    }
+
     // Verificar se tem API key para este modelo
     const keyName = getAPIKeyName(appState.selectedAI);
     if (!appState.apiKeys[appState.selectedAI]) {
@@ -1013,6 +1021,14 @@ async function analyzeImages() {
             console.log('Usando versão do Claude:', claudeVersion);
         }
 
+        // Obter versão específica do GPT, se aplicável
+        let gptVersion = null;
+        if (appState.selectedAI === 'gpt4') {
+            const gptVersionSelect = document.getElementById('gpt-version');
+            gptVersion = gptVersionSelect ? gptVersionSelect.value : 'gpt-4o';
+            console.log('Usando versão do GPT:', gptVersion);
+        }
+
         // Obter configuração de prompt salva
         const promptConfig = PromptConfig.getSavedConfig();
         console.log('Usando configuração de prompt:', promptConfig);
@@ -1032,7 +1048,8 @@ async function analyzeImages() {
         const headers = {
             'Content-Type': 'application/json',
             'X-Gemini-Version': geminiVersion || '',
-            'X-Claude-Version': claudeVersion || ''
+            'X-Claude-Version': claudeVersion || '',
+            'X-GPT-Version': gptVersion || ''
         };
         
         // Adicionar chaves API apenas se existirem (codificadas em Base64 com suporte UTF-8)
@@ -1574,6 +1591,9 @@ async function executeReanalysis(subparcela, promptConfig) {
             }
         } else if (appState.selectedAI === 'gpt4') {
             headers['X-API-Key-GPT4'] = apiKey;
+            if (gptVersion) {
+                headers['X-GPT-Version'] = gptVersion;
+            }
         } else if (appState.selectedAI === 'gemini') {
             headers['X-API-Key-Gemini'] = apiKey;
             headers['X-Gemini-Version'] = geminiVersion;
@@ -3315,6 +3335,7 @@ async function analyzeMoreSpecies() {
     try {
         const geminiVersion = localStorage.getItem('geminiVersion') || 'gemini-flash-latest';
         const claudeVersion = document.getElementById('claude-version')?.value || 'claude-sonnet-4-5-20250929';
+        const gptVersion = document.getElementById('gpt-version')?.value || 'gpt-4o';
 
         const headers = { 'Content-Type': 'application/json' };
 
@@ -3324,6 +3345,9 @@ async function analyzeMoreSpecies() {
             headers['X-Claude-Version'] = claudeVersion;
         } else if (appState.selectedAI === 'gpt4') {
             headers['X-API-Key-GPT4'] = appState.apiKeys.gpt4;
+            if (gptVersion) {
+                headers['X-GPT-Version'] = gptVersion;
+            }
         } else if (appState.selectedAI === 'gemini') {
             headers['X-API-Key-Gemini'] = appState.apiKeys.gemini;
             headers['X-Gemini-Version'] = geminiVersion;
