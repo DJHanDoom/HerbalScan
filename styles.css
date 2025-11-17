@@ -85,8 +85,28 @@ nav {
 
 .subtitle {
     font-size: 1.3rem;
+    margin-bottom: 1rem;
+    opacity: 0.95;
+}
+
+.version-badge {
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    font-weight: 600;
+    padding: 0.5rem 1.5rem;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 25px;
+    display: inline-block;
+}
+
+.highlight {
+    font-size: 1.1rem;
     margin-bottom: 2rem;
     opacity: 0.95;
+    padding: 1rem;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: var(--border-radius);
+    display: inline-block;
 }
 
 .hero-buttons {
@@ -296,9 +316,76 @@ nav {
     color: var(--dark-color);
 }
 
+.installation h3 {
+    text-align: center;
+    font-size: 1.8rem;
+    margin-bottom: 2rem;
+    color: var(--primary-color);
+}
+
+.install-note {
+    background: var(--light-color);
+    padding: 1.5rem;
+    border-radius: var(--border-radius);
+    text-align: center;
+    margin-bottom: 3rem;
+    border-left: 4px solid var(--secondary-color);
+}
+
+.install-note strong {
+    color: var(--primary-color);
+}
+
 .install-steps {
     max-width: 800px;
     margin: 0 auto;
+}
+
+.api-keys-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin: 2rem auto;
+    max-width: 1000px;
+}
+
+.api-key-card {
+    background: var(--light-color);
+    padding: 1.5rem;
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    transition: all 0.3s;
+    text-align: center;
+}
+
+.api-key-card:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-hover);
+    background: white;
+}
+
+.api-key-card strong {
+    display: block;
+    color: var(--dark-color);
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+}
+
+.api-key-card p {
+    color: #666;
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+}
+
+.api-key-card a {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.3s;
+}
+
+.api-key-card a:hover {
+    color: var(--secondary-color);
 }
 
 .step {
@@ -332,6 +419,27 @@ nav {
     font-size: 1.4rem;
 }
 
+.step-content ul {
+    list-style: none;
+    padding-left: 0;
+}
+
+.step-content ul li {
+    padding: 0.5rem 0;
+    padding-left: 1.5rem;
+    position: relative;
+    color: #666;
+}
+
+.step-content ul li:before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    color: var(--secondary-color);
+    font-weight: bold;
+    font-size: 1.2rem;
+}
+
 .step-content pre {
     background: #f5f5f5;
     padding: 1rem;
@@ -347,6 +455,18 @@ nav {
 
 .step-content p {
     color: #666;
+}
+
+.step-content p a {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.3s;
+}
+
+.step-content p a:hover {
+    color: var(--secondary-color);
+    text-decoration: underline;
 }
 
 .step-content strong {
@@ -396,6 +516,84 @@ nav {
     color: #666;
 }
 
+/* Contact Section */
+.contact {
+    padding: 5rem 0;
+    background: white;
+}
+
+.contact h2 {
+    text-align: center;
+    font-size: 2.5rem;
+    margin-bottom: 3rem;
+    color: var(--dark-color);
+}
+
+.creator-info {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.creator-info h3 {
+    color: var(--primary-color);
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+    text-align: center;
+}
+
+.creator-info h4 {
+    color: var(--dark-color);
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    text-align: center;
+}
+
+.creator-info > p {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    color: #666;
+    font-size: 1.1rem;
+}
+
+.contact-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    margin: 2rem 0;
+}
+
+.contact-item {
+    background: var(--light-color);
+    padding: 1.5rem;
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    transition: all 0.3s;
+}
+
+.contact-item:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-hover);
+}
+
+.contact-item strong {
+    display: block;
+    color: var(--dark-color);
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.contact-item a {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 500;
+    word-break: break-all;
+    transition: color 0.3s;
+}
+
+.contact-item a:hover {
+    color: var(--secondary-color);
+}
+
 /* Footer */
 footer {
     background: var(--dark-color);
@@ -433,11 +631,20 @@ footer a:hover {
         font-size: 1.1rem;
     }
 
+    .version-badge {
+        font-size: 1rem;
+    }
+
+    .highlight {
+        font-size: 1rem;
+    }
+
     .features h2,
     .models h2,
     .vegetation-types h2,
     .installation h2,
-    .tech-stack h2 {
+    .tech-stack h2,
+    .contact h2 {
         font-size: 2rem;
     }
 
@@ -453,6 +660,14 @@ footer a:hover {
         width: 40px;
         height: 40px;
         font-size: 1.2rem;
+    }
+
+    .api-keys-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .contact-grid {
+        grid-template-columns: 1fr;
     }
 }
 
@@ -479,6 +694,16 @@ footer a:hover {
         font-size: 1rem;
     }
 
+    .version-badge {
+        font-size: 0.9rem;
+        padding: 0.4rem 1rem;
+    }
+
+    .highlight {
+        font-size: 0.9rem;
+        padding: 0.8rem;
+    }
+
     .btn {
         padding: 0.8rem 1.5rem;
         font-size: 0.9rem;
@@ -488,7 +713,8 @@ footer a:hover {
     .models,
     .vegetation-types,
     .installation,
-    .tech-stack {
+    .tech-stack,
+    .contact {
         padding: 3rem 0;
     }
 }

@@ -27,9 +27,11 @@
             <div class="hero-content">
                 <h2>Sistema de Análise de Vegetação Herbácea</h2>
                 <p class="subtitle">Análise automatizada de cobertura vegetal em quadrados de 1x1m utilizando Inteligência Artificial</p>
+                <p class="version-badge">✨ Versão 3.0 - Windows Standalone</p>
+                <p class="highlight">💡 <strong>Novidade:</strong> Agora disponível como aplicativo standalone para Windows! Não é necessário instalar Python ou configurar ambiente de desenvolvimento.</p>
                 <div class="hero-buttons">
-                    <a href="https://github.com/DJHanDoom/HerbalScan" class="btn btn-primary" target="_blank">Ver no GitHub</a>
-                    <a href="#installation" class="btn btn-secondary">Começar</a>
+                    <a href="https://github.com/DJHanDoom/HerbalScan/releases/download/v3.0.0-WIN/HerbalScan_Setup_v3.0.0.exe" class="btn btn-primary" target="_blank">📥 Baixar v3.0.0 para Windows</a>
+                    <a href="https://github.com/DJHanDoom/HerbalScan" class="btn btn-secondary" target="_blank">Ver no GitHub</a>
                 </div>
             </div>
         </div>
@@ -37,7 +39,41 @@
 
     <section id="features" class="features">
         <div class="container">
-            <h2>Funcionalidades Principais</h2>
+            <h2>🆕 Novidades da Versão 3.0 (Standalone)</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">✨</div>
+                    <h3>Aplicativo Windows Standalone</h3>
+                    <p>Não requer Python instalado - executável completo e independente</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔧</div>
+                    <h3>Instalador Profissional</h3>
+                    <p>Setup automático com configuração guiada e wizard de instalação</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <h3>6 IAs Diferentes</h3>
+                    <p>Gemini, Claude, GPT-4, DeepSeek, Qwen, HuggingFace</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📦</div>
+                    <h3>Exportação/Importação ZIP</h3>
+                    <p>Pacote completo com JSON + imagens das subparcelas</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Excel Avançado</h3>
+                    <p>4 abas com análises ecológicas: Ranking, Formas de Vida, Comparação e Índices de Diversidade</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📚</div>
+                    <h3>Banco de Espécies de Referência</h3>
+                    <p>Padronização automática e consistência entre análises</p>
+                </div>
+            </div>
+
+            <h2 style="margin-top: 3rem;">Funcionalidades Principais</h2>
             <div class="features-grid">
                 <div class="feature-card">
                     <div class="feature-icon">📤</div>
@@ -55,6 +91,7 @@
                         <li>Suporte a múltiplos modelos de IA</li>
                         <li>Detecção de formas vegetais</li>
                         <li>Cálculo de métricas automatizado</li>
+                        <li>Templates personalizáveis (regeneração, reflorestamento, carbono)</li>
                     </ul>
                 </div>
                 <div class="feature-card">
@@ -64,6 +101,7 @@
                         <li>Edição individual de espécies</li>
                         <li>Unificação e subdivisão</li>
                         <li>Adição e remoção manual</li>
+                        <li>Informações científicas (gênero, espécie, família)</li>
                     </ul>
                 </div>
                 <div class="feature-card">
@@ -72,7 +110,8 @@
                     <ul>
                         <li>Cards visuais por subparcela</li>
                         <li>Resumo estatístico</li>
-                        <li>Exportação para Excel</li>
+                        <li>Exportação para Excel, PDF e ZIP</li>
+                        <li>Índices de diversidade (Shannon, Simpson, Pielou)</li>
                     </ul>
                 </div>
             </div>
@@ -158,7 +197,82 @@
 
     <section id="installation" class="installation">
         <div class="container">
-            <h2>Como Instalar</h2>
+            <h2>🚀 Instalação Rápida (Windows)</h2>
+            
+            <div class="install-note">
+                <p><strong>💡 Novidade:</strong> Aplicativo standalone para Windows! Não é necessário instalar Python ou configurar ambiente de desenvolvimento.</p>
+            </div>
+
+            <div class="install-steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>Baixe o Instalador</h3>
+                        <p>📥 <a href="https://github.com/DJHanDoom/HerbalScan/releases/download/v3.0.0-WIN/HerbalScan_Setup_v3.0.0.exe" target="_blank"><strong>Baixar HerbalScan_Setup_v3.0.0.exe</strong></a></p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>Execute o Instalador</h3>
+                        <p>Execute como administrador (clique com botão direito → "Executar como administrador")</p>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>Siga o Assistente</h3>
+                        <ul>
+                            <li>Escolha o diretório de instalação</li>
+                            <li>Selecione a IA padrão (Gemini recomendado)</li>
+                            <li>Opcionalmente, crie atalhos na área de trabalho</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <h3>Configure API Keys</h3>
+                        <p>Na primeira execução, clique no ícone ⚙️ e configure suas chaves de API</p>
+                    </div>
+                </div>
+            </div>
+
+            <h3 style="margin-top: 2rem;">🔑 Obtenha Chaves de API (pelo menos uma):</h3>
+            <div class="api-keys-grid">
+                <div class="api-key-card">
+                    <strong>✨ Google Gemini</strong>
+                    <p><em>(Gratuito, recomendado)</em></p>
+                    <a href="https://aistudio.google.com/app/apikey" target="_blank">Obter chave →</a>
+                </div>
+                <div class="api-key-card">
+                    <strong>🧠 OpenAI GPT-4</strong>
+                    <p><em>(Premium)</em></p>
+                    <a href="https://platform.openai.com/api-keys" target="_blank">Obter chave →</a>
+                </div>
+                <div class="api-key-card">
+                    <strong>🤖 Anthropic Claude</strong>
+                    <p><em>(Premium)</em></p>
+                    <a href="https://console.anthropic.com/settings/keys" target="_blank">Obter chave →</a>
+                </div>
+                <div class="api-key-card">
+                    <strong>🚀 DeepSeek</strong>
+                    <p><em>(Gratuito - $0.14/1M tokens)</em></p>
+                    <a href="https://platform.deepseek.com/api_keys" target="_blank">Obter chave →</a>
+                </div>
+                <div class="api-key-card">
+                    <strong>🌐 Qwen (Alibaba)</strong>
+                    <p><em>(Free tier generoso)</em></p>
+                    <a href="https://dashscope.console.aliyun.com/apiKey" target="_blank">Obter chave →</a>
+                </div>
+                <div class="api-key-card">
+                    <strong>🤗 HuggingFace</strong>
+                    <p><em>(Open source, gratuito)</em></p>
+                    <a href="https://huggingface.co/settings/tokens" target="_blank">Obter chave →</a>
+                </div>
+            </div>
+
+            <h3 style="margin-top: 3rem;">💻 Para Desenvolvedores (Instalação via Código-Fonte)</h3>
             <div class="install-steps">
                 <div class="step">
                     <div class="step-number">1</div>
@@ -178,13 +292,6 @@ cd HerbalScan</code></pre>
                 <div class="step">
                     <div class="step-number">3</div>
                     <div class="step-content">
-                        <h3>Configure as API keys</h3>
-                        <p>Configure suas API keys via variáveis de ambiente ou diretamente na interface web</p>
-                    </div>
-                </div>
-                <div class="step">
-                    <div class="step-number">4</div>
-                    <div class="step-content">
                         <h3>Execute a aplicação</h3>
                         <pre><code>python app.py</code></pre>
                         <p>Acesse em <strong>http://localhost:5000</strong></p>
@@ -196,24 +303,72 @@ cd HerbalScan</code></pre>
 
     <section class="tech-stack">
         <div class="container">
-            <h2>Tecnologias Utilizadas</h2>
+            <h2>📊 Informações Técnicas</h2>
             <div class="tech-grid">
                 <div class="tech-item">
-                    <strong>Backend</strong>
-                    <p>Flask (Python)</p>
+                    <strong>Versão Atual</strong>
+                    <p>3.0.0 (Standalone)</p>
                 </div>
                 <div class="tech-item">
-                    <strong>IA</strong>
-                    <p>Claude, GPT-4, Gemini</p>
+                    <strong>Plataforma</strong>
+                    <p>Windows 10/11 (64-bit)</p>
+                </div>
+                <div class="tech-item">
+                    <strong>Backend</strong>
+                    <p>Flask 3.0 / Python 3.13</p>
+                </div>
+                <div class="tech-item">
+                    <strong>Modelos IA</strong>
+                    <p>6 suportados</p>
+                </div>
+                <div class="tech-item">
+                    <strong>Exportação</strong>
+                    <p>Excel, PDF, ZIP</p>
                 </div>
                 <div class="tech-item">
                     <strong>Frontend</strong>
                     <p>HTML5, CSS3, JavaScript</p>
                 </div>
-                <div class="tech-item">
-                    <strong>Exportação</strong>
-                    <p>OpenPyXL</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="contact">
+        <div class="container">
+            <h2>👨‍💻 Sobre o Criador</h2>
+            <div class="creator-info">
+                <h3>Diogo Bueno Kanoute</h3>
+                <p><strong>Parabotânico e Dendrólogo em Inventário Florestal</strong></p>
+                <p>Desenvolvedor especializado em Tecnologias de Inteligência Artificial e Banco de Dados para Inventário Florestal, Ecologia, Botânica, Dendrometria e Dendrologia.</p>
+                
+                <h4 style="margin-top: 2rem;">🔗 Links e Contatos</h4>
+                <div class="contact-grid">
+                    <div class="contact-item">
+                        <strong>📸 Fototeca DBK no SPLink</strong>
+                        <a href="https://specieslink.net/col/FDBK" target="_blank">specieslink.net/col/FDBK</a>
+                    </div>
+                    <div class="contact-item">
+                        <strong>📱 Instagram Científico</strong>
+                        <a href="https://instagram.com/fotografandomato" target="_blank">@fotografandomato</a>
+                    </div>
+                    <div class="contact-item">
+                        <strong>📚 Biblioteca Botânica</strong>
+                        <a href="https://drive.google.com/drive/folders/0B4wGMi_KVTvOWm51UzNnNVJjaEk?resourcekey=0-8e69zvcLn2zMXuphNmC56A&usp=drive_link" target="_blank">PDFs e Material de Referência</a>
+                    </div>
+                    <div class="contact-item">
+                        <strong>🌿 Flora da Reserva Ducke</strong>
+                        <a href="https://drive.google.com/drive/folders/0B4wGMi_KVTvOV2FmV0dnbDFiSzA?resourcekey=0-93UNqXD8Tg4mD0C9p073SA&usp=drive_link" target="_blank">Glossários e Guias Ilustrados</a>
+                    </div>
+                    <div class="contact-item">
+                        <strong>💬 WhatsApp Científico</strong>
+                        <a href="https://wa.me/5521998501623" target="_blank">+55 21 998501623</a>
+                    </div>
+                    <div class="contact-item">
+                        <strong>📧 E-mail</strong>
+                        <a href="mailto:diogokanoute@gmail.com">diogokanoute@gmail.com</a>
+                    </div>
                 </div>
+                <p style="margin-top: 1.5rem;"><em>Entre em contato para dúvidas sobre o app, cursos de Identificação Botânica, tecnologias de IA aplicadas à Dendrologia ou serviços de Inventário Florestal (Mata Atlântica, Cerrado, Amazônia e Caatinga).</em></p>
             </div>
         </div>
     </section>
