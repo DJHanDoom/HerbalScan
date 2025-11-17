@@ -12,7 +12,7 @@ Aplicação standalone para Windows para análise automatizada de espécies herb
 
 ### Download do Instalador
 
-📥 **[Baixar HerbalScan v3.0.0 para Windows](https://github.com/DJHanDoom/HerbalScan/releases/latest)**
+📥 **[Baixar HerbalScan v3.0.0 para Windows](https://github.com/DJHanDoom/HerbalScan/releases/download/v3.0.0-WIN/HerbalScan_Setup_v3.0.0.exe)**
 
 ### Requisitos do Sistema
 
@@ -20,6 +20,7 @@ Aplicação standalone para Windows para análise automatizada de espécies herb
 - **Espaço em Disco:** ~200 MB
 - **Memória RAM:** 4 GB mínimo (8 GB recomendado)
 - **Conexão com Internet:** Necessária para análise com IA
+- **Nenhuma instalação adicional necessária** - Python e dependências já incluídos!
 
 ### Passo a Passo
 

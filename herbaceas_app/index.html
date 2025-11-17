@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="HerbalScan - Análise de Vegetação Herbácea com IA para Windows">
+    <title>HerbalScan - Análise de Vegetação com IA</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: white;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 800px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            color: #333;
+        }
+        
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .logo h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+        
+        .logo p {
+            font-size: 1.2em;
+            color: #666;
+        }
+        
+        .hero {
+            text-align: center;
+            margin: 30px 0;
+        }
+        
+        .hero img {
+            max-width: 100%;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .download-btn {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            padding: 20px 50px;
+            border-radius: 50px;
+            font-size: 1.3em;
+            font-weight: bold;
+            margin: 20px 0;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        
+        .download-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.6);
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 40px 0;
+        }
+        
+        .feature {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .feature-icon {
+            font-size: 3em;
+            margin-bottom: 10px;
+        }
+        
+        .feature h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .requirements {
+            background: #fff3cd;
+            border-left: 5px solid #ffc107;
+            padding: 20px;
+            margin: 30px 0;
+            border-radius: 5px;
+        }
+        
+        .requirements h3 {
+            color: #856404;
+            margin-bottom: 15px;
+        }
+        
+        .requirements ul {
+            list-style: none;
+            padding-left: 20px;
+        }
+        
+        .requirements li:before {
+            content: "✓ ";
+            color: #28a745;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #e9ecef;
+        }
+        
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>🌿 HerbalScan</h1>
+            <p>Análise de Vegetação Herbácea com Inteligência Artificial</p>
+            <p style="font-size: 0.9em; color: #999;">Versão 3.0 - Windows Standalone</p>
+        </div>
+        
+        <div class="hero">
+            <p style="font-size: 1.1em; margin-bottom: 20px;">
+                Aplicativo standalone para Windows para análise automatizada de espécies herbáceas 
+                em parcelas de campo utilizando Inteligência Artificial.
+            </p>
+            
+            <a href="https://github.com/DJHanDoom/HerbalScan/releases/download/v3.0.0-WIN/HerbalScan_Setup_v3.0.0.exe" class="download-btn">
+                📥 Baixar HerbalScan v3.0.0
+            </a>
+            
+            <p style="margin-top: 10px; color: #666;">
+                <small>Windows 10/11 (64-bit) | ~200 MB | Gratuito</small>
+            </p>
+        </div>
+        
+        <div class="requirements">
+            <h3>✨ Nenhuma instalação adicional necessária!</h3>
+            <ul>
+                <li>Não requer Python ou ambiente de desenvolvimento</li>
+                <li>Instalador profissional com configuração guiada</li>
+                <li>Pronto para usar após a instalação</li>
+            </ul>
+        </div>
+        
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">🤖</div>
+                <h3>6 IAs Diferentes</h3>
+                <p>Gemini, Claude, GPT-4, DeepSeek, Qwen, HuggingFace</p>
+            </div>
+            
+            <div class="feature">
+                <div class="feature-icon">📸</div>
+                <h3>Análise Automática</h3>
+                <p>Identificação de morfotipos e características</p>
+            </div>
+            
+            <div class="feature">
+                <div class="feature-icon">📊</div>
+                <h3>Excel Avançado</h3>
+                <p>4 abas com análises ecológicas detalhadas</p>
+            </div>
+            
+            <div class="feature">
+                <div class="feature-icon">📦</div>
+                <h3>Export/Import ZIP</h3>
+                <p>Salve e carregue projetos completos</p>
+            </div>
+            
+            <div class="feature">
+                <div class="feature-icon">✏️</div>
+                <h3>Edição Inline</h3>
+                <p>Painel lateral moderno para editar espécies</p>
+            </div>
+            
+            <div class="feature">
+                <div class="feature-icon">🎨</div>
+                <h3>Interface Moderna</h3>
+                <p>Design responsivo e intuitivo</p>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>
+                <a href="https://github.com/DJHanDoom/HerbalScan" target="_blank">📖 Ver no GitHub</a> | 
+                <a href="https://github.com/DJHanDoom/HerbalScan/releases" target="_blank">📋 Changelog</a> | 
+                <a href="https://github.com/DJHanDoom/HerbalScan/issues" target="_blank">🐛 Reportar Bug</a>
+            </p>
+            <p style="margin-top: 20px; color: #999;">
+                Desenvolvido por <strong>Diogo Bueno Kanoute</strong><br>
+                Parabotânico e Dendrólogo | Tecnologias de IA para Inventário Florestal
+            </p>
+        </div>
+    </div>
+</body>
+</html>
