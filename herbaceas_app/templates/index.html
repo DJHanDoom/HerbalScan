@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/coverage-drawer.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/species-details-modal.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/advanced-analytics.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/help-modal.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -159,6 +160,9 @@
     <!-- Rodapé Fixo de Exportação -->
     <footer id="export-footer" style="display: block;">
         <div class="export-footer-container">
+            <button id="help-btn" class="btn btn-secondary" onclick="openHelpModal()" style="margin-right: 15px;">
+                ❓ Help
+            </button>
             <div class="export-footer-title">📦 Exportação & Importação</div>
             <div class="export-footer-buttons">
                 <button id="import-zip-footer-btn" class="btn btn-info" onclick="AnalysisManager.importCompleteZip()">
@@ -194,6 +198,138 @@
         </div>
     </div>
 
+    <!-- Modal de Help -->
+    <div id="help-modal" class="modal" style="display: none;">
+        <div class="help-modal-content">
+            <div class="help-modal-header">
+                <h2>❓ Ajuda - HerbalScan</h2>
+                <button onclick="closeHelpModal()" class="close-btn">×</button>
+            </div>
+            <div class="help-modal-body">
+                <!-- Instruções de Uso -->
+                <section class="help-section">
+                    <h3>📖 Instruções de Uso</h3>
+                    <div class="help-instructions">
+                        <div class="instruction-item">
+                            <strong>1️⃣ Configurar API Keys</strong>
+                            <p>Clique no ícone de configuração (⚙️) no canto superior direito e adicione suas chaves de API para os serviços de IA desejados (Gemini, Claude, GPT-4, etc.).</p>
+                        </div>
+                        <div class="instruction-item">
+                            <strong>2️⃣ Criar ou Selecionar Parcela</strong>
+                            <p>Digite o nome da parcela no campo "Nome da Parcela" ou selecione uma parcela existente no menu dropdown.</p>
+                        </div>
+                        <div class="instruction-item">
+                            <strong>3️⃣ Upload de Imagens</strong>
+                            <p>Clique em "Escolher Imagens" e selecione as fotos das subparcelas que deseja analisar. Você pode fazer upload de múltiplas imagens de uma vez.</p>
+                        </div>
+                        <div class="instruction-item">
+                            <strong>4️⃣ Configurar Prompt (Opcional)</strong>
+                            <p>Utilize o painel de configuração de prompt para personalizar a análise. Você pode escolher templates predefinidos ou criar templates customizados.</p>
+                        </div>
+                        <div class="instruction-item">
+                            <strong>5️⃣ Iniciar Análise</strong>
+                            <p>Selecione o modelo de IA desejado e clique em "🔍 Analisar". O sistema processará as imagens e identificará as espécies vegetais presentes.</p>
+                        </div>
+                        <div class="instruction-item">
+                            <strong>6️⃣ Revisar e Editar Resultados</strong>
+                            <p>Após a análise, revise os resultados no painel lateral. Você pode editar espécies, coberturas, alturas e formas de vida conforme necessário.</p>
+                        </div>
+                        <div class="instruction-item">
+                            <strong>7️⃣ Adicionar Espécies de Referência</strong>
+                            <p>Use o botão "📚 Espécies de Referência" para adicionar espécies ao banco de dados de referência, facilitando a padronização em análises futuras.</p>
+                        </div>
+                        <div class="instruction-item">
+                            <strong>8️⃣ Exportar Dados</strong>
+                            <p>Utilize os botões no rodapé para exportar seus resultados em diferentes formatos:</p>
+                            <ul>
+                                <li><strong>📊 Excel:</strong> Planilha completa com análises avançadas, índices de diversidade e rankings</li>
+                                <li><strong>📄 PDF:</strong> Relatório visual com gráficos e tabelas</li>
+                                <li><strong>📦 ZIP:</strong> Pacote completo incluindo JSON + imagens das subparcelas</li>
+                            </ul>
+                        </div>
+                        <div class="instruction-item">
+                            <strong>9️⃣ Importar Projetos</strong>
+                            <p>Use "📥 Importar Projeto" para carregar análises anteriores salvas em formato ZIP.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <hr style="margin: 30px 0; border: 1px solid #e0e0e0;">
+
+                <!-- Sobre o Criador -->
+                <section class="help-section">
+                    <h3>👨‍💻 Sobre o Criador e Contatos</h3>
+                    <div class="creator-card">
+                        <h4>Diogo Bueno Kanoute</h4>
+                        <p class="creator-title">Parabotânico e Dendrólogo em Inventário Florestal</p>
+                        <p class="creator-description">
+                            Desenvolvedor especializado em Tecnologias de Inteligência Artificial e Banco de Dados
+                            para Inventário Florestal, Ecologia, Botânica, Dendrometria e Dendrologia.
+                        </p>
+
+                        <div class="contact-links">
+                            <h5>🔗 Links e Contatos:</h5>
+
+                            <a href="https://specieslink.net/col/FDBK" target="_blank" class="contact-item">
+                                <span class="contact-icon">📸</span>
+                                <div>
+                                    <strong>Fototeca DBK no SPLink</strong>
+                                    <small>specieslink.net/col/FDBK</small>
+                                </div>
+                            </a>
+
+                            <a href="https://instagram.com/fotografandomato" target="_blank" class="contact-item">
+                                <span class="contact-icon">📱</span>
+                                <div>
+                                    <strong>Instagram Científico</strong>
+                                    <small>@fotografandomato</small>
+                                </div>
+                            </a>
+
+                            <a href="https://drive.google.com/drive/folders/1CItqYGmHNYC3aGK14F-Q-c-qwwqJSNpu" target="_blank" class="contact-item">
+                                <span class="contact-icon">📚</span>
+                                <div>
+                                    <strong>Biblioteca Botânica</strong>
+                                    <small>PDFs e Material de Referência</small>
+                                </div>
+                            </a>
+
+                            <a href="https://drive.google.com/drive/folders/1-gP-G7u3DFiwWVxEYgXEqCw1RExbOjTR" target="_blank" class="contact-item">
+                                <span class="contact-icon">🌿</span>
+                                <div>
+                                    <strong>Flora da Reserva Ducke</strong>
+                                    <small>Glossários e Guias Ilustrados</small>
+                                </div>
+                            </a>
+
+                            <a href="https://wa.me/5521998501623" target="_blank" class="contact-item">
+                                <span class="contact-icon">💬</span>
+                                <div>
+                                    <strong>WhatsApp Científico</strong>
+                                    <small>+55 21 998501623</small>
+                                </div>
+                            </a>
+
+                            <a href="mailto:diogokanoute@gmail.com" class="contact-item">
+                                <span class="contact-icon">📧</span>
+                                <div>
+                                    <strong>E-mail de Contato</strong>
+                                    <small>diogokanoute@gmail.com</small>
+                                </div>
+                            </a>
+                        </div>
+
+                        <p class="creator-footer">
+                            Entre em contato para dúvidas sobre o app, cursos de Identificação Botânica,
+                            tecnologias de IA aplicadas à Dendrologia ou serviços de Inventário Florestal
+                            (Mata Atlântica, Cerrado, Amazônia e Caatinga).
+                        </p>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal de Subdivisão de Espécies -->
     <div id="split-modal" class="split-modal">
         <div class="split-overlay" onclick="closeSplitModal()"></div>
@@ -220,5 +356,35 @@
     <script src="{{ url_for('static', filename='js/species-details-modal.js') }}"></script>
     <script src="{{ url_for('static', filename='js/advanced-analytics.js') }}"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+    <!-- Help Modal Controls -->
+    <script>
+        function openHelpModal() {
+            document.getElementById('help-modal').style.display = 'flex';
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeHelpModal() {
+            document.getElementById('help-modal').style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+
+        // Fechar modal ao clicar fora do conteúdo
+        document.getElementById('help-modal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeHelpModal();
+            }
+        });
+
+        // Fechar modal com tecla ESC
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const modal = document.getElementById('help-modal');
+                if (modal.style.display === 'flex') {
+                    closeHelpModal();
+                }
+            }
+        });
+    </script>
 </body>
 </html>

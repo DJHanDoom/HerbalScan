@@ -18,6 +18,8 @@ def get_app_data_dir():
     else:
         # Se está rodando como script Python
         app_dir = Path(__file__).parent
+
+    print(f"[DEBUG] App data dir: {app_dir}")
     return app_dir
 
 
@@ -55,13 +57,13 @@ def save_env(config):
     """Salva as configurações no arquivo .env"""
     env_path = get_env_path()
 
-    content = """# Configuração do HerbalScan
-# Adicione suas chaves de API abaixo
+    content = """# HerbalScan Configuration
+# Add your API keys below
 
-# IA Padrão (gemini, claude, gpt4, deepseek, qwen, huggingface)
+# Default AI (gemini, claude, gpt4, deepseek, qwen, huggingface)
 DEFAULT_AI={default_ai}
 
-# Chaves de API
+# API Keys
 ANTHROPIC_API_KEY={anthropic_key}
 OPENAI_API_KEY={openai_key}
 GOOGLE_API_KEY={google_key}
@@ -274,20 +276,33 @@ def ensure_config():
     Garante que a configuração existe.
     Se não existir, abre o wizard de configuração.
     """
+    print(f"[DEBUG] Verificando .env...")
+    env_path = get_env_path()
+    print(f"[DEBUG] .env path: {env_path}")
+    print(f"[DEBUG] .env exists: {env_exists()}")
+
     if not env_exists():
+        print("[DEBUG] .env não existe, criando configuração...")
         try:
+            print("[DEBUG] Tentando abrir wizard...")
             wizard = ConfigWizard()
             wizard.run()
+            print("[DEBUG] Wizard concluído!")
         except Exception as e:
             # Se falhar ao criar wizard, criar .env básico
-            print(f"Aviso: Não foi possível abrir wizard de configuração: {e}")
-            print("Criando configuração padrão...")
+            print(f"[DEBUG] Erro no wizard: {e}")
+            import traceback
+            traceback.print_exc()
+            print("[DEBUG] Criando configuração padrão...")
             save_env({'DEFAULT_AI': 'gemini'})
+            print("[DEBUG] Configuração padrão criada!")
 
     # Carregar as variáveis de ambiente
+    print("[DEBUG] Carregando variáveis de ambiente...")
     env_vars = load_env()
     for key, value in env_vars.items():
         os.environ[key] = value
+    print(f"[DEBUG] {len(env_vars)} variáveis carregadas")
 
 
 if __name__ == '__main__':

@@ -26,8 +26,8 @@ DisableProgramGroupPage=yes
 ; Licença (opcional - crie um arquivo LICENSE.txt se desejar)
 ;LicenseFile=LICENSE.txt
 
-; Ícone do instalador (será criado depois)
-;SetupIconFile=icon.ico
+; Ícone do instalador
+SetupIconFile=icon.ico
 
 ; Saída do instalador
 OutputDir=installer_output
@@ -60,24 +60,28 @@ Name: "quicklaunchicon"; Description: "Criar ícone na Barra de Tarefas"; GroupD
 
 [Files]
 ; Arquivos principais do aplicativo
-Source: "dist\HerbalScan\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.md,*.txt,BUILD_README.md,INSTALADOR_PROFISSIONAL.md,docs,tests,legacy,__pycache__,.git,.gitignore,.env,exports\*,saved_analyses\*,static\uploads\*"
+Source: "dist\HerbalScan\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.md,*.log,BUILD_README.md,INSTALADOR_PROFISSIONAL.md,docs,tests,legacy,__pycache__,.git,.gitignore,.env,exports\*,saved_analyses\*,static\uploads\*"
+
+; Launcher .bat para debug (opcional)
+Source: "HerbalScan_Launcher.bat"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Nota: Todos os arquivos necessários em dist\HerbalScan\ serão copiados, exceto arquivos de desenvolvimento
 
 [Icons]
 ; Atalho no Menu Iniciar
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+Name: "{group}\{#MyAppName} (Launcher)"; Filename: "{app}\HerbalScan_Launcher.bat"; WorkingDir: "{app}"; Comment: "Inicia o HerbalScan com console visível para debug"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 
 ; Atalho na Área de Trabalho (se selecionado)
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 ; Atalho na Barra de Tarefas (se selecionado)
-Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
+Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: quicklaunchicon
 
 [Run]
 ; Opção de executar o aplicativo após instalação
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent; WorkingDir: "{app}"
 
 [Code]
 var
@@ -123,13 +127,14 @@ begin
 
   EnvContent := TStringList.Create;
   try
-    EnvContent.Add('# Configuração do HerbalScan');
-    EnvContent.Add('# Adicione suas chaves de API abaixo');
+    // Usar apenas caracteres ASCII para evitar problemas de codificacao
+    EnvContent.Add('# HerbalScan Configuration');
+    EnvContent.Add('# Add your API keys below');
     EnvContent.Add('');
-    EnvContent.Add('# IA Padrão (gemini, claude, gpt4, deepseek, qwen, huggingface)');
+    EnvContent.Add('# Default AI (gemini, claude, gpt4, deepseek, qwen, huggingface)');
     EnvContent.Add('DEFAULT_AI=' + DefaultAI);
     EnvContent.Add('');
-    EnvContent.Add('# Chaves de API (configure através do menu do aplicativo)');
+    EnvContent.Add('# API Keys (configure via application menu)');
     EnvContent.Add('ANTHROPIC_API_KEY=');
     EnvContent.Add('OPENAI_API_KEY=');
     EnvContent.Add('GOOGLE_API_KEY=');
