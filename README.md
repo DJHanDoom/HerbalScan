@@ -12,7 +12,7 @@ Aplicação standalone para Windows para análise automatizada de espécies herb
 
 ### Download do Instalador
 
-📥 **[Baixar HerbalScan v3.0.0 para Windows](https://github.com/DJHanDoom/HerbalScan/releases/download/v3.0.0-WIN/HerbalScan_Setup_v3.0.0.exe)**
+📥 **[Baixar HerbalScan v3.0.2 para Windows](https://github.com/DJHanDoom/HerbalScan/releases/download/v3.0.2-WIN/HerbalScan_Setup_v3.0.2.exe)**
 
 
 ## 🌐 Site do Projeto
