@@ -23,7 +23,9 @@ PROMPT_TEMPLATES = {
             "focus_succession": False,
             "focus_carbon": False,
             "standardize_across_subplots": "moderate",  # none, conservative, moderate, aggressive
-            "detect_coordinates": True  # Detectar coordenadas de polígonos das espécies
+            "detect_coordinates": True,  # Detectar coordenadas de polígonos das espécies
+            "include_polygon_json": True,  # Incluir polígonos no formato JSON de importação
+            "include_eco_traits": False  # Incluir características ecológicas (grupo sucessional, etc.)
         }
     },
     
@@ -50,7 +52,9 @@ PROMPT_TEMPLATES = {
                 "Observe presença de espécies pioneiras vs secundárias quando possível",
                 "Registre abundância de regenerantes lenhosos"
             ],
-            "detect_coordinates": True
+            "detect_coordinates": True,
+            "include_polygon_json": True,
+            "include_eco_traits": False
         }
     },
     
@@ -78,7 +82,9 @@ PROMPT_TEMPLATES = {
                 "Registre presença de espécies indicadoras de sucessão secundária",
                 "Identifique mudas de espécies nativas arbóreas/arbustivas"
             ],
-            "detect_coordinates": True
+            "detect_coordinates": True,
+            "include_polygon_json": True,
+            "include_eco_traits": False
         }
     },
     
@@ -106,7 +112,9 @@ PROMPT_TEMPLATES = {
                 "Para gramíneas cespitosas, note densidade das touceiras",
                 "Diferencie entre estratos herbáceo (<50cm) e subarbustivo (50-150cm)"
             ],
-            "detect_coordinates": True
+            "detect_coordinates": True,
+            "include_polygon_json": True,
+            "include_eco_traits": False
         }
     },
     
@@ -134,7 +142,9 @@ PROMPT_TEMPLATES = {
                 "Diferencie grupos funcionais: gramíneas C3 vs C4 (quando óbvio pela cor/textura)",
                 "Registre presença de estruturas especializadas: estolões, rizomas, bulbos (quando visíveis)"
             ],
-            "detect_coordinates": True
+            "detect_coordinates": True,
+            "include_polygon_json": True,
+            "include_eco_traits": False
         }
     },
     
@@ -162,7 +172,9 @@ PROMPT_TEMPLATES = {
                 "Identifique xilopódios e estruturas de rebrota quando visíveis",
                 "Note presença de espécies indicadoras de queimada recente"
             ],
-            "detect_coordinates": True
+            "detect_coordinates": True,
+            "include_polygon_json": True,
+            "include_eco_traits": False
         }
     },
     
@@ -190,7 +202,9 @@ PROMPT_TEMPLATES = {
                 "Registre abundância de serapilheira (importante em ambientes florestais)",
                 "Note presença de lianas e trepadeiras jovens"
             ],
-            "detect_coordinates": True
+            "detect_coordinates": True,
+            "include_polygon_json": True,
+            "include_eco_traits": False
         }
     },
     
@@ -219,7 +233,9 @@ PROMPT_TEMPLATES = {
                 "Note presença de espécies ruderais e indicadoras de distúrbio",
                 "Estime vigor da vegetação (plantas saudáveis vs estressadas/secas)"
             ],
-            "detect_coordinates": True
+            "detect_coordinates": True,
+            "include_polygon_json": True,
+            "include_eco_traits": False
         }
     },
     
@@ -247,7 +263,9 @@ PROMPT_TEMPLATES = {
                 "Registre presença de juncos e taboas quando presentes",
                 "Note adaptações a ambientes alagados (aerênquima, raízes adventícias visíveis)"
             ],
-            "detect_coordinates": True
+            "detect_coordinates": True,
+            "include_polygon_json": True,
+            "include_eco_traits": False
         }
     },
     
@@ -274,7 +292,9 @@ PROMPT_TEMPLATES = {
                 "Foque em cobertura e estrutura geral da vegetação",
                 "Minimize detalhes taxonômicos"
             ],
-            "detect_coordinates": True
+            "detect_coordinates": True,
+            "include_polygon_json": True,
+            "include_eco_traits": False
         }
     },
     
@@ -303,7 +323,9 @@ PROMPT_TEMPLATES = {
                 "Para Poaceae: note tipo de inflorescência (panícula, espiga, racemo, digitada)",
                 "Para Cyperaceae: observe formato da inflorescência (umbela, espiga, capítulo)"
             ],
-            "detect_coordinates": True
+            "detect_coordinates": True,
+            "include_polygon_json": True,
+            "include_eco_traits": False
         }
     }
 }
@@ -766,72 +788,163 @@ Para cada morfotipo CLARAMENTE visível, forneça:
         prompt += """
 """
 
-    prompt += """
+
+    # Adicionar informações de polígonos se ativado
+    if params.get('include_polygon_json', False):
+        prompt += """
+
+📐 **FORMATO DE POLÍGONOS (OBRIGATÓRIO quando include_polygon_json=True):**
+
+Além do array de espécies, você DEVE incluir dois campos adicionais no JSON:
+
+1. **area_shape** - Polígono representando a área total da subparcela (1x1m):
+   - Coordenadas em porcentagem (0-100) relativas à imagem
+   - Geralmente um quadrilátero representando os limites visíveis do quadrado
+   - Se não conseguir identificar os limites, use: {"points": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}]}
+
+2. **species_shapes** - Objeto mapeando índice de espécie → array de polígonos:
+   - Chave = índice da espécie no array (0, 1, 2...)
+   - Valor = array de polígonos onde a espécie ocorre
+   - Cada polígono: {"points": [{"x": X, "y": Y}, ...]}
+   - Use [] se a espécie estiver muito dispersa/uniforme
+
+   **Coordenadas:**
+   - x: 0 (esquerda) a 100 (direita)
+   - y: 0 (topo) a 100 (fundo)
+   - Mínimo 3-4 pontos por polígono
+   - Múltiplos polígonos se espécie em áreas não-contíguas
+
+"""
+    
+    # Adicionar informações de traços ecológicos se ativado
+    if params.get('include_eco_traits', False):
+        prompt += """
+
+🌱 **CARACTERÍSTICAS ECOLÓGICAS (OPCIONAL):**
+
+Para cada espécie, TENTE preencher os seguintes campos ecológicos:
+
+8. **grupo_sucessional** - Classificação sucessional (se identificável):
+   - "Pioneira" - Espécies de início de sucessão, tolerantes ao sol
+   - "Secundária Inicial" - Transição, crescimento rápido
+   - "Secundária Tardia" - Espécies de sombra moderada
+   - "Climácica" - Espécies de florestas maduras
+   - "" (vazio) - Se não for possível determinar
+
+9. **tolerancia_sombra** - Preferência de luminosidade:
+   - "Heliófita" - Exige sol direto
+   - "Esciófita" - Tolera/prefere sombra
+   - "Indiferente" - Flexível
+   - "" (vazio) - Se não for possível determinar
+
+10. **tipo_dispersao** - Mecanismo de dispersão (se identificável):
+   - "Anemocórica" - Dispersão pelo vento
+   - "Zoocórica" - Dispersão por animais
+   - "Autocórica" - Auto-dispersão
+   - "Hidrocórica" - Dispersão pela água
+   - "" (vazio) - Se não for possível determinar
+
+⚠️ ATENÇÃO: Só preencha campos ecológicos se houver evidências visuais ou conhecimento taxonômico. Na dúvida, deixe vazio ("").
+
+"""
+
+
+    # Construir exemplo JSON
+    prompt += '''
 EXEMPLOS DE RESPOSTA (JSON válido, sem ```json):
 {
   "especies": [
     {
+      "indice": 1,
       "apelido": "Gramínea Cespitosa Verde-Claro",
       "genero": "",
       "familia": "Poaceae",
-      "observacoes": "Crescimento em touceiras densas, folhas lineares muito finas (<2mm largura), caules cilíndricos visíveis, cor verde-claro predominante com leve tonalidade amarelada, textura lisa e glabra, bainhas abertas características de Poaceae, algumas folhas senescentes nas pontas, altura variando 25-35cm",
+      "observacoes": "Crescimento em touceiras densas, folhas lineares muito finas (<2mm largura), caules cilíndricos visíveis, cor verde-claro predominante",
       "cobertura": 45,
       "altura": 30,
-      "forma_vida": "Erva"""
+      "forma_vida": "Erva"'''
 
-    # Adicionar exemplo de areas se ativado
-    if params.get('detect_coordinates', False):
-        prompt += """,
-      "areas": [
-        [[10, 20], [40, 20], [40, 60], [10, 60]],
-        [[60, 30], [80, 30], [80, 70], [60, 70]]
-      ]"""
+    # Adicionar eco_traits ao exemplo se ativado
+    if params.get('include_eco_traits', False):
+        prompt += ''',
+      "grupo_sucessional": "Pioneira",
+      "tolerancia_sombra": "Heliófita",
+      "tipo_dispersao": "Anemocórica"'''
 
-    prompt += """
+    prompt += '''
     },
     {
+      "indice": 2,
       "apelido": "Leguminosa Trifoliolada Pilosa Dourada",
       "genero": "",
       "familia": "Fabaceae",
-      "observacoes": "Folhas compostas trifolioladas (3 folíolos por folha), folíolos ovados a elípticos de 8-12mm comprimento, margem inteira, pilosidade densa de coloração dourada cobrindo lâmina e pecíolo, textura aveludada ao toque visual, estípulas pequenas presentes na base do pecíolo, crescimento prostrado a semi-ereto, cor verde-médio, altura 5-8cm",
+      "observacoes": "Folhas compostas trifolioladas, folíolos ovados a elípticos, pilosidade densa dourada, crescimento prostrado",
       "cobertura": 10,
       "altura": 6,
-      "forma_vida": "Erva"""
+      "forma_vida": "Erva"'''
 
-    if params.get('detect_coordinates', False):
-        prompt += """,
-      "areas": [
-        [[15, 70], [35, 75], [30, 90], [12, 85]]
-      ]"""
+    if params.get('include_eco_traits', False):
+        prompt += ''',
+      "grupo_sucessional": "",
+      "tolerancia_sombra": "",
+      "tipo_dispersao": "Autocórica"'''
 
-    prompt += """
-    },
-    {
-      "apelido": "Plântula Dicotiledônea Pilosa Prateada",
-      "genero": "",
-      "familia": "",
-      "observacoes": "Plântula jovem com 2 cotilédones ovados visíveis, 2-4 folhas verdadeiras em desenvolvimento, folhas lanceoladas de 10-15mm, pilosidade densa prateada em toda planta especialmente no hipocótilo e face abaxial das folhas, margem foliar inteira, cor verde-claro, crescimento ereto, altura 3-5cm",
-      "cobertura": 5,
-      "altura": 4,
-      "forma_vida": "Plântula"""
-
-    if params.get('detect_coordinates', False):
-        prompt += """,
-      "areas": []"""
-
-    prompt += """
+    prompt += '''
     }
-  ]
+  ]'''
+
+    # Adicionar area_shape e species_shapes ao exemplo se ativado
+    if params.get('include_polygon_json', False):
+        prompt += ''',
+  "area_shape": {
+    "points": [
+      {"x": 5, "y": 3},
+      {"x": 95, "y": 5},
+      {"x": 97, "y": 96},
+      {"x": 3, "y": 94}
+    ]
+  },
+  "species_shapes": {
+    "0": [
+      {
+        "points": [
+          {"x": 10, "y": 15},
+          {"x": 45, "y": 15},
+          {"x": 45, "y": 50},
+          {"x": 10, "y": 50}
+        ]
+      },
+      {
+        "points": [
+          {"x": 55, "y": 20},
+          {"x": 85, "y": 20},
+          {"x": 85, "y": 60},
+          {"x": 55, "y": 60}
+        ]
+      }
+    ],
+    "1": [
+      {
+        "points": [
+          {"x": 20, "y": 65},
+          {"x": 40, "y": 68},
+          {"x": 38, "y": 88},
+          {"x": 18, "y": 85}
+        ]
+      }
+    ]
+  }'''
+
+    prompt += '''
 }
 
 REGRAS FINAIS:
-"""
+'''
 
     if params['separate_grasses']:
         prompt += "✓ SEPARE Poaceae (caule cilíndrico) de Cyperaceae (caule triangular)\n"
     
     prompt += f"""✓ Crie {params['min_species']}-{params['max_species']} morfotipos baseados em características visuais
-✓ Preencha "observacoes" SEMPRE com descrições {detail_desc.get(params['detail_level'], 'detalhadas')}
 """
     
     if params['include_genus'] != 'never':

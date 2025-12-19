@@ -1,0 +1,238 @@
+{
+  "version": "1.0",
+  "type": "herbalscan_subparcela",
+  "exported_at": "2025-12-19T20:44:44.832Z",
+  "parcela": "Parcela_9",
+  "subparcela_id": 1,
+  "image_filename": "TimePhoto_20251106_121635.jpg",
+  "data": {
+    "especies": [
+      {
+        "indice": 1,
+        "apelido": "Arbusto Jovem Folha Palmada",
+        "genero": "",
+        "familia": "",
+        "observacoes": "Planta jovem com folhas compostas palmadas, geralmente com 5 a 7 folíolos por folha. Os folíolos possuem forma obovada a oblanceolada, com ápice arredondado a levemente acuminado e base cuneada. A cor predominante é um verde-amarelado a verde-claro vibrante, com nervuras mais claras e proeminentes na face adaxial. A textura foliar é lisa e glabra, com um aspecto levemente ceroso ou suculento. A margem foliar é inteira. Apresenta crescimento ereto, formando uma pequena touceira ou arbusto em estágio inicial de desenvolvimento. A altura aproximada da planta é de 15-20 cm.",
+        "cobertura": 9,
+        "altura": 18,
+        "forma_vida": "Arbusto Jovem"
+      },
+      {
+        "indice": 2,
+        "apelido": "Capim Palito",
+        "genero": "",
+        "familia": "Poaceae",
+        "observacoes": "Gramínea cespitosa com folhas lineares muito finas, com largura geralmente inferior a 2mm. A coloração predominante é amarelada a marrom-palha, indicando um estado senescente ou seco, embora algumas bases e brotos mais recentes possam apresentar um tom verde-claro a verde-médio. Os caules são inferidos como cilíndricos, característicos de Poaceae. A textura foliar é áspera ao toque visual, e a planta é glabra. O hábito de crescimento é em touceiras densas, com as folhas se apresentando de eretas a prostradas/espalhadas devido ao ressecamento. A altura média varia entre 10-30 cm.",
+        "cobertura": 19.2,
+        "altura": 20,
+        "forma_vida": "Erva"
+      },
+      {
+        "indice": 3,
+        "apelido": "Capim Palito Verde",
+        "genero": "",
+        "familia": "Poaceae",
+        "observacoes": "Gramínea cespitosa com folhas lineares muito finas (largura <2mm), de coloração verde-médio a verde-claro vibrante, indicando crescimento mais recente e maior vigor. Morfologicamente similar ao 'Capim Palito' seco, mas claramente distinguível pela cor predominante e estado de vitalidade. A textura foliar é lisa e glabra. O hábito de crescimento é em pequenas touceiras, mais compactas e eretas em comparação com as porções secas da mesma espécie ou de espécies semelhantes. A altura média varia de 5-15 cm.",
+        "cobertura": 53.6,
+        "altura": 10,
+        "forma_vida": "Erva"
+      }
+    ],
+    "area_shape": {
+      "points": [
+        {
+          "x": 1005.7943115234375,
+          "y": 183.79981994628906
+        },
+        {
+          "x": 2541.586669921875,
+          "y": 42.09849166870117
+        },
+        {
+          "x": 2827.072998046875,
+          "y": 1807.113525390625
+        },
+        {
+          "x": 609.8641357421875,
+          "y": 1755.0174560546875
+        }
+      ]
+    },
+    "species_shapes": {
+      "0": [
+        {
+          "points": [
+            {
+              "x": 1114.1541748046875,
+              "y": 939.3593139648438
+            },
+            {
+              "x": 1205.84326171875,
+              "y": 826.831787109375
+            },
+            {
+              "x": 1364.21533203125,
+              "y": 795.5741577148438
+            },
+            {
+              "x": 1385.0537109375,
+              "y": 947.6947021484375
+            },
+            {
+              "x": 1491.3297119140625,
+              "y": 933.1077880859375
+            },
+            {
+              "x": 1593.43798828125,
+              "y": 843.5025024414062
+            },
+            {
+              "x": 1685.1270751953125,
+              "y": 851.837890625
+            },
+            {
+              "x": 1776.816162109375,
+              "y": 805.9933471679688
+            },
+            {
+              "x": 1910.18212890625,
+              "y": 953.9462280273438
+            },
+            {
+              "x": 1841.415283203125,
+              "y": 1058.1383056640625
+            },
+            {
+              "x": 1856.002197265625,
+              "y": 1160.2467041015625
+            },
+            {
+              "x": 2006.0389404296875,
+              "y": 1222.761962890625
+            },
+            {
+              "x": 1931.0206298828125,
+              "y": 1351.960205078125
+            },
+            {
+              "x": 1758.0616455078125,
+              "y": 1379.0501708984375
+            },
+            {
+              "x": 1528.8388671875,
+              "y": 1260.2711181640625
+            },
+            {
+              "x": 1449.65283203125,
+              "y": 1172.749755859375
+            },
+            {
+              "x": 1493.41357421875,
+              "y": 1089.39599609375
+            },
+            {
+              "x": 1397.5567626953125,
+              "y": 1151.9112548828125
+            },
+            {
+              "x": 1255.85546875,
+              "y": 1162.33056640625
+            },
+            {
+              "x": 1274.610107421875,
+              "y": 1003.9584350585938
+            },
+            {
+              "x": 1134.9925537109375,
+              "y": 983.1199951171875
+            }
+          ]
+        }
+      ],
+      "1": [
+        {
+          "points": [
+            {
+              "x": 987.77685546875,
+              "y": 139.2327423095703
+            },
+            {
+              "x": 929.1381225585938,
+              "y": 551.7984008789062
+            },
+            {
+              "x": 2600.34326171875,
+              "y": 472.21722412109375
+            },
+            {
+              "x": 2493.658203125,
+              "y": 105.82211303710938
+            }
+          ]
+        }
+      ],
+      "2": [
+        {
+          "points": [
+            {
+              "x": 1024.5489501953125,
+              "y": 224.60116577148438
+            },
+            {
+              "x": 1866.4215087890625,
+              "y": 224.60116577148438
+            },
+            {
+              "x": 1866.4215087890625,
+              "y": 808.0772094726562
+            },
+            {
+              "x": 1024.5489501953125,
+              "y": 808.0772094726562
+            }
+          ]
+        },
+        {
+          "points": [
+            {
+              "x": 1853.91845703125,
+              "y": 99.57058715820312
+            },
+            {
+              "x": 2581.1796875,
+              "y": 99.57058715820312
+            },
+            {
+              "x": 2581.1796875,
+              "y": 695.5496826171875
+            },
+            {
+              "x": 1853.91845703125,
+              "y": 695.5496826171875
+            }
+          ]
+        },
+        {
+          "points": [
+            {
+              "x": 1924.76904296875,
+              "y": 758.06494140625
+            },
+            {
+              "x": 2677.036376953125,
+              "y": 758.06494140625
+            },
+            {
+              "x": 2677.036376953125,
+              "y": 1770.8126220703125
+            },
+            {
+              "x": 1924.76904296875,
+              "y": 1770.8126220703125
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

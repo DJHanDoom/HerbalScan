@@ -1,4 +1,4 @@
-:root {
+﻿:root {
     --primary-color: #2E5942;
     /* Forest Green */
     --primary-hover: #1A3C28;
@@ -610,7 +610,7 @@ tbody tr:hover {
     font-size: 0.85rem;
 }
 
-/* Subparcela card com botão de edição */
+/* Subparcela card com botÃ£o de ediÃ§Ã£o */
 .subparcela-card {
     position: relative;
 }
@@ -638,7 +638,7 @@ tbody tr:hover {
     box-shadow: 0 4px 12px rgba(46, 89, 66, 0.4);
 }
 
-/* ========= MODAL DE VISUALIZAÇÃO E EDIÇÃO (NOVO UX) ========= */
+/* ========= MODAL DE VISUALIZAÃ‡ÃƒO E EDIÃ‡ÃƒO (NOVO UX) ========= */
 .image-viewer-modal {
     position: fixed;
     top: 0;
@@ -669,7 +669,7 @@ tbody tr:hover {
     overflow: hidden;
 }
 
-/* Header com título e controles */
+/* Header com tÃ­tulo e controles */
 .viewer-header {
     display: flex;
     justify-content: space-between;
@@ -711,7 +711,7 @@ tbody tr:hover {
     transform: scale(1.05);
 }
 
-/* Conteúdo split: imagem (75%) + edição (25%) */
+/* ConteÃºdo split: imagem (75%) + ediÃ§Ã£o (25%) */
 .viewer-content {
     flex: 1;
     display: flex;
@@ -763,7 +763,7 @@ tbody tr:hover {
     cursor: grabbing;
 }
 
-/* Controles de zoom (dentro da área da imagem) - mais compactos */
+/* Controles de zoom (dentro da Ã¡rea da imagem) - mais compactos */
 .viewer-zoom-controls {
     position: absolute;
     bottom: 12px;
@@ -807,7 +807,7 @@ tbody tr:hover {
     align-items: center;
 }
 
-/* Setas de navegação - mais compactas */
+/* Setas de navegaÃ§Ã£o - mais compactas */
 .viewer-nav-arrows {
     position: absolute;
     top: 50%;
@@ -853,7 +853,7 @@ tbody tr:hover {
     pointer-events: none;
 }
 
-/* Indicador de posição - mais compacto */
+/* Indicador de posiÃ§Ã£o - mais compacto */
 .viewer-position-indicator {
     position: absolute;
     top: 12px;
@@ -869,7 +869,7 @@ tbody tr:hover {
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
 }
 
-/* Painel de edição de espécies - mais compacto */
+/* Painel de ediÃ§Ã£o de espÃ©cies - mais compacto */
 .viewer-edit-header {
     padding: 12px 16px;
     background: #F0F9F4;
@@ -1202,7 +1202,7 @@ tbody tr:hover {
     animation: fadeIn 0.2s ease-out;
 }
 
-/* ========= MODAL DE SUBDIVISÃO ========= */
+/* ========= MODAL DE SUBDIVISÃƒO ========= */
 .split-modal {
     position: fixed;
     top: 0;
@@ -1444,7 +1444,7 @@ tbody tr:hover {
     box-shadow: 0 6px 16px rgba(46, 89, 66, 0.5);
 }
 
-/* Estilos para adicionar espécie inline */
+/* Estilos para adicionar espÃ©cie inline */
 .add-species-tab {
     flex: 1;
     padding: 10px;
@@ -1484,7 +1484,7 @@ tbody tr:hover {
     }
 }
 
-/* ===== FOOTER FIXO DE EXPORTAÇÃO ===== */
+/* ===== FOOTER FIXO DE EXPORTAÃ‡ÃƒO ===== */
 #export-footer {
     position: fixed;
     bottom: 0;
@@ -1613,56 +1613,148 @@ tbody tr:hover {
     .export-footer-buttons .btn {
         width: 100%;
     }
-} 
- / *   - - -   N e w   S m a l l   B u t t o n   S t y l e s   - - -   * /  
- . b t n - x s   {  
-         p a d d i n g :   2 p x   1 0 p x ;  
-         f o n t - s i z e :   0 . 8 r e m ;  
-         f o n t - w e i g h t :   5 0 0 ;  
-         b o r d e r - r a d i u s :   4 p x ;  
-         d i s p l a y :   i n l i n e - f l e x ;  
-         a l i g n - i t e m s :   c e n t e r ;  
-         g a p :   4 p x ;  
-         h e i g h t :   2 8 p x ;  
-         l i n e - h e i g h t :   1 ;  
-         m a r g i n :   0 ;  
- }  
-  
- . s u b p a r c e l a - h e a d e r - a c t i o n s   {  
-         d i s p l a y :   f l e x ;  
-         g a p :   8 p x ;  
-         a l i g n - i t e m s :   c e n t e r ;  
- }  
-  
- / *   G l a s s y   W h i t e   B u t t o n   ( V e r   e   E d i t a r )   * /  
- . b t n - g l a s s   {  
-         b a c k g r o u n d :   r g b a ( 2 5 5 ,   2 5 5 ,   2 5 5 ,   0 . 2 ) ;  
-         c o l o r :   w h i t e ;  
-         b o r d e r :   1 p x   s o l i d   r g b a ( 2 5 5 ,   2 5 5 ,   2 5 5 ,   0 . 4 ) ;  
-         b o x - s h a d o w :   0   1 p x   2 p x   r g b a ( 0 ,   0 ,   0 ,   0 . 1 ) ;  
-         b a c k d r o p - f i l t e r :   b l u r ( 4 p x ) ;  
-         t r a n s i t i o n :   a l l   0 . 2 s   e a s e ;  
- }  
-  
- . b t n - g l a s s : h o v e r   {  
-         b a c k g r o u n d :   r g b a ( 2 5 5 ,   2 5 5 ,   2 5 5 ,   0 . 3 5 ) ;  
-         b o r d e r - c o l o r :   r g b a ( 2 5 5 ,   2 5 5 ,   2 5 5 ,   0 . 6 ) ;  
-         t r a n s f o r m :   t r a n s l a t e Y ( - 1 p x ) ;  
- }  
-  
- / *   G l a s s y   O r a n g e   B u t t o n   ( R e a n a l i s a r )   -   l e s s   s a t u r a t e d   * /  
- . b t n - g l a s s - o r a n g e   {  
-         b a c k g r o u n d :   r g b a ( 2 4 6 ,   1 7 3 ,   8 5 ,   0 . 2 5 ) ;   / *   s o f t e r   o r a n g e   * /  
-         c o l o r :   # f f d c b 5 ;  
-         b o r d e r :   1 p x   s o l i d   r g b a ( 2 4 6 ,   1 7 3 ,   8 5 ,   0 . 5 ) ;  
-         b o x - s h a d o w :   0   1 p x   2 p x   r g b a ( 0 ,   0 ,   0 ,   0 . 1 ) ;  
-         b a c k d r o p - f i l t e r :   b l u r ( 4 p x ) ;  
-         t r a n s i t i o n :   a l l   0 . 2 s   e a s e ;  
- }  
-  
- . b t n - g l a s s - o r a n g e : h o v e r   {  
-         b a c k g r o u n d :   r g b a ( 2 4 6 ,   1 7 3 ,   8 5 ,   0 . 4 ) ;  
-         c o l o r :   w h i t e ;  
-         t r a n s f o r m :   t r a n s l a t e Y ( - 1 p x ) ;  
- }  
- 
+}
+
+/* --- New Small Button Styles (Refined) --- */
+.btn-xs {
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: auto;
+    line-height: 1;
+    margin: 0;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+.subparcela-header-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+/* Glassy White Button (Ver e Editar) */
+.btn-glass {
+    background: rgba(255, 255, 255, 0.15);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(4px);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-glass:hover {
+    background: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.7);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Glassy Orange Button (Reanalisar) */
+.btn-glass-orange {
+    background: rgba(246, 173, 85, 0.2);
+    color: #fbd38d;
+    border: 1px solid rgba(246, 173, 85, 0.4);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(4px);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-glass-orange:hover {
+    background: rgba(246, 173, 85, 0.35);
+    color: white;
+    border-color: rgba(246, 173, 85, 0.8);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(246, 173, 85, 0.2);
+}
+
+/* --- 8 UI/UX Improvements --- */
+
+/* 1. Modern Card Hover Effects */
+.card:hover, .subparcela-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.15);
+    border-color: var(--secondary-color);
+}
+
+/* 2. Custom Scrollbars */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f5f2;
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #a5c6a5;
+    border-radius: 5px;
+    border: 2px solid #f1f5f2;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--secondary-color);
+}
+
+/* 3. Input Field Focus Animations */
+input:focus, select:focus, textarea:focus {
+    box-shadow: 0 0 0 3px rgba(46, 89, 66, 0.15); /* Soft primary glow */
+    border-color: var(--primary-color) !important;
+    transform: translateY(-1px);
+}
+
+/* 4. Smooth Scrolling & Transitions */
+html {
+    scroll-behavior: smooth;
+}
+
+* {
+    transition: border-color 0.2s, background-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+
+/* 5. Better Empty States */
+#file-count:empty::before {
+    content: "Nenhum arquivo selecionado";
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+/* 6. Premium Modals */
+.modal-content {
+    border-radius: 16px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    backdrop-filter: blur(10px);
+    animation: modalSlideUp 0.3s ease-out;
+}
+
+@keyframes modalSlideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* 7. Tag/Badge Styling */
+.badge {
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+/* 8. Typography Enhancements */
+h1, h2, h3, h4, h5, h6 {
+    letter-spacing: -0.02em; /* Tighter headings */
+    color: var(--primary-color);
+}
+
+body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}

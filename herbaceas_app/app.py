@@ -491,8 +491,23 @@ def validate_and_filter_results(analysis_result, template_config=None):
     
     print(f"✓ Validação concluída: {len(especies_filtradas)} morfotipos (cobertura total: {total_cobertura}%)")
     
+    # 📐 Preservar dados de polígonos da IA (se presentes)
+    if analysis_result.get('area_shape'):
+        print(f"✓ area_shape preservado: {len(analysis_result['area_shape'].get('points', []))} pontos")
+    if analysis_result.get('species_shapes'):
+        print(f"✓ species_shapes preservado: polígonos para {len(analysis_result['species_shapes'])} espécies")
+    
+    # 🌱 Verificar presença de campos ecológicos
+    eco_traits_count = 0
+    for esp in especies_filtradas:
+        if esp.get('grupo_sucessional') or esp.get('tolerancia_sombra') or esp.get('tipo_dispersao'):
+            eco_traits_count += 1
+    if eco_traits_count > 0:
+        print(f"✓ Características ecológicas detectadas em {eco_traits_count} espécies")
+    
     analysis_result['especies'] = especies_filtradas
     return analysis_result
+
 
 def get_analysis_prompt(template_name="default", custom_params=None, custom_prompt=None):
     """
@@ -2453,7 +2468,12 @@ def remove_especie():
 
 @app.route('/api/especies/<parcela>/<int:subparcela>/<apelido>', methods=['PUT'])
 def update_especie_subparcela(parcela, subparcela, apelido):
-    """Atualiza cobertura e altura de uma espécie em uma subparcela específica"""
+    """
+    Atualiza uma espécie em uma subparcela específica.
+    Implements 'Split vs Rename' logic:
+    - If the species exists in multiple subparcelas, create a NEW species (split).
+    - If the species is unique to this subparcela, update it directly (rename).
+    """
     data = request.json
 
     if parcela not in analysis_data['parcelas']:
@@ -2465,50 +2485,139 @@ def update_especie_subparcela(parcela, subparcela, apelido):
 
     subparcela_data = parcela_data['subparcelas'][subparcela]
 
-    # Encontrar e atualizar espécie
-    especie_encontrada = False
-    for esp in subparcela_data['especies']:
+    # Find the species in this subparcela
+    target_esp = None
+    target_idx = -1
+    for idx, esp in enumerate(subparcela_data['especies']):
         if esp['apelido'] == apelido:
-            # Atualizar todos os campos enviados
-            if 'familia' in data:
-                esp['familia'] = data['familia']
-            if 'genero' in data:
-                esp['genero'] = data['genero']
-            if 'especie' in data:
-                esp['especie'] = data['especie']
-            if 'observacoes' in data:
-                esp['observacoes'] = data['observacoes']
-            if 'cobertura' in data:
-                esp['cobertura'] = data['cobertura']
-            if 'altura' in data:
-                esp['altura'] = data['altura']
-            if 'forma_vida' in data:
-                esp['forma_vida'] = data['forma_vida']
-            if 'link_fotos' in data:
-                esp['link_fotos'] = data['link_fotos']
-            especie_encontrada = True
+            target_esp = esp
+            target_idx = idx
             break
 
-    if not especie_encontrada:
+    if target_esp is None:
         return jsonify({'error': 'Espécie não encontrada nesta subparcela'}), 404
 
-    # Atualizar especies_unificadas se campos taxonômicos foram alterados
-    if parcela in analysis_data['especies_unificadas'] and apelido in analysis_data['especies_unificadas'][parcela]:
-        especie_unificada = analysis_data['especies_unificadas'][parcela][apelido]
-        if 'familia' in data:
-            especie_unificada['familia'] = data['familia']
-        if 'genero' in data:
-            especie_unificada['genero'] = data['genero']
-        if 'especie' in data:
-            especie_unificada['especie'] = data['especie']
-        if 'link_fotos' in data:
-            especie_unificada['link_fotos'] = data['link_fotos']
-        print(f"✓ Espécie '{apelido}' também atualizada em especies_unificadas (incluindo link fotos)")
+    # --- SPLIT VS RENAME LOGIC ---
+    # 1. Count global occurrences of this apelido across ALL subparcelas
+    global_usage_count = 0
+    for sub_id, sub_data in parcela_data.get('subparcelas', {}).items():
+        for esp in sub_data.get('especies', []):
+            if esp.get('apelido') == apelido:
+                global_usage_count += 1
 
-    return jsonify({
-        'success': True,
-        'message': 'Espécie atualizada com sucesso'
-    })
+    print(f"🔍 Species '{apelido}' usage count: {global_usage_count}")
+
+    # 2. Determine if we need to split (create new) or rename (update existing)
+    new_apelido = data.get('apelido_usuario', apelido)  # User might provide new name
+    # Check if any identifier fields are changing
+    is_identity_change = (
+        data.get('familia', target_esp.get('familia')) != target_esp.get('familia') or
+        data.get('genero', target_esp.get('genero')) != target_esp.get('genero') or
+        data.get('especie', target_esp.get('especie')) != target_esp.get('especie') or
+        new_apelido != apelido
+    )
+
+    if global_usage_count > 1 and is_identity_change:
+        # --- SPLIT: Create a new morphotype ---
+        print(f"⚡ SPLIT: Creating new morphotype for '{apelido}' in subparcela {subparcela}")
+
+        # Generate a unique new apelido if user provided a new one, otherwise suffix
+        if new_apelido == apelido:
+            # User didn't provide a new name, generate one
+            new_apelido = f"{apelido}_v{subparcela}"
+            counter = 1
+            while new_apelido in (analysis_data.get('especies_unificadas', {}).get(parcela, {}) or {}):
+                new_apelido = f"{apelido}_v{subparcela}_{counter}"
+                counter += 1
+        
+        # Update the species data in this subparcela
+        target_esp['apelido'] = new_apelido
+        if 'familia' in data:
+            target_esp['familia'] = data['familia']
+        if 'genero' in data:
+            target_esp['genero'] = data['genero']
+        if 'especie' in data:
+            target_esp['especie'] = data['especie']
+        if 'observacoes' in data:
+            target_esp['observacoes'] = data['observacoes']
+        if 'cobertura' in data:
+            target_esp['cobertura'] = data['cobertura']
+        if 'altura' in data:
+            target_esp['altura'] = data['altura']
+        if 'forma_vida' in data:
+            target_esp['forma_vida'] = data['forma_vida']
+        if 'link_fotos' in data:
+            target_esp['link_fotos'] = data['link_fotos']
+
+        # Create new entry in especies_unificadas for the new morphotype
+        if parcela not in analysis_data['especies_unificadas']:
+            analysis_data['especies_unificadas'][parcela] = {}
+        
+        analysis_data['especies_unificadas'][parcela][new_apelido] = {
+            'apelido_original': new_apelido,
+            'apelido_usuario': new_apelido,
+            'familia': data.get('familia', target_esp.get('familia', '')),
+            'genero': data.get('genero', target_esp.get('genero', '')),
+            'especie': data.get('especie', target_esp.get('especie', '')),
+            'cobertura': target_esp.get('cobertura', 0),
+            'ocorrencias': 1,
+            'link_fotos': data.get('link_fotos', target_esp.get('link_fotos', ''))
+        }
+        print(f"✅ NEW morphotype '{new_apelido}' created in especies_unificadas")
+
+        # Recalculate to update old morphotype's count (decremented by 1)
+        recalculate_analysis_data_global(analysis_data)
+
+        return jsonify({
+            'success': True,
+            'message': f"Novo morfotipo '{new_apelido}' criado (espécie original mantida em outras subparcelas)",
+            'new_apelido': new_apelido,
+            'action': 'split'
+        })
+
+    else:
+        # --- RENAME/UPDATE: Update existing morphotype directly ---
+        print(f"🔄 RENAME/UPDATE: Updating existing morphotype '{apelido}'")
+
+        # Update all fields on the target species in this subparcela
+        if 'familia' in data:
+            target_esp['familia'] = data['familia']
+        if 'genero' in data:
+            target_esp['genero'] = data['genero']
+        if 'especie' in data:
+            target_esp['especie'] = data['especie']
+        if 'observacoes' in data:
+            target_esp['observacoes'] = data['observacoes']
+        if 'cobertura' in data:
+            target_esp['cobertura'] = data['cobertura']
+        if 'altura' in data:
+            target_esp['altura'] = data['altura']
+        if 'forma_vida' in data:
+            target_esp['forma_vida'] = data['forma_vida']
+        if 'link_fotos' in data:
+            target_esp['link_fotos'] = data['link_fotos']
+        
+        # Also update especies_unificadas if exists
+        if parcela in analysis_data.get('especies_unificadas', {}) and apelido in analysis_data['especies_unificadas'][parcela]:
+            especie_unificada = analysis_data['especies_unificadas'][parcela][apelido]
+            if 'familia' in data:
+                especie_unificada['familia'] = data['familia']
+            if 'genero' in data:
+                especie_unificada['genero'] = data['genero']
+            if 'especie' in data:
+                especie_unificada['especie'] = data['especie']
+            if 'link_fotos' in data:
+                especie_unificada['link_fotos'] = data['link_fotos']
+            print(f"✓ Espécie '{apelido}' também atualizada em especies_unificadas")
+
+        # Recalculate stats
+        recalculate_analysis_data_global(analysis_data)
+
+        return jsonify({
+            'success': True,
+            'message': 'Espécie atualizada com sucesso',
+            'action': 'update'
+        })
 
 # NOVAS ROTAS para edição inline no modal
 @app.route('/api/parcela/<parcela>/subparcela/<int:subparcela>/especie/<int:index>', methods=['PATCH'])
@@ -2942,6 +3051,10 @@ def update_species_coverage():
                         esp.get('apelido') == apelido):
                         esp['cobertura'] = float(cobertura)
                         print(f"✓ Cobertura atualizada: {apelido} = {cobertura}%")
+                        
+                        # Recalcular estatísticas globais para refletir a nova cobertura
+                        recalculate_analysis_data_global(analysis_data)
+                        
                         return jsonify({'success': True})
                 
         return jsonify({'error': 'Espécie não encontrada'}), 404
@@ -2980,6 +3093,13 @@ def update_species_area():
             if esp.get('apelido') == especie_nome or esp.get('especie') == especie_nome:
                 esp['area_shapes'] = area_shapes
                 print(f"✓ Áreas da espécie {especie_nome} atualizadas: {len(area_shapes)} polígonos")
+                
+                # Recalcular estatísticas globais (embora area_shape não afete cobertura direta, 
+                # é boa prática garantir consistência se algo dependesse disso no futuro ou se cobertura fosse derivada da área)
+                # OBS: A cobertura numérica é atualizada via /api/species/coverage, então aqui é opcional, 
+                # mas mal não faz.
+                recalculate_analysis_data_global(analysis_data)
+                
                 return jsonify({'success': True})
         
         return jsonify({'error': 'Espécie não encontrada'}), 404
@@ -3919,6 +4039,9 @@ def save_analysis():
                     'filename': os.path.basename(img_path)
                 })
         
+        # Recalcular estatísticas ANTES de salvar o objeto final
+        recalculate_analysis_data_global(analysis_data)
+
         # Preparar dados completos da análise
         analysis_save_data = {
             'name': analysis_name,
@@ -4122,8 +4245,70 @@ def get_reference_species():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/reference-species', methods=['POST'])
-@app.route('/api/reference-species', methods=['POST'])
+
+def recalculate_analysis_data_global(analysis_content):
+    """
+    Recalcula as estatísticas unificadas (cobertura, ocorrências) 
+    baseado nos dados das subparcelas.
+    Helper GLOBAL para ser usado em qualquer endpoint.
+    """
+    especies_unificadas = analysis_content.get('especies_unificadas', {})
+    subparcelas = analysis_content.get('subparcelas', {})
+    
+    # Se não houver dados, não há o que recalcular
+    if not especies_unificadas and not subparcelas:
+        return False
+        
+    # Resetar contadores nas espécies unificadas
+    # Estrutura unificada: { 'Apelido': { cobertura: 0, ocorrencias: 0, ... } }
+    # Se for aninhada (por parcela), iterar e resetar
+    # Helper para detectar se é dict de espécie ou dict de parcelas
+    is_nested = False
+    if especies_unificadas:
+        first_val = next(iter(especies_unificadas.values()))
+        if isinstance(first_val, dict) and 'apelido_original' not in first_val:
+            is_nested = True # É aninhado por parcela
+
+    if is_nested:
+        for parcela_key, species_dict in especies_unificadas.items():
+            for sp in species_dict.values():
+                sp['cobertura'] = 0
+                sp['ocorrencias'] = 0
+    else:
+        for sp in especies_unificadas.values():
+            sp['cobertura'] = 0
+            sp['ocorrencias'] = 0
+    
+    # Re-agregar dados das subparcelas
+    for sub in subparcelas.values():
+        for esp in sub.get('especies', []):
+            apelido = esp.get('apelido')
+            cobertura = float(esp.get('cobertura', 0))
+            
+            if not apelido: continue
+            
+            target_sp = None
+            
+            if is_nested:
+                    # Assumindo apenas uma parcela por arquivo JSON de análise típica, 
+                    # ou tentando encontrar em qual parcela está.
+                    # Simplificação: varrer todas as parcelas unificadas
+                    for parcela_key, species_dict in especies_unificadas.items():
+                        if apelido in species_dict:
+                            target_sp = species_dict[apelido]
+                            break
+                    # Se não achou, talvez precise criar (mas aqui estamos apenas atualizando existentes)
+            else:
+                if apelido in especies_unificadas:
+                    target_sp = especies_unificadas[apelido]
+                    
+            if target_sp:
+                target_sp['cobertura'] += cobertura
+                target_sp['ocorrencias'] += 1
+
+    # Calcular médias se necessário (ex: altura) - implementação futura
+    return True
+
 @app.route('/api/reference-species', methods=['POST'])
 def save_reference_species():
     """Salva a lista de espécies de referência e propaga renomeações"""
@@ -4147,64 +4332,12 @@ def save_reference_species():
         # apelido -> {familia, genero, especie, ...}
         new_species_map = {sp['apelido']: sp for sp in species_list if 'apelido' in sp}
 
+        # LOCAL WRAPPER para manter compatibilidade caso necessário, mas usando a global
         def recalculate_analysis_data(analysis_content):
-            """
-            Recalcula as estatísticas unificadas (cobertura, ocorrências) 
-            baseado nos dados das subparcelas.
-            """
-            especies_unificadas = analysis_content.get('especies_unificadas', {})
-            subparcelas = analysis_content.get('subparcelas', {})
-            
-            # Resetar contadores nas espécies unificadas
-            # Estrutura unificada: { 'Apelido': { cobertura: 0, ocorrencias: 0, ... } }
-            # Se for aninhada (por parcela), iterar e resetar
-             # Helper para detectar se é dict de espécie ou dict de parcelas
-            is_nested = False
-            first_val = next(iter(especies_unificadas.values())) if especies_unificadas else None
-            if first_val and isinstance(first_val, dict) and 'apelido_original' not in first_val:
-                is_nested = True # É aninhado por parcela
+             return recalculate_analysis_data_global(analysis_content)
 
-            if is_nested:
-                for parcela_key, species_dict in especies_unificadas.items():
-                    for sp in species_dict.values():
-                        sp['cobertura'] = 0
-                        sp['ocorrencias'] = 0
-            else:
-                for sp in especies_unificadas.values():
-                    sp['cobertura'] = 0
-                    sp['ocorrencias'] = 0
-            
-            # Re-agregar dados das subparcelas
-            for sub in subparcelas.values():
-                for esp in sub.get('especies', []):
-                    apelido = esp.get('apelido')
-                    cobertura = float(esp.get('cobertura', 0))
-                    
-                    if not apelido: continue
-                    
-                    target_sp = None
-                    
-                    if is_nested:
-                         # Assumindo apenas uma parcela por arquivo JSON de análise típica, 
-                         # ou tentando encontrar em qual parcela está.
-                         # Simplificação: varrer todas as parcelas unificadas
-                         found = False
-                         for parcela_key, species_dict in especies_unificadas.items():
-                             if apelido in species_dict:
-                                 target_sp = species_dict[apelido]
-                                 found = True
-                                 break
-                         # Se não achou, talvez precise criar (mas aqui estamos apenas atualizando existentes)
-                    else:
-                        if apelido in especies_unificadas:
-                            target_sp = especies_unificadas[apelido]
-                            
-                    if target_sp:
-                        target_sp['cobertura'] += cobertura
-                        target_sp['ocorrencias'] += 1
 
-            # Calcular médias se necessário (ex: altura) - implementação futura
-            return True
+
 
 
         # 2. Propagar renomeações para análises salvas
@@ -4812,8 +4945,11 @@ def update_especie_global(apelido):
 
         print(f"🔄 Atualizando espécie globalmente: {apelido}")
         
-        # Campos permitidos para atualização
-        campos_atualizaveis = ['apelido_usuario', 'genero', 'especie', 'familia', 'link_fotos', 'observacoes']
+        # Campos permitidos para atualização (incluindo campos ecológicos)
+        campos_atualizaveis = [
+            'apelido_usuario', 'genero', 'especie', 'familia', 'link_fotos', 'observacoes',
+            'grupo_sucessional', 'tolerancia_sombra', 'tipo_dispersao', 'habitat_preferencial'
+        ]
         
         # Verificar se houve renomeação (apelido_usuario diferente do atual)
         novo_apelido = data.get('apelido_usuario')
@@ -4830,6 +4966,11 @@ def update_especie_global(apelido):
             if 'link_fotos' in data: esp_unif['link_fotos'] = data['link_fotos']
             if 'observacoes' in data: esp_unif['observacoes'] = data['observacoes']
             if 'apelido_usuario' in data: esp_unif['apelido_usuario'] = data['apelido_usuario']
+            # Campos ecológicos
+            if 'grupo_sucessional' in data: esp_unif['grupo_sucessional'] = data['grupo_sucessional']
+            if 'tolerancia_sombra' in data: esp_unif['tolerancia_sombra'] = data['tolerancia_sombra']
+            if 'tipo_dispersao' in data: esp_unif['tipo_dispersao'] = data['tipo_dispersao']
+            if 'habitat_preferencial' in data: esp_unif['habitat_preferencial'] = data['habitat_preferencial']
             
             # Se renomeou, precisamos atualizar a chave no dicionário unificado?
             # Por enquanto, mantemos a chave original (apelido_original) e só mudamos o display name
@@ -4850,12 +4991,18 @@ def update_especie_global(apelido):
                         if 'familia' in data: esp['familia'] = data['familia']
                         if 'link_fotos' in data: esp['link_fotos'] = data['link_fotos']
                         if 'observacoes' in data: esp['observacoes'] = data['observacoes']
+                        # Campos ecológicos
+                        if 'grupo_sucessional' in data: esp['grupo_sucessional'] = data['grupo_sucessional']
+                        if 'tolerancia_sombra' in data: esp['tolerancia_sombra'] = data['tolerancia_sombra']
+                        if 'tipo_dispersao' in data: esp['tipo_dispersao'] = data['tipo_dispersao']
+                        if 'habitat_preferencial' in data: esp['habitat_preferencial'] = data['habitat_preferencial']
                         
                         # Se houve renomeação, atualiza o apelido na ocorrência
                         if renomeou:
                             esp['apelido'] = novo_apelido
                             
                         count_updates += 1
+
 
         # 3. Se houve renomeação, precisamos atualizar a chave na lista unificada também?
         # A lógica atual usa o apelido como chave. Se mudarmos o apelido nas ocorrências,

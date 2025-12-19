@@ -402,6 +402,47 @@ const SpeciesDetailsModal = {
                         </div>
                     </div>
 
+                    <h3 style="margin-top: 20px;">🌱 Características Ecológicas</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Grupo Sucessional</label>
+                            <select id="edit-grupo-sucessional">
+                                <option value="" ${!data.grupo_sucessional ? 'selected' : ''}>Não definido</option>
+                                <option value="Pioneira" ${data.grupo_sucessional === 'Pioneira' ? 'selected' : ''}>Pioneira</option>
+                                <option value="Secundária Inicial" ${data.grupo_sucessional === 'Secundária Inicial' ? 'selected' : ''}>Secundária Inicial</option>
+                                <option value="Secundária Tardia" ${data.grupo_sucessional === 'Secundária Tardia' ? 'selected' : ''}>Secundária Tardia</option>
+                                <option value="Climácica" ${data.grupo_sucessional === 'Climácica' ? 'selected' : ''}>Climácica</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Tolerância à Sombra</label>
+                            <select id="edit-tolerancia-sombra">
+                                <option value="" ${!data.tolerancia_sombra ? 'selected' : ''}>Não definido</option>
+                                <option value="Heliófita" ${data.tolerancia_sombra === 'Heliófita' ? 'selected' : ''}>Heliófita (sol)</option>
+                                <option value="Esciófita" ${data.tolerancia_sombra === 'Esciófita' ? 'selected' : ''}>Esciófita (sombra)</option>
+                                <option value="Indiferente" ${data.tolerancia_sombra === 'Indiferente' ? 'selected' : ''}>Indiferente</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Tipo de Dispersão</label>
+                            <select id="edit-tipo-dispersao">
+                                <option value="" ${!data.tipo_dispersao ? 'selected' : ''}>Não definido</option>
+                                <option value="Anemocórica" ${data.tipo_dispersao === 'Anemocórica' ? 'selected' : ''}>Anemocórica (vento)</option>
+                                <option value="Zoocórica" ${data.tipo_dispersao === 'Zoocórica' ? 'selected' : ''}>Zoocórica (animais)</option>
+                                <option value="Autocórica" ${data.tipo_dispersao === 'Autocórica' ? 'selected' : ''}>Autocórica (auto)</option>
+                                <option value="Hidrocórica" ${data.tipo_dispersao === 'Hidrocórica' ? 'selected' : ''}>Hidrocórica (água)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Habitat Preferencial</label>
+                            <input type="text" id="edit-habitat-preferencial" value="${data.habitat_preferencial || ''}" 
+                                   placeholder="Ex: Borda de mata, Campo úmido">
+                        </div>
+                    </div>
+
                     <div class="form-actions">
                         <button type="submit" class="btn btn-primary">💾 Salvar Alterações</button>
                         <button type="button" class="btn btn-secondary" onclick="SpeciesDetailsModal.close()">Cancelar</button>
@@ -741,6 +782,12 @@ const SpeciesDetailsModal = {
         const familia = document.getElementById('edit-familia').value.trim();
         const linkFotos = document.getElementById('edit-link-fotos').value.trim();
 
+        // Campos ecológicos
+        const grupoSucessional = document.getElementById('edit-grupo-sucessional').value;
+        const toleranciaSombra = document.getElementById('edit-tolerancia-sombra').value;
+        const tipoDispersao = document.getElementById('edit-tipo-dispersao').value;
+        const habitatPreferencial = document.getElementById('edit-habitat-preferencial').value.trim();
+
         if (!apelidoUsuario) {
             showAlert('error', 'Apelido personalizado é obrigatório');
             return;
@@ -756,7 +803,12 @@ const SpeciesDetailsModal = {
                     especie: especieNome,
                     familia,
                     link_fotos: linkFotos,
-                    observacoes: document.getElementById('edit-observacoes').value.trim()
+                    observacoes: document.getElementById('edit-observacoes').value.trim(),
+                    // Campos ecológicos
+                    grupo_sucessional: grupoSucessional,
+                    tolerancia_sombra: toleranciaSombra,
+                    tipo_dispersao: tipoDispersao,
+                    habitat_preferencial: habitatPreferencial
                 })
             });
 
@@ -778,6 +830,11 @@ const SpeciesDetailsModal = {
                             esp.familia = familia;
                             esp.link_fotos = linkFotos;
                             esp.observacoes = result.especie.observacoes || esp.observacoes;
+                            // Campos ecológicos
+                            esp.grupo_sucessional = grupoSucessional;
+                            esp.tolerancia_sombra = toleranciaSombra;
+                            esp.tipo_dispersao = tipoDispersao;
+                            esp.habitat_preferencial = habitatPreferencial;
                         }
                     });
                 });
@@ -805,6 +862,7 @@ const SpeciesDetailsModal = {
             showAlert('error', 'Erro ao salvar: ' + error.message);
         }
     },
+
 
     async deleteSpecies() {
         const data = this.currentSpeciesData;

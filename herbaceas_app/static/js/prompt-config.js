@@ -5,25 +5,25 @@ const PromptConfig = {
     currentTemplate: 'default',
     customParams: {},
     previewTimer: null,
-    
+
     async init() {
         await this.loadTemplates();
         this.createModal();
         this.attachEvents();
         this.loadSavedConfig();
     },
-    
+
     async loadTemplates() {
         try {
             // Carregar templates padrão
             const response = await fetch('/api/templates');
             const data = await response.json();
             this.templates = data.templates;
-            
+
             // Carregar templates customizados
             const customResponse = await fetch('/api/templates/custom/list');
             const customData = await customResponse.json();
-            
+
             if (customData.templates && customData.templates.length > 0) {
                 // Adicionar templates customizados à lista com flag 'custom'
                 customData.templates.forEach(t => {
@@ -44,7 +44,7 @@ const PromptConfig = {
             alert('Erro ao carregar templates de prompt');
         }
     },
-    
+
     createModal() {
         const modal = document.createElement('div');
         modal.id = 'prompt-config-modal';
@@ -164,6 +164,22 @@ const PromptConfig = {
                                 <input type="checkbox" id="param-focus-carbon">
                                 <label for="param-focus-carbon">Foco em biomassa/carbono</label>
                             </div>
+                            
+                            <div class="param-item checkbox-group">
+                                <input type="checkbox" id="param-include-polygon-json" checked>
+                                <label for="param-include-polygon-json">📐 Incluir polígonos de cobertura</label>
+                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
+                                    IA retorna áreas de cada espécie em formato de polígonos JSON
+                                </small>
+                            </div>
+                            
+                            <div class="param-item checkbox-group">
+                                <input type="checkbox" id="param-include-eco-traits">
+                                <label for="param-include-eco-traits">🌱 Incluir características ecológicas</label>
+                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
+                                    Grupo sucessional, tolerância à sombra, tipo de dispersão
+                                </small>
+                            </div>
                         </div>
                         
                         <div class="prompt-preview">
@@ -208,57 +224,61 @@ const PromptConfig = {
             </div>
         `;
         document.body.appendChild(modal);
-        
+
         this.manualEdit = false; // Resetar flag de edição manual
         this.renderTemplates();
         this.updatePreview();
     },
-    
+
     async loadSavedConfig() {
         const saved = this.getSavedConfig();
         if (saved && saved.params) {
             console.log('📂 Carregando última configuração salva:', saved);
             this.currentTemplate = saved.template || 'default';
-            
+
             // Aplicar params salvos aos inputs
-            if (saved.params.min_species !== undefined) 
+            if (saved.params.min_species !== undefined)
                 document.getElementById('param-min-species').value = saved.params.min_species;
-            if (saved.params.max_species !== undefined) 
+            if (saved.params.max_species !== undefined)
                 document.getElementById('param-max-species').value = saved.params.max_species;
-            if (saved.params.detail_level) 
+            if (saved.params.detail_level)
                 document.getElementById('param-detail-level').value = saved.params.detail_level;
-            if (saved.params.taxonomic_precision) 
+            if (saved.params.taxonomic_precision)
                 document.getElementById('param-taxonomic-precision').value = saved.params.taxonomic_precision;
-            if (saved.params.include_genus) 
+            if (saved.params.include_genus)
                 document.getElementById('param-include-genus').value = saved.params.include_genus;
-            if (saved.params.include_family) 
+            if (saved.params.include_family)
                 document.getElementById('param-include-family').value = saved.params.include_family;
-            if (saved.params.standardize_across_subplots) 
+            if (saved.params.standardize_across_subplots)
                 document.getElementById('param-standardize-subplots').value = saved.params.standardize_across_subplots;
-            if (saved.params.separate_grasses !== undefined) 
+            if (saved.params.separate_grasses !== undefined)
                 document.getElementById('param-separate-grasses').checked = saved.params.separate_grasses;
-            if (saved.params.include_soil !== undefined) 
+            if (saved.params.include_soil !== undefined)
                 document.getElementById('param-include-soil').checked = saved.params.include_soil;
-            if (saved.params.include_litter !== undefined) 
+            if (saved.params.include_litter !== undefined)
                 document.getElementById('param-include-litter').checked = saved.params.include_litter;
-            if (saved.params.focus_functional !== undefined) 
+            if (saved.params.focus_functional !== undefined)
                 document.getElementById('param-focus-functional').checked = saved.params.focus_functional;
-            if (saved.params.focus_succession !== undefined) 
+            if (saved.params.focus_succession !== undefined)
                 document.getElementById('param-focus-succession').checked = saved.params.focus_succession;
-            if (saved.params.focus_carbon !== undefined) 
+            if (saved.params.focus_carbon !== undefined)
                 document.getElementById('param-focus-carbon').checked = saved.params.focus_carbon;
+            if (saved.params.include_polygon_json !== undefined)
+                document.getElementById('param-include-polygon-json').checked = saved.params.include_polygon_json;
+            if (saved.params.include_eco_traits !== undefined)
+                document.getElementById('param-include-eco-traits').checked = saved.params.include_eco_traits;
         }
     },
-    
+
     renderTemplates() {
         const container = document.getElementById('template-list');
         if (!container) return;
-        
+
         container.innerHTML = this.templates.map(template => {
             const isCustom = template.custom === true;
             const deleteBtn = isCustom ? `<button class="template-delete-btn" onclick="event.stopPropagation(); PromptConfig.deleteTemplate('${template.filename}')" title="Deletar template">🗑️</button>` : '';
             const customBadge = isCustom ? '<span class="template-custom-badge">⭐ Customizado</span>' : '';
-            
+
             return `
                 <div class="template-card ${template.id === this.currentTemplate ? 'active' : ''} ${isCustom ? 'custom' : ''}" 
                      onclick="PromptConfig.selectTemplate('${template.id}')">
@@ -278,26 +298,26 @@ const PromptConfig = {
             `;
         }).join('');
     },
-    
+
     async deleteTemplate(filename) {
         if (!confirm('Tem certeza que deseja deletar este template personalizado?')) {
             return;
         }
-        
+
         try {
             const response = await fetch(`/api/templates/custom/delete/${filename}`, {
                 method: 'DELETE'
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 alert('✓ Template deletado com sucesso!');
-                
+
                 // Recarregar lista
                 await this.loadTemplates();
                 this.renderTemplates();
-                
+
                 // Se estava selecionado, voltar para default
                 if (this.currentTemplate === `custom_${filename}`) {
                     this.selectTemplate('default');
@@ -310,21 +330,21 @@ const PromptConfig = {
             alert('Erro ao deletar template: ' + error.message);
         }
     },
-    
+
     async selectTemplate(templateId) {
         this.currentTemplate = templateId;
-        
+
         // Verificar se é template customizado
         const isCustom = templateId.startsWith('custom_');
-        
+
         let params;
-        
+
         if (isCustom) {
             // Template customizado - buscar dos dados locais
             const template = this.templates.find(t => t.id === templateId);
             console.log('🔍 Template customizado selecionado:', templateId);
             console.log('📋 Template encontrado:', template);
-            
+
             if (template && template.params) {
                 params = template.params;
                 console.log('✅ Params carregados:', params);
@@ -344,9 +364,9 @@ const PromptConfig = {
                 return;
             }
         }
-        
+
         console.log('🎯 Aplicando params aos inputs:', params);
-        
+
         // Aplicar parâmetros aos inputs com validação
         const setInputValue = (id, value, type = 'value') => {
             const el = document.getElementById(id);
@@ -354,7 +374,7 @@ const PromptConfig = {
                 console.error(`❌ Elemento não encontrado: ${id}`);
                 return false;
             }
-            
+
             if (type === 'checkbox') {
                 el.checked = value;
                 console.log(`✓ ${id} = ${value} (checked)`);
@@ -364,7 +384,7 @@ const PromptConfig = {
             }
             return true;
         };
-        
+
         // Aplicar parâmetros com log individual
         setInputValue('param-min-species', params.min_species || 1);
         setInputValue('param-max-species', params.max_species || 8);
@@ -380,13 +400,15 @@ const PromptConfig = {
         setInputValue('param-focus-functional', params.focus_functional === true, 'checkbox');
         setInputValue('param-focus-succession', params.focus_succession === true, 'checkbox');
         setInputValue('param-focus-carbon', params.focus_carbon === true, 'checkbox');
-        
+        setInputValue('param-include-polygon-json', params.include_polygon_json !== false, 'checkbox');
+        setInputValue('param-include-eco-traits', params.include_eco_traits === true, 'checkbox');
+
         console.log('✅ Todos os parâmetros aplicados');
-        
+
         this.renderTemplates();
         this.updatePreview();
     },
-    
+
     attachEvents() {
         const inputs = [
             'param-min-species', 'param-max-species', 'param-detail-level',
@@ -394,9 +416,10 @@ const PromptConfig = {
             'param-standardize-subplots',
             'param-separate-grasses', 'param-include-soil', 'param-include-litter',
             'param-normalize-coverage',
-            'param-focus-functional', 'param-focus-succession', 'param-focus-carbon'
+            'param-focus-functional', 'param-focus-succession', 'param-focus-carbon',
+            'param-include-polygon-json', 'param-include-eco-traits'
         ];
-        
+
         inputs.forEach(id => {
             const el = document.getElementById(id);
             if (el) {
@@ -408,7 +431,7 @@ const PromptConfig = {
             }
         });
     },
-    
+
     saveCurrentConfig() {
         const config = {
             template: this.currentTemplate,
@@ -417,7 +440,7 @@ const PromptConfig = {
         localStorage.setItem('promptConfig', JSON.stringify(config));
         console.log('💾 Configuração salva automaticamente:', config);
     },
-    
+
     getCustomParams() {
         return {
             min_species: parseInt(document.getElementById('param-min-species').value),
@@ -433,28 +456,30 @@ const PromptConfig = {
             normalize_coverage: document.getElementById('param-normalize-coverage').checked,
             focus_functional: document.getElementById('param-focus-functional').checked,
             focus_succession: document.getElementById('param-focus-succession').checked,
-            focus_carbon: document.getElementById('param-focus-carbon').checked
+            focus_carbon: document.getElementById('param-focus-carbon').checked,
+            include_polygon_json: document.getElementById('param-include-polygon-json').checked,
+            include_eco_traits: document.getElementById('param-include-eco-traits').checked
         };
     },
-    
+
     async updatePreview() {
         // Se houver edição manual, não sobrescrever
         if (this.manualEdit) {
             return;
         }
-        
+
         clearTimeout(this.previewTimer);
         this.previewTimer = setTimeout(async () => {
             try {
                 const response = await fetch('/api/templates/preview', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         template: this.currentTemplate,
                         params: this.getCustomParams()
                     })
                 });
-                
+
                 const data = await response.json();
                 const previewElement = document.getElementById('prompt-preview-text');
                 previewElement.value = data.prompt;
@@ -464,17 +489,17 @@ const PromptConfig = {
             }
         }, 500);
     },
-    
+
     onPromptEdit() {
         // Marcar que houve edição manual
         this.manualEdit = true;
-        
+
         // Atualizar contador de caracteres
         const previewElement = document.getElementById('prompt-preview-text');
         const length = previewElement.value.length;
         document.getElementById('prompt-length').textContent = `${length} caracteres`;
     },
-    
+
     getEditedPrompt() {
         // Retornar prompt editado se houver edição manual
         if (this.manualEdit) {
@@ -482,10 +507,10 @@ const PromptConfig = {
         }
         return null;
     },
-    
+
     open() {
         document.getElementById('prompt-config-modal').classList.add('active');
-        
+
         // Mostrar botão "Aplicar e Reanalisar" se há uma reanálise pendente
         const reanalyzeBtn = document.getElementById('apply-and-reanalyze-btn');
         if (reanalyzeBtn && window.pendingReanalysis) {
@@ -494,40 +519,40 @@ const PromptConfig = {
             reanalyzeBtn.style.display = 'none';
         }
     },
-    
+
     close() {
         document.getElementById('prompt-config-modal').classList.remove('active');
-        
+
         // Limpar reanálise pendente ao fechar sem executar
         if (window.pendingReanalysis) {
             delete window.pendingReanalysis;
         }
     },
-    
+
     async applyAndReanalyze() {
         // Verificar se há reanálise pendente
         if (!window.pendingReanalysis) {
             showAlert('error', 'Nenhuma reanálise pendente');
             return;
         }
-        
+
         const { subparcela } = window.pendingReanalysis;
-        
+
         // Salvar configuração
         this.saveAndClose();
-        
+
         // Obter configuração recém-salva
         const promptConfig = this.getSavedConfig();
-        
+
         // Executar reanálise
         const success = await executeReanalysis(subparcela, promptConfig);
-        
+
         if (success) {
             // Limpar reanálise pendente
             delete window.pendingReanalysis;
         }
     },
-    
+
     async saveTemplate() {
         // Criar mini-modal para salvar template
         const saveModal = document.createElement('div');
@@ -570,47 +595,47 @@ const PromptConfig = {
                 </div>
             </div>
         `;
-        
+
         document.body.appendChild(saveModal);
-        
+
         // Focus no input
         setTimeout(() => {
             document.getElementById('save-template-name').focus();
         }, 100);
     },
-    
+
     closeSaveModal() {
         const modal = document.querySelector('.save-template-modal');
         if (modal) modal.remove();
     },
-    
+
     async confirmSaveTemplate() {
         const name = document.getElementById('save-template-name').value.trim();
         const description = document.getElementById('save-template-description').value.trim();
-        
+
         if (!name) {
             alert('Por favor, digite um nome para o template');
             return;
         }
-        
+
         const params = this.getCustomParams();
-        
+
         // Obter preview do prompt
         const previewResponse = await fetch('/api/templates/preview', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 template: this.currentTemplate,
                 params: params
             })
         });
-        
+
         const previewData = await previewResponse.json();
-        
+
         try {
             const response = await fetch('/api/templates/custom/save', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     name: name,
                     description: description,
@@ -619,13 +644,13 @@ const PromptConfig = {
                     base_template: this.currentTemplate
                 })
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 this.closeSaveModal();
                 alert(`✓ Template "${name}" salvo com sucesso!`);
-                
+
                 // Recarregar lista de templates
                 await this.loadTemplates();
                 this.renderTemplates();
@@ -637,21 +662,21 @@ const PromptConfig = {
             alert('Erro ao salvar template: ' + error.message);
         }
     },
-    
+
     saveAndClose() {
         const config = {
             template: this.currentTemplate,
             params: this.getCustomParams()
         };
-        
+
         // Se houve edição manual, salvar o prompt editado
         if (this.manualEdit) {
             config.customPrompt = document.getElementById('prompt-preview-text').value;
             console.log('💾 Salvando prompt editado manualmente');
         }
-        
+
         localStorage.setItem('promptConfig', JSON.stringify(config));
-        
+
         // Verificar se há imagens pendentes para adicionar à análise
         if (window.appState && window.appState.pendingNewImages) {
             this.close();
@@ -664,7 +689,7 @@ const PromptConfig = {
             this.close();
         }
     },
-    
+
     loadSavedConfig() {
         const saved = localStorage.getItem('promptConfig');
         if (saved) {
@@ -677,19 +702,19 @@ const PromptConfig = {
             }
         }
     },
-    
+
     getSavedConfig() {
         const saved = localStorage.getItem('promptConfig');
         if (saved) {
             try {
                 return JSON.parse(saved);
             } catch (e) {
-                return {template: 'default', params: null};
+                return { template: 'default', params: null };
             }
         }
-        return {template: 'default', params: null};
+        return { template: 'default', params: null };
     },
-    
+
     resetToDefault() {
         this.selectTemplate('default');
     }
