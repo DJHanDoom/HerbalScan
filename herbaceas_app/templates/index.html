@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,15 +12,22 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/species-details-modal.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/advanced-analytics.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/help-modal.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Merriweather:wght@300;400;700&display=swap"
+        rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
+
 <body>
     <div class="container">
         <header>
-            <h1>🌿 Análise de Vegetação Herbácea</h1>
-            <p>Sistema de análise automatizada de cobertura vegetal em quadrados de 1x1m</p>
+            <img src="{{ url_for('static', filename='img/logoHerbalScan.png') }}" alt="Herbal Scan Logo" class="logo">
+            <h1>🌿 HerbalScan</h1>
+            <p>Sistema de análise automatizada de cobertura vegetal</p>
         </header>
 
         <!-- Seção 1: Upload de Imagens -->
@@ -57,11 +65,12 @@
             <div class="form-group" id="gemini-model-group" style="display: none;">
                 <label for="gemini-version">Versão do Gemini:</label>
                 <select id="gemini-version" class="ai-select">
-                    <option value="gemini-2.5-flash" selected>2.5 Flash (Rápido) ⚡</option>
-                    <option value="gemini-flash-latest">Flash Latest (Rápido, Recomendado)</option>
-                    <option value="gemini-2.5-pro">2.5 Pro (Mais Poderoso) 🔥</option>
-                    <option value="gemini-pro-latest">Pro Latest (Mais Poderoso) 🔥</option>
-                    <option value="gemini-2.0-flash">2.0 Flash (Estável)</option>
+                    <option value="gemini-3.0-pro">Gemini 3.0 Pro (New!) 🚀</option>
+                    <option value="gemini-3.0-flash">Gemini 3.0 Flash (New!) ⚡</option>
+                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (Mais Poderoso) 🔥</option>
+                    <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (Recomendado/Rápido) ⚡</option>
+                    <option value="gemini-2.0-pro">Gemini 2.0 Pro (Estável)</option>
+                    <option value="gemini-2.0-flash">Gemini 2.0 Flash (Estável)</option>
                 </select>
                 <p class="ai-info-small">💡 Modelos "Pro" são mais precisos mas mais lentos</p>
             </div>
@@ -70,15 +79,13 @@
             <div class="form-group" id="claude-model-group" style="display: none;">
                 <label for="claude-version">Versão do Claude:</label>
                 <select id="claude-version" class="ai-select">
-                    <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Set/2025 - Recomendado) 🔥</option>
-                    <option value="claude-opus-4-1-20250805">Claude Opus 4.1 (Ago/2025 - Mais Poderoso) 💎</option>
-                    <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Out/2025 - Mais Rápido) ⚡</option>
-                    <option value="claude-opus-4-20250514">Claude Opus 4 (Mai/2025)</option>
-                    <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Mai/2025)</option>
-                    <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (Out/2024)</option>
-                    <option value="claude-3-haiku-20240307">Claude 3 Haiku (Mar/2024)</option>
+                    <option value="claude-3-7-sonnet-20251201">Claude 3.7 Sonnet (Dez/2025) 🚀</option>
+                    <option value="claude-3-5-sonnet-latest" selected>Claude 3.5 Sonnet (Latest) 🔥</option>
+                    <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (Rápido) ⚡</option>
+                    <option value="claude-3-opus-20240229">Claude 3 Opus (Robusto) 💎</option>
                 </select>
-                <p class="ai-info-small">💡 Sonnet 4.5 é o melhor custo-benefício! Opus 4.1 é o mais preciso. Haiku 4.5 é o mais rápido.</p>
+                <p class="ai-info-small">💡 Sonnet 4.5 é o melhor custo-benefício! Opus 4.1 é o mais preciso. Haiku 4.5
+                    é o mais rápido.</p>
             </div>
 
             <!-- Seletor de versão do modelo GPT -->
@@ -95,7 +102,8 @@
             </div>
 
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                <button id="config-prompt-btn" class="btn btn-secondary" onclick="PromptConfig.open()" style="flex: 0 0 auto;">
+                <button id="config-prompt-btn" class="btn btn-secondary" onclick="PromptConfig.open()"
+                    style="flex: 0 0 auto;">
                     ⚙️ Configurar Prompt
                 </button>
                 <button id="add-images-btn" class="btn btn-info" style="flex: 0 0 auto; display: none;">
@@ -163,8 +171,10 @@
             <button id="help-btn" class="btn btn-secondary" onclick="openHelpModal()" style="margin-right: 15px;">
                 ❓ Help
             </button>
-            <div class="export-footer-title">📦 Exportação & Importação</div>
-            <div class="export-footer-buttons">
+            <div class="export-footer-buttons" style="display: flex; align-items: center; gap: 15px;">
+                <div class="export-footer-title"
+                    style="margin-right: 15px; font-weight: 600; color: var(--text-secondary);">📦 Exportação &
+                    Importação:</div>
                 <button id="import-zip-footer-btn" class="btn btn-info" onclick="AnalysisManager.importCompleteZip()">
                     📥 Importar Projeto
                 </button>
@@ -212,39 +222,48 @@
                     <div class="help-instructions">
                         <div class="instruction-item">
                             <strong>1️⃣ Configurar API Keys</strong>
-                            <p>Clique no ícone de configuração (⚙️) no canto superior direito e adicione suas chaves de API para os serviços de IA desejados (Gemini, Claude, GPT-4, etc.).</p>
+                            <p>Clique no ícone de configuração (⚙️) no canto superior direito e adicione suas chaves de
+                                API para os serviços de IA desejados (Gemini, Claude, GPT-4, etc.).</p>
                         </div>
                         <div class="instruction-item">
                             <strong>2️⃣ Criar ou Selecionar Parcela</strong>
-                            <p>Digite o nome da parcela no campo "Nome da Parcela" ou selecione uma parcela existente no menu dropdown.</p>
+                            <p>Digite o nome da parcela no campo "Nome da Parcela" ou selecione uma parcela existente no
+                                menu dropdown.</p>
                         </div>
                         <div class="instruction-item">
                             <strong>3️⃣ Upload de Imagens</strong>
-                            <p>Clique em "Escolher Imagens" e selecione as fotos das subparcelas que deseja analisar. Você pode fazer upload de múltiplas imagens de uma vez.</p>
+                            <p>Clique em "Escolher Imagens" e selecione as fotos das subparcelas que deseja analisar.
+                                Você pode fazer upload de múltiplas imagens de uma vez.</p>
                         </div>
                         <div class="instruction-item">
                             <strong>4️⃣ Configurar Prompt (Opcional)</strong>
-                            <p>Utilize o painel de configuração de prompt para personalizar a análise. Você pode escolher templates predefinidos ou criar templates customizados.</p>
+                            <p>Utilize o painel de configuração de prompt para personalizar a análise. Você pode
+                                escolher templates predefinidos ou criar templates customizados.</p>
                         </div>
                         <div class="instruction-item">
                             <strong>5️⃣ Iniciar Análise</strong>
-                            <p>Selecione o modelo de IA desejado e clique em "🔍 Analisar". O sistema processará as imagens e identificará as espécies vegetais presentes.</p>
+                            <p>Selecione o modelo de IA desejado e clique em "🔍 Analisar". O sistema processará as
+                                imagens e identificará as espécies vegetais presentes.</p>
                         </div>
                         <div class="instruction-item">
                             <strong>6️⃣ Revisar e Editar Resultados</strong>
-                            <p>Após a análise, revise os resultados no painel lateral. Você pode editar espécies, coberturas, alturas e formas de vida conforme necessário.</p>
+                            <p>Após a análise, revise os resultados no painel lateral. Você pode editar espécies,
+                                coberturas, alturas e formas de vida conforme necessário.</p>
                         </div>
                         <div class="instruction-item">
                             <strong>7️⃣ Adicionar Espécies de Referência</strong>
-                            <p>Use o botão "📚 Espécies de Referência" para adicionar espécies ao banco de dados de referência, facilitando a padronização em análises futuras.</p>
+                            <p>Use o botão "📚 Espécies de Referência" para adicionar espécies ao banco de dados de
+                                referência, facilitando a padronização em análises futuras.</p>
                         </div>
                         <div class="instruction-item">
                             <strong>8️⃣ Exportar Dados</strong>
                             <p>Utilize os botões no rodapé para exportar seus resultados em diferentes formatos:</p>
                             <ul>
-                                <li><strong>📊 Excel:</strong> Planilha completa com análises avançadas, índices de diversidade e rankings</li>
+                                <li><strong>📊 Excel:</strong> Planilha completa com análises avançadas, índices de
+                                    diversidade e rankings</li>
                                 <li><strong>📄 PDF:</strong> Relatório visual com gráficos e tabelas</li>
-                                <li><strong>📦 ZIP:</strong> Pacote completo incluindo JSON + imagens das subparcelas</li>
+                                <li><strong>📦 ZIP:</strong> Pacote completo incluindo JSON + imagens das subparcelas
+                                </li>
                             </ul>
                         </div>
                         <div class="instruction-item">
@@ -286,7 +305,8 @@
                                 </div>
                             </a>
 
-                            <a href="https://drive.google.com/drive/folders/0B4wGMi_KVTvOWm51UzNnNVJjaEk?resourcekey=0-8e69zvcLn2zMXuphNmC56A&usp=drive_link" target="_blank" class="contact-item">
+                            <a href="https://drive.google.com/drive/folders/0B4wGMi_KVTvOWm51UzNnNVJjaEk?resourcekey=0-8e69zvcLn2zMXuphNmC56A&usp=drive_link"
+                                target="_blank" class="contact-item">
                                 <span class="contact-icon">📚</span>
                                 <div>
                                     <strong>Biblioteca Botânica</strong>
@@ -294,7 +314,8 @@
                                 </div>
                             </a>
 
-                            <a href="https://drive.google.com/drive/folders/0B4wGMi_KVTvOV2FmV0dnbDFiSzA?resourcekey=0-93UNqXD8Tg4mD0C9p073SA&usp=drive_link" target="_blank" class="contact-item">
+                            <a href="https://drive.google.com/drive/folders/0B4wGMi_KVTvOV2FmV0dnbDFiSzA?resourcekey=0-93UNqXD8Tg4mD0C9p073SA&usp=drive_link"
+                                target="_blank" class="contact-item">
                                 <span class="contact-icon">🌿</span>
                                 <div>
                                     <strong>Flora da Reserva Ducke</strong>
@@ -370,14 +391,14 @@
         }
 
         // Fechar modal ao clicar fora do conteúdo
-        document.getElementById('help-modal').addEventListener('click', function(e) {
+        document.getElementById('help-modal').addEventListener('click', function (e) {
             if (e.target === this) {
                 closeHelpModal();
             }
         });
 
         // Fechar modal com tecla ESC
-        document.addEventListener('keydown', function(e) {
+        document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
                 const modal = document.getElementById('help-modal');
                 if (modal.style.display === 'flex') {
@@ -387,4 +408,5 @@
         });
     </script>
 </body>
+
 </html>

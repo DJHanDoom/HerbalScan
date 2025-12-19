@@ -189,3 +189,4 @@ Esta sessão implementou a transformação completa do projeto HerbalScan em um 
 **Branch:** v3 WIN  
 **Status:** ✅ Completo e Testado
 
+

@@ -78,3 +78,4 @@ Após reinstalar, verifique se:
 - A solução inclui os arquivos tanto via hook quanto diretamente no spec para garantir compatibilidade
 
 
+

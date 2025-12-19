@@ -5,11 +5,13 @@
 
 const ReferenceSpeciesManager = {
     species: [],
-    
+    renames: [], // Stores { old: 'paspalum', new: 'paspalum notatum' }
+    editIndex: -1, // -1 means adding mode, >= 0 means editing mode
+
     init() {
         this.loadSpecies();
     },
-    
+
     async loadSpecies() {
         try {
             const response = await fetch('/api/reference-species');
@@ -21,21 +23,21 @@ const ReferenceSpeciesManager = {
             this.species = [];
         }
     },
-    
+
     open() {
         this.createModal();
         this.renderSpeciesList();
     },
-    
+
     close() {
         const modal = document.getElementById('reference-species-modal');
         if (modal) modal.remove();
     },
-    
+
     createModal() {
         // Remover modal existente
         this.close();
-        
+
         const modal = document.createElement('div');
         modal.id = 'reference-species-modal';
         modal.className = 'reference-species-modal';
@@ -84,8 +86,11 @@ const ReferenceSpeciesManager = {
                             <textarea id="ref-observacoes" rows="3" placeholder="Ex: Gramínea em touceiras densas, folhas lineares muito finas (<2mm), caules cilíndricos, cor verde-claro com leve tonalidade amarelada, textura lisa e glabra, altura 25-35cm"></textarea>
                         </div>
                         
-                        <button class="btn-add-species" onclick="ReferenceSpeciesManager.addSpecies()">
+                        <button class="btn-add-species" id="btn-save-species" onclick="ReferenceSpeciesManager.processForm()">
                             ➕ Adicionar Espécie
+                        </button>
+                        <button class="btn-cancel-edit" id="btn-cancel-edit" onclick="ReferenceSpeciesManager.cancelEdit()" style="display: none; width: 100%; margin-top: 8px; padding: 10px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: #cbd5e1; border-radius: 8px; cursor: pointer;">
+                            ❌ Cancelar Edição
                         </button>
                     </div>
                     
@@ -113,30 +118,33 @@ const ReferenceSpeciesManager = {
                 </div>
             </div>
         `;
-        
+
         document.body.appendChild(modal);
         this.injectStyles();
     },
-    
+
     renderSpeciesList() {
         const container = document.getElementById('species-list-container');
         const countSpan = document.getElementById('species-count');
-        
+
         if (!container) return;
-        
+
         countSpan.textContent = this.species.length;
-        
+
         if (this.species.length === 0) {
             container.innerHTML = '<div class="empty-state">Nenhuma espécie cadastrada ainda.</div>';
             return;
         }
-        
+
         container.innerHTML = this.species.map((sp, index) => `
             <div class="species-card">
                 <div class="species-card-header">
                     <strong>${sp.apelido}</strong>
                     <button class="btn-delete-species" onclick="ReferenceSpeciesManager.deleteSpecies(${index})" title="Remover">
                         🗑️
+                    </button>
+                    <button class="btn-edit-species" onclick="ReferenceSpeciesManager.editSpecies(${index})" title="Editar" style="margin-right: 8px; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); color: #f59e0b; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 1rem; transition: all 0.2s;">
+                        ✏️
                     </button>
                 </div>
                 <div class="species-card-body">
@@ -148,44 +156,104 @@ const ReferenceSpeciesManager = {
             </div>
         `).join('');
     },
-    
-    addSpecies() {
+
+    processForm() {
         const apelido = document.getElementById('ref-apelido').value.trim();
-        
+
         if (!apelido) {
             alert('Por favor, preencha o campo "Apelido"');
             return;
         }
-        
-        const newSpecies = {
+
+        const speciesData = {
             apelido: apelido,
             familia: document.getElementById('ref-familia').value.trim(),
             genero: document.getElementById('ref-genero').value.trim(),
             especie: document.getElementById('ref-especie').value.trim(),
             observacoes: document.getElementById('ref-observacoes').value.trim()
         };
-        
-        this.species.push(newSpecies);
-        
-        // Limpar formulário
+
+        if (this.editIndex >= 0) {
+            // Updating existing species
+            const original = this.species[this.editIndex];
+
+            // Check for rename
+            if (original.apelido !== apelido) {
+                this.renames.push({
+                    old: original.apelido,
+                    new: apelido
+                });
+                console.log(`📝 Rename tracked: "${original.apelido}" -> "${apelido}"`);
+            }
+
+            this.species[this.editIndex] = speciesData;
+
+            // Reset UI
+            this.cancelEdit();
+
+            // Visual feedback for update
+            const btn = document.getElementById('btn-save-species');
+            const originalText = btn.textContent;
+            btn.textContent = '✓ Atualizado!';
+            setTimeout(() => {
+                btn.textContent = originalText;
+            }, 1500);
+
+        } else {
+            // Adding new species
+            this.species.push(speciesData);
+
+            // Allow adding specific fields if needed, but primarily reset form
+            this.clearForm();
+
+            // Visual feedback for add
+            const btn = document.getElementById('btn-save-species');
+            const originalText = btn.textContent;
+            btn.textContent = '✓ Adicionado!';
+            setTimeout(() => {
+                btn.textContent = originalText;
+            }, 1500);
+        }
+
+        this.renderSpeciesList();
+    },
+
+    editSpecies(index) {
+        const sp = this.species[index];
+        this.editIndex = index;
+
+        document.getElementById('ref-apelido').value = sp.apelido;
+        document.getElementById('ref-familia').value = sp.familia || '';
+        document.getElementById('ref-genero').value = sp.genero || '';
+        document.getElementById('ref-especie').value = sp.especie || '';
+        document.getElementById('ref-observacoes').value = sp.observacoes || '';
+
+        const btnSave = document.getElementById('btn-save-species');
+        btnSave.innerHTML = '💾 Salvar Alterações';
+        btnSave.style.background = 'linear-gradient(90deg, #f59e0b 0%, #d97706 100%)';
+
+        document.getElementById('btn-cancel-edit').style.display = 'block';
+    },
+
+    cancelEdit() {
+        this.editIndex = -1;
+        this.clearForm();
+
+        const btnSave = document.getElementById('btn-save-species');
+        btnSave.innerHTML = '➕ Adicionar Espécie';
+        btnSave.style.background = 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)';
+
+        document.getElementById('btn-cancel-edit').style.display = 'none';
+    },
+
+    clearForm() {
         document.getElementById('ref-apelido').value = '';
         document.getElementById('ref-familia').value = '';
         document.getElementById('ref-genero').value = '';
         document.getElementById('ref-especie').value = '';
         document.getElementById('ref-observacoes').value = '';
-        
-        this.renderSpeciesList();
-        
-        // Feedback visual
-        const btn = document.querySelector('.btn-add-species');
-        btn.textContent = '✓ Adicionado!';
-        btn.style.background = 'linear-gradient(90deg, #10b981 0%, #059669 100%)';
-        setTimeout(() => {
-            btn.textContent = '➕ Adicionar Espécie';
-            btn.style.background = '';
-        }, 1500);
     },
-    
+
     deleteSpecies(index) {
         const species = this.species[index];
         if (confirm(`Remover "${species.apelido}"?`)) {
@@ -193,19 +261,23 @@ const ReferenceSpeciesManager = {
             this.renderSpeciesList();
         }
     },
-    
+
     async saveAndClose() {
         try {
             const response = await fetch('/api/reference-species', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ species: this.species })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    species: this.species,
+                    renames: this.renames
+                })
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 alert(`✓ ${this.species.length} espécies salvas com sucesso!`);
+                this.renames = []; // Clear renames after successful save
                 this.close();
             } else {
                 alert('Erro: ' + (result.error || 'Erro ao salvar espécies'));
@@ -215,44 +287,44 @@ const ReferenceSpeciesManager = {
             alert('Erro ao salvar espécies: ' + error.message);
         }
     },
-    
+
     exportSpecies() {
         if (this.species.length === 0) {
             alert('Nenhuma espécie para exportar');
             return;
         }
-        
+
         const dataStr = JSON.stringify({ species: this.species }, null, 2);
         const blob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
-        
+
         const a = document.createElement('a');
         a.href = url;
         a.download = `reference_species_${new Date().toISOString().split('T')[0]}.json`;
         a.click();
-        
+
         URL.revokeObjectURL(url);
         alert(`✓ ${this.species.length} espécies exportadas!`);
     },
-    
+
     showImportDialog() {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = '.json';
-        
+
         input.onchange = async (e) => {
             const file = e.target.files[0];
             if (!file) return;
-            
+
             try {
                 const text = await file.text();
                 const data = JSON.parse(text);
-                
+
                 if (!data.species || !Array.isArray(data.species)) {
                     alert('Formato de arquivo inválido');
                     return;
                 }
-                
+
                 if (confirm(`Importar ${data.species.length} espécies? Isso substituirá a lista atual.`)) {
                     this.species = data.species;
                     this.renderSpeciesList();
@@ -262,13 +334,13 @@ const ReferenceSpeciesManager = {
                 alert('Erro ao importar arquivo: ' + error.message);
             }
         };
-        
+
         input.click();
     },
-    
+
     injectStyles() {
         if (document.getElementById('reference-species-styles')) return;
-        
+
         const style = document.createElement('style');
         style.id = 'reference-species-styles';
         style.textContent = `
@@ -556,7 +628,7 @@ const ReferenceSpeciesManager = {
                 }
             }
         `;
-        
+
         document.head.appendChild(style);
     }
 };

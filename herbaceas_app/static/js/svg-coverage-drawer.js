@@ -262,7 +262,7 @@ const SVGCoverageDrawer = {
 
     onMouseDown(e) {
         if (!this.drawMode) return;
-        
+
         // Verificar se ferramenta foi selecionada
         if (!this.currentTool) {
             if (typeof showAlert === 'function') {
@@ -270,12 +270,18 @@ const SVGCoverageDrawer = {
             }
             return;
         }
-        
+
         e.preventDefault();
 
         const point = this.getSVGPoint(e);
 
         if (this.currentTool === 'polygon') {
+            // Ignorar segundo clique do duplo-clique para evitar ponto duplicado
+            if (e.detail > 1) {
+                e.preventDefault();
+                return;
+            }
+
             // Para polígonos: só iniciar desenho se ainda não começou
             if (!this.isDrawing) {
                 // Primeiro clique - iniciar desenho
@@ -346,7 +352,7 @@ const SVGCoverageDrawer = {
     onKeyDown(e) {
         if (!this.drawMode) return;
 
-        switch(e.key.toLowerCase()) {
+        switch (e.key.toLowerCase()) {
             case 'r':
                 this.setTool('rectangle');
                 break;
@@ -453,10 +459,10 @@ const SVGCoverageDrawer = {
         // Limpar preview imediatamente
         const drawGroup = this.svg.querySelector('#draw-group');
         if (drawGroup) drawGroup.innerHTML = '';
-        
+
         // Bloquear novos eventos temporariamente
         this.svg.style.pointerEvents = 'none';
-        
+
         const x1 = Math.min(this.startPoint.x, endPoint.x);
         const y1 = Math.min(this.startPoint.y, endPoint.y);
         const x2 = Math.max(this.startPoint.x, endPoint.x);
@@ -471,14 +477,14 @@ const SVGCoverageDrawer = {
         ];
 
         this.savePolygon(points);
-        
+
         // Resetar estado para próximo desenho
         this.startPoint = null;
         this.isDrawing = false;
-        
+
         // Reativar pointer events para próximo desenho
         this.svg.style.pointerEvents = 'auto';
-        
+
         if (typeof showAlert === 'function') {
             showAlert('success', '✅ Retângulo salvo! Arraste para criar outro ou ESC para parar');
         }
@@ -488,10 +494,10 @@ const SVGCoverageDrawer = {
         // Limpar preview imediatamente
         const drawGroup = this.svg.querySelector('#draw-group');
         if (drawGroup) drawGroup.innerHTML = '';
-        
+
         // Bloquear novos eventos temporariamente
         this.svg.style.pointerEvents = 'none';
-        
+
         const dx = endPoint.x - this.startPoint.x;
         const dy = endPoint.y - this.startPoint.y;
         const radius = Math.abs(dx); // Usar apenas distância horizontal
@@ -518,18 +524,18 @@ const SVGCoverageDrawer = {
         }
 
         this.savePolygon(points);
-        
+
         // Resetar estado para próximo desenho
         this.startPoint = null;
         this.isDrawing = false;
-        
+
         // Reativar pointer events para próximo desenho
         this.svg.style.pointerEvents = 'auto';
-        
+
         if (typeof showAlert === 'function') {
             showAlert('success', '✅ Círculo salvo! Arraste para criar outro ou ESC para parar');
         }
-        
+
         console.log(`✅ Círculo convertido para polígono (raio: ${radius.toFixed(1)}px)`);
     },
 
@@ -537,10 +543,10 @@ const SVGCoverageDrawer = {
         // Limpar preview imediatamente
         const drawGroup = this.svg.querySelector('#draw-group');
         if (drawGroup) drawGroup.innerHTML = '';
-        
+
         // Bloquear novos eventos temporariamente
         this.svg.style.pointerEvents = 'none';
-        
+
         const rx = Math.abs(endPoint.x - this.startPoint.x) / 2;
         const ry = Math.abs(endPoint.y - this.startPoint.y) / 2;
 
@@ -566,49 +572,49 @@ const SVGCoverageDrawer = {
         }
 
         this.savePolygon(points);
-        
+
         // Resetar estado para próximo desenho
         this.startPoint = null;
         this.isDrawing = false;
-        
+
         // Reativar pointer events para próximo desenho
         this.svg.style.pointerEvents = 'auto';
-        
+
         if (typeof showAlert === 'function') {
             showAlert('success', '✅ Elipse salva! Arraste para criar outra ou ESC para parar');
         }
-        
+
         console.log(`✅ Elipse convertida para polígono (${rx.toFixed(1)}x${ry.toFixed(1)}px)`);
     },
 
     finishPolygon() {
         if (this.polygonPoints.length < 3) return;
-        
+
         console.log(`🟢 FINALIZANDO POLÍGONO - ${this.polygonPoints.length} pontos`);
-        
+
         // Capturar dados antes de resetar
         const pointsToSave = [...this.polygonPoints];
         const currentMode = this.drawMode;
         const currentSpeciesIdx = this.currentSpeciesIndex;
-        
+
         // Resetar pontos mas MANTER modo ativo
         this.polygonPoints = [];
         this.isDrawing = false;
         this.startPoint = null;
-        
+
         console.log(`🔄 Estado resetado: isDrawing=${this.isDrawing}, drawMode=${this.drawMode}, pontos=${this.polygonPoints.length}`);
         console.log('✅ DrawMode PERMANECE ATIVO - próximo clique iniciará novo polígono');
-        
+
         // NÃO resetar drawMode - manter ferramenta ativa
         // NÃO bloquear pointer-events - manter ativo
-        
+
         // Limpar preview
         const drawGroup = this.svg.querySelector('#draw-group');
         if (drawGroup) drawGroup.innerHTML = '';
-        
+
         // Salvar usando dados capturados
         this.savePolygonWithMode(pointsToSave, currentMode, currentSpeciesIdx);
-        
+
         // NÃO desativar - manter ferramenta ativa para próximo polígono
         // Apenas mostrar mensagem
         if (typeof showAlert === 'function') {
@@ -682,7 +688,7 @@ const SVGCoverageDrawer = {
                 const polygonGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                 polygonGroup.dataset.speciesIndex = speciesIndex;
                 polygonGroup.dataset.polygonIndex = polyIndex;
-                
+
                 // Criar polígono
                 const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
                 const pointsStr = polyData.points.map(p => `${p.x},${p.y}`).join(' ');
@@ -713,7 +719,7 @@ const SVGCoverageDrawer = {
                 labelBg.setAttribute('fill', color);
                 labelBg.setAttribute('fill-opacity', '0.9');
                 labelBg.setAttribute('rx', '4');
-                
+
                 // Texto do rótulo
                 const labelText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 labelText.setAttribute('x', centerX);
@@ -767,7 +773,7 @@ const SVGCoverageDrawer = {
 
     deletePolygon(speciesIndex, polygonIndex) {
         const speciesName = this.currentSubparcela?.especies[speciesIndex]?.apelido || `Espécie ${parseInt(speciesIndex) + 1}`;
-        
+
         if (!confirm(`Apagar polígono da espécie "${speciesName}"?`)) {
             return;
         }
@@ -775,25 +781,25 @@ const SVGCoverageDrawer = {
         // Remover polígono do array
         if (this.speciesPolygons[speciesIndex]) {
             this.speciesPolygons[speciesIndex].splice(polygonIndex, 1);
-            
+
             // Se não sobrou nenhum polígono, remover a espécie
             if (this.speciesPolygons[speciesIndex].length === 0) {
                 delete this.speciesPolygons[speciesIndex];
             }
-            
+
             // Re-renderizar
             this.renderSpecies();
-            
+
             // Atualizar cobertura
             this.updateCoverageDisplay();
-            
+
             // Persistir
             if (this.speciesPolygons[speciesIndex]) {
                 this.persistSpeciesArea(speciesIndex, this.speciesPolygons[speciesIndex]);
             } else {
                 this.persistSpeciesArea(speciesIndex, []);
             }
-            
+
             if (typeof showAlert === 'function') {
                 showAlert('success', '✅ Polígono removido');
             }
@@ -802,11 +808,11 @@ const SVGCoverageDrawer = {
 
     editPolygonVertices(speciesIndex, polygonIndex) {
         const speciesName = this.currentSubparcela?.especies[speciesIndex]?.apelido || `Espécie ${parseInt(speciesIndex) + 1}`;
-        
+
         if (typeof showAlert === 'function') {
             showAlert('info', `🔧 Edição de vértices para "${speciesName}" - Em desenvolvimento`);
         }
-        
+
         // TODO: Implementar edição de vértices
         console.log('TODO: Editar vértices do polígono', speciesIndex, polygonIndex);
     },
@@ -906,13 +912,13 @@ const SVGCoverageDrawer = {
     setTool(tool) {
         this.currentTool = tool;
         console.log(`🔧 Ferramenta: ${tool}`);
-        
+
         // Mostrar instruções baseadas na ferramenta
         if (typeof showAlert === 'function' && this.drawMode) {
             const modeName = this.drawMode === 'subparcela' ? 'Área 100%' : 'Espécie';
             let instruction = '';
-            
-            switch(tool) {
+
+            switch (tool) {
                 case 'rectangle':
                     instruction = 'Clique e arraste para criar um retângulo';
                     break;
@@ -926,7 +932,7 @@ const SVGCoverageDrawer = {
                     instruction = 'Clique e arraste para criar uma elipse';
                     break;
             }
-            
+
             showAlert('success', `✅ ${tool.toUpperCase()} selecionado - ${instruction}`);
         }
     },
@@ -966,7 +972,7 @@ const SVGCoverageDrawer = {
 
         const especie = this.currentSubparcela.especies[speciesIndex];
         const subparcelaId = this.currentSubparcela.subparcela_id || this.currentSubparcela.id || this.currentSubparcela.subparcela;
-        
+
         const data = {
             parcela: window.appState?.parcelaNome,
             subparcela: subparcelaId,

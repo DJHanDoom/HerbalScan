@@ -699,7 +699,30 @@ Para cada morfotipo CLARAMENTE visível, forneça:
     prompt += """
    Sempre inclua: cor, textura, tamanho, forma, padrão de crescimento, altura, e qualquer variação observada
 
-5. **cobertura** - Porcentagem (0-100), soma deve ser ~100%
+"""
+
+    # Instrução de cobertura
+    if params['include_soil'] and params['include_litter']:
+        prompt += """
+5. **cobertura** - Porcentagem (0-100) ocupada no quadrado de 1x1m.
+   - A soma de todas as coberturas deve ser ~100% (pois inclui solo e serapilheira).
+"""
+    elif params.get('normalize_coverage', False):
+        prompt += """
+5. **cobertura** - Porcentagem (0-100) ocupada no quadrado de 1x1m.
+   - ⚠️ **ATENÇÃO:** A soma de coberturas DEVE ser ~100% (Normalização Ativada).
+   - Calcule a abundância relativa de cada espécie em relação à área vegetal total.
+   - Ignore os espaços vazios na soma final - redistribua para que as espécies somem 100%.
+"""
+    else:
+        prompt += """
+5. **cobertura** - Porcentagem (0-100) ocupada no quadrado de 1x1m.
+   - ⚠️ **ATENÇÃO:** A soma PODE ser MENOR que 100% (pois solo/serapilheira foram excluídos).
+   - Estime a porcentagem REAL que a planta ocupa no 1m².
+   - NÃO force a soma para 100% redistribuindo a área vazia.
+"""
+
+    prompt += """
 
 6. **altura** - Altura média em cm (considere o quadrado de 1x1m como referência)
 
@@ -823,7 +846,10 @@ REGRAS FINAIS:
             else 'sempre que possível identificar'
         }\n"""
     
-    prompt += "✓ Soma de coberturas = ~100%\n"
+    if params['include_soil'] and params['include_litter']:
+        prompt += "✓ Soma de coberturas = ~100%\n"
+    else:
+        prompt += "✓ Soma de coberturas = Porcentagem REAL (pode ser < 100%)\n"
 
     if params.get('detect_coordinates', False):
         prompt += "✓ TENTE SEMPRE fornecer coordenadas 'areas' para espécies com localização visível\n"

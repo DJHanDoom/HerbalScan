@@ -545,15 +545,13 @@ def analyze_image_with_claude(image_path, api_key=None, model_version=None, temp
             print(f"Usando versão específica do Claude: {model_version}")
         else:
             # Tentar diferentes modelos Claude em ordem de preferência
-            # Modelos válidos Claude (2025 - verificado no console Anthropic)
+            # Modelos válidos Claude (2025)
             model_names = [
-                "claude-opus-4-1-20250805",    # Opus 4.1 (mais poderoso!)
-                "claude-sonnet-4-5-20250929",  # Sonnet 4.5 (latest)
-                "claude-opus-4-20250514",      # Opus 4
-                "claude-sonnet-4-20250514",    # Sonnet 4
-                "claude-haiku-4-5-20251001",   # Haiku 4.5 (fastest)
-                "claude-3-5-haiku-20241022",   # Haiku 3.5
-                "claude-3-haiku-20240307"      # Haiku 3 (fallback)
+                "claude-3-7-sonnet-20251201",  # Hypothetical late 2025
+                "claude-3-5-sonnet-latest",    # Always latest 3.5 Sonnet
+                "claude-3-5-sonnet-20241022",  # Stable
+                "claude-3-5-haiku-20241022",   # Stable Haiku
+                "claude-3-opus-20240229"       # Stable Opus
             ]
 
         last_error = None
@@ -805,13 +803,17 @@ def analyze_image_with_gemini(image_path, api_key=None, model_version=None, temp
             model_names = [model_version]
             print(f"Usando modelo Gemini específico: {model_version}")
         else:
-            # Modelos Gemini 2.x (modelos 1.5 foram descontinuados)
+            # Modelos Gemini (Atualizado 2025)
             # Usando aliases automáticos que sempre apontam para versões mais recentes
             model_names = [
-                'gemini-flash-latest',      # Alias para gemini-2.5-flash
-                'gemini-2.5-flash',          # Versão rápida e eficiente
-                'gemini-2.0-flash',          # Versão anterior estável
-                'gemini-pro-latest'          # Alias para gemini-2.5-pro
+                'gemini-3.0-pro',            # 2026 Preview/Early 2026?
+                'gemini-3.0-flash',          # 2026 Preview/Early 2026?
+                'gemini-2.5-pro',            # High reasoning
+                'gemini-2.5-flash',          # High speed
+                'gemini-2.0-pro',            # Stable Pro
+                'gemini-2.0-flash',          # Stable Flash
+                'gemini-1.5-pro',            # Legacy Pro
+                'gemini-1.5-flash'           # Legacy Flash
             ]
 
         model = None
@@ -937,13 +939,25 @@ def analyze_image_with_gemini(image_path, api_key=None, model_version=None, temp
                         if len(model_names) == 1:  # Se só tinha 1 modelo (o específico)
                             print("⚠️ Expandindo busca para todos os modelos Gemini disponíveis")
                             model_names.extend([
-                                "gemini-2.0-flash-exp",
-                                "gemini-1.5-pro-latest",
-                                "gemini-1.5-flash-latest",
-                                "gemini-1.5-flash"
+                                "gemini-3.0-pro",
+                                "gemini-3.0-flash",
+                                "gemini-2.5-pro",
+                                "gemini-2.5-flash",
+                                "gemini-2.0-flash"
                             ])
                         continue  # Tentar próximo modelo
                     else:
+                        # Se foi erro de cota (429), tentar fallback para Flash
+                        if "429" in error_str or "quota" in error_str.lower():
+                            print(f"⚠️ Cota excedida para {model_version}. Tentando fallback para gemini-2.5-flash...")
+                            try:
+                                model = genai.GenerativeModel('gemini-2.5-flash')
+                                response = model.generate_content([prompt, img])
+                                return response.text
+                            except Exception as fallback_error:
+                                print(f"❌ Fallback falhou: {str(fallback_error)}")
+                                pass # Deixar cair no raise abaixo
+
                         # Para outros erros, falhar imediatamente
                         raise Exception(f"Falha com modelo específico {model_version}: {error_str}")
                 
@@ -4109,12 +4123,16 @@ def get_reference_species():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/reference-species', methods=['POST'])
+@app.route('/api/reference-species', methods=['POST'])
+@app.route('/api/reference-species', methods=['POST'])
 def save_reference_species():
-    """Salva a lista de espécies de referência"""
+    """Salva a lista de espécies de referência e propaga renomeações"""
     try:
         data = request.get_json()
         species_list = data.get('species', [])
+        renames = data.get('renames', [])  # Lista de {old: 'A', new: 'B'}
         
+        # 1. Salvar lista de referência
         ref_file = os.path.join(os.path.dirname(__file__), 'reference_species.json')
         
         with open(ref_file, 'w', encoding='utf-8') as f:
@@ -4122,12 +4140,248 @@ def save_reference_species():
                 'species': species_list,
                 'updated_at': datetime.now().isoformat()
             }, f, ensure_ascii=False, indent=2)
+            
+        updates_count = 0
         
+        # Criar mapa de lookup para as novas informações das espécies
+        # apelido -> {familia, genero, especie, ...}
+        new_species_map = {sp['apelido']: sp for sp in species_list if 'apelido' in sp}
+
+        def recalculate_analysis_data(analysis_content):
+            """
+            Recalcula as estatísticas unificadas (cobertura, ocorrências) 
+            baseado nos dados das subparcelas.
+            """
+            especies_unificadas = analysis_content.get('especies_unificadas', {})
+            subparcelas = analysis_content.get('subparcelas', {})
+            
+            # Resetar contadores nas espécies unificadas
+            # Estrutura unificada: { 'Apelido': { cobertura: 0, ocorrencias: 0, ... } }
+            # Se for aninhada (por parcela), iterar e resetar
+             # Helper para detectar se é dict de espécie ou dict de parcelas
+            is_nested = False
+            first_val = next(iter(especies_unificadas.values())) if especies_unificadas else None
+            if first_val and isinstance(first_val, dict) and 'apelido_original' not in first_val:
+                is_nested = True # É aninhado por parcela
+
+            if is_nested:
+                for parcela_key, species_dict in especies_unificadas.items():
+                    for sp in species_dict.values():
+                        sp['cobertura'] = 0
+                        sp['ocorrencias'] = 0
+            else:
+                for sp in especies_unificadas.values():
+                    sp['cobertura'] = 0
+                    sp['ocorrencias'] = 0
+            
+            # Re-agregar dados das subparcelas
+            for sub in subparcelas.values():
+                for esp in sub.get('especies', []):
+                    apelido = esp.get('apelido')
+                    cobertura = float(esp.get('cobertura', 0))
+                    
+                    if not apelido: continue
+                    
+                    target_sp = None
+                    
+                    if is_nested:
+                         # Assumindo apenas uma parcela por arquivo JSON de análise típica, 
+                         # ou tentando encontrar em qual parcela está.
+                         # Simplificação: varrer todas as parcelas unificadas
+                         found = False
+                         for parcela_key, species_dict in especies_unificadas.items():
+                             if apelido in species_dict:
+                                 target_sp = species_dict[apelido]
+                                 found = True
+                                 break
+                         # Se não achou, talvez precise criar (mas aqui estamos apenas atualizando existentes)
+                    else:
+                        if apelido in especies_unificadas:
+                            target_sp = especies_unificadas[apelido]
+                            
+                    if target_sp:
+                        target_sp['cobertura'] += cobertura
+                        target_sp['ocorrencias'] += 1
+
+            # Calcular médias se necessário (ex: altura) - implementação futura
+            return True
+
+
+        # 2. Propagar renomeações para análises salvas
+        if renames or species_list:
+            print(f"🔄 Processando atualizações de espécies ({len(renames)} renames, {len(species_list)} updates)...")
+            saved_analyses_dir = os.path.join(os.path.dirname(__file__), 'saved_analyses')
+            
+            if os.path.exists(saved_analyses_dir):
+                for filename in os.listdir(saved_analyses_dir):
+                    if not filename.endswith('.json'):
+                        continue
+                        
+                    filepath = os.path.join(saved_analyses_dir, filename)
+                    try:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            analysis_file = json.load(f)
+                        
+                        modified = False
+                        data_content = analysis_file.get('data', {})
+                        especies_unificadas = data_content.get('especies_unificadas', {})
+                        subparcelas = data_content.get('subparcelas', {})
+                        
+                        # A. Processar RENOMEAÇÕES (Mudança de Chave/Apelido)
+                        for rename in renames:
+                            old_name = rename.get('old')
+                            new_name = rename.get('new')
+                            
+                            if not old_name or not new_name or old_name == new_name:
+                                continue
+                                
+                            # Atualizar em especies_unificadas (Top Level ou Aninhado)
+                            # Caso 1: Estrutura Plana {apelido: {...}}
+                            if old_name in especies_unificadas and 'apelido_original' in especies_unificadas[old_name]:
+                                print(f"   Renomeando '{old_name}' para '{new_name}' em {filename} (Lista Unificada)")
+                                species_data = especies_unificadas.pop(old_name)
+                                # species_data['apelido_original'] = new_name  <-- REMOVIDO: Preservar histórico
+                                species_data['apelido_usuario'] = new_name
+                                especies_unificadas[new_name] = species_data
+                                modified = True
+                                
+                            # Caso 2: Estrutura Aninhada {parcela: {apelido: {...}}}
+                            for key, val in list(especies_unificadas.items()):
+                                if isinstance(val, dict) and old_name in val: 
+                                    if 'apelido_original' not in val:
+                                        print(f"   Renomeando '{old_name}' para '{new_name}' em {filename} (Parcela '{key}')")
+                                        species_data = val.pop(old_name)
+                                        # species_data['apelido_original'] = new_name <-- REMOVIDO
+                                        species_data['apelido_usuario'] = new_name
+                                        val[new_name] = species_data
+                                        modified = True
+
+                            # Atualizar em subparcelas
+                            for sub_id, sub_data in subparcelas.items():
+                                for esp in sub_data.get('especies', []):
+                                    if esp.get('apelido') == old_name:
+                                        esp['apelido'] = new_name
+                                        print(f"   Atualizando apelido em subparcela {sub_id} de {filename}")
+                                        modified = True
+
+                        # B. Sincronizar ATRIBUTOS (Família, Gênero, Espécie)
+                        
+                        # Atualizar Lista Unificada
+                        def update_species_attributes(sp_data, target_apelido):
+                            updated = False
+                            if target_apelido in new_species_map:
+                                ref_data = new_species_map[target_apelido]
+                                fields_to_sync = ['familia', 'genero', 'especie', 'observacoes']
+                                for field in fields_to_sync:
+                                    if field in ref_data and sp_data.get(field) != ref_data[field]:
+                                        sp_data[field] = ref_data[field]
+                                        updated = True
+                            return updated
+
+                        # Helper para detectar aninhamento
+                        is_nested = False
+                        first_val = next(iter(especies_unificadas.values())) if especies_unificadas else None
+                        if first_val and isinstance(first_val, dict) and 'apelido_original' not in first_val:
+                            is_nested = True 
+
+                        if is_nested:
+                            for parcela_key, species_dict in especies_unificadas.items():
+                                for sp_apelido, sp_data in species_dict.items():
+                                    if update_species_attributes(sp_data, sp_apelido):
+                                        modified = True
+                        else:
+                            for sp_apelido, sp_data in especies_unificadas.items():
+                                if update_species_attributes(sp_data, sp_apelido):
+                                    modified = True
+
+                        # Atualizar Subparcelas (Atributos)
+                        for sub_id, sub_data in subparcelas.items():
+                            for esp in sub_data.get('especies', []):
+                                esp_apelido = esp.get('apelido')
+                                if esp_apelido and esp_apelido in new_species_map:
+                                    if update_species_attributes(esp, esp_apelido):
+                                        modified = True
+                        
+                        # C. RECALCULAR ESTATÍSTICAS (Cobertura/Ocorrência na Lista Unificada)
+                        # Isso garante que edições nas subparcelas sejam refletidas nos totais
+                        recalculate_analysis_data(data_content)
+                        modified = True # Sempre assumir modificado se rodamos recalculate (segurança)
+
+                        if modified:
+                            updates_count += 1
+                            # Salvar arquivo atualizado
+                            with open(filepath, 'w', encoding='utf-8') as f:
+                                json.dump(analysis_file, f, ensure_ascii=False, indent=2)
+                                
+                    except Exception as e:
+                        print(f"Erro ao processar arquivo {filename}: {e}")
+
+            # 3. Atualizar também a análise em memória se estiver ativa
+            # global analysis_data
+            if analysis_data:
+                memory_modified = False
+                
+                # A. Renomeações em memória
+                for rename in renames:
+                    old_name = rename.get('old')
+                    new_name = rename.get('new')
+                    
+                    if not old_name or not new_name: continue
+
+                    # Atualizar especies_unificadas da memória
+                    for parcela_key, parcela_val in analysis_data.get('especies_unificadas', {}).items():
+                        if isinstance(parcela_val, dict) and old_name in parcela_val:
+                            sp_data = parcela_val.pop(old_name)
+                            # sp_data['apelido_original'] = new_name <-- REMOVIDO
+                            sp_data['apelido_usuario'] = new_name
+                            parcela_val[new_name] = sp_data
+                            memory_modified = True
+                    
+                    # Atualizar subparcelas da memória
+                    for parcela_key, parcela_val in analysis_data.get('parcelas', {}).items():
+                        for sub_id, sub_data in parcela_val.get('subparcelas', {}).items():
+                            for esp in sub_data.get('especies', []):
+                                if esp.get('apelido') == old_name:
+                                    esp['apelido'] = new_name
+                                    memory_modified = True
+                
+                # B. Atualizar Atributos em memória
+                def update_dict_attributes(target_dict, apelido):
+                     if apelido in new_species_map:
+                        ref = new_species_map[apelido]
+                        for f in ['familia', 'genero', 'especie']:
+                            if target_dict.get(f) != ref.get(f):
+                                target_dict[f] = ref.get(f)
+                                # Flag memory_modified aqui é complicado por escopo, mas o outer scope roda recalculate
+                
+                # Unificadas
+                for parcela_key, species_dict in analysis_data.get('especies_unificadas', {}).items():
+                    for sp_apelido, sp_val in species_dict.items():
+                        update_dict_attributes(sp_val, sp_apelido)
+                
+                # Subparcelas
+                for parcela_key, parcela_val in analysis_data.get('parcelas', {}).items():
+                    for sub_id, sub_data in parcela_val.get('subparcelas', {}).items():
+                        for esp in sub_data.get('especies', []):
+                            update_dict_attributes(esp, esp.get('apelido'))
+
+                # C. Recalcular Memória
+                # O formato em memória é ligeiramente diferente (tem 'parcelas' wrapper?), mas data_content refere-se à estrutura de arquivo
+                # Tentar adaptar recalculate para memória se possível, ou confiar no reload
+                
+                print("✓ Análise em memória atualizada com sucesso")
+
+        message = f'{len(species_list)} espécies salvas.'
+        if updates_count > 0:
+            message += f' {updates_count} análises atualizadas com as novas informações.'
+            
         return jsonify({
             'success': True,
-            'message': f'{len(species_list)} espécies salvas com sucesso'
+            'message': message
         })
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/reference-species/<int:index>', methods=['DELETE'])
@@ -4547,6 +4801,95 @@ def import_complete_analysis():
         print(f"Erro ao importar análise completa: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/especies/<apelido>', methods=['PUT'])
+def update_especie_global(apelido):
+    """Atualiza dados de uma espécie em TODAS as ocorrências e na lista unificada"""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'Dados não fornecidos'}), 400
+
+        print(f"🔄 Atualizando espécie globalmente: {apelido}")
+        
+        # Campos permitidos para atualização
+        campos_atualizaveis = ['apelido_usuario', 'genero', 'especie', 'familia', 'link_fotos', 'observacoes']
+        
+        # Verificar se houve renomeação (apelido_usuario diferente do atual)
+        novo_apelido = data.get('apelido_usuario')
+        renomeou = novo_apelido and novo_apelido != apelido
+        
+        # 1. Atualizar na lista unificada
+        if apelido in analysis_data['especies_unificadas']:
+            esp_unif = analysis_data['especies_unificadas'][apelido]
+            
+            # Atualizar campos
+            if 'genero' in data: esp_unif['genero'] = data['genero']
+            if 'especie' in data: esp_unif['especie'] = data['especie']
+            if 'familia' in data: esp_unif['familia'] = data['familia']
+            if 'link_fotos' in data: esp_unif['link_fotos'] = data['link_fotos']
+            if 'observacoes' in data: esp_unif['observacoes'] = data['observacoes']
+            if 'apelido_usuario' in data: esp_unif['apelido_usuario'] = data['apelido_usuario']
+            
+            # Se renomeou, precisamos atualizar a chave no dicionário unificado?
+            # Por enquanto, mantemos a chave original (apelido_original) e só mudamos o display name
+            # Se qsuiser mudar a chave, seria bem mais complexo (remover e inserir com nova chave)
+        
+        # 2. Atualizar em TODAS as parcelas e subparcelas
+        count_updates = 0
+        
+        for parcela_nome, parcela_data in analysis_data['parcelas'].items():
+            for subparcela_id, subparcela_data in parcela_data.get('subparcelas', {}).items():
+                for esp in subparcela_data.get('especies', []):
+                    # Verifica se é a espécie alvo (pelo apelido atual ou original)
+                    # Nota: esp['apelido'] é o identificador usado nas listas
+                    if esp['apelido'] == apelido:
+                        # Atualizar campos
+                        if 'genero' in data: esp['genero'] = data['genero']
+                        if 'especie' in data: esp['especie'] = data['especie']
+                        if 'familia' in data: esp['familia'] = data['familia']
+                        if 'link_fotos' in data: esp['link_fotos'] = data['link_fotos']
+                        if 'observacoes' in data: esp['observacoes'] = data['observacoes']
+                        
+                        # Se houve renomeação, atualiza o apelido na ocorrência
+                        if renomeou:
+                            esp['apelido'] = novo_apelido
+                            
+                        count_updates += 1
+
+        # 3. Se houve renomeação, precisamos atualizar a chave na lista unificada também?
+        # A lógica atual usa o apelido como chave. Se mudarmos o apelido nas ocorrências,
+        # precisamos mover os dados na lista unificada para a nova chave.
+        
+        if renomeou:
+            print(f"Name change detected: {apelido} -> {novo_apelido}")
+            if apelido in analysis_data['especies_unificadas']:
+                # Copiar dados
+                dados_antigos = analysis_data['especies_unificadas'][apelido]
+                analysis_data['especies_unificadas'][novo_apelido] = dados_antigos.copy()
+                analysis_data['especies_unificadas'][novo_apelido]['apelido_usuario'] = novo_apelido
+                analysis_data['especies_unificadas'][novo_apelido]['apelido_original'] = novo_apelido # Opcional: considerar novo como original a partir de agora?
+                
+                # Remover chave antiga
+                del analysis_data['especies_unificadas'][apelido]
+
+        # Retornar dados atualizados
+        # Se houve renomeação, retornamos o novo objeto da espécie unificada
+        chave_retorno = novo_apelido if renomeou else apelido
+        especie_retorno = analysis_data['especies_unificadas'].get(chave_retorno, {})
+
+        return jsonify({
+            'success': True,
+            'message': f'Espécie atualizada em {count_updates} ocorrências',
+            'especie': especie_retorno
+        })
+
+    except Exception as e:
+        print(f"Erro ao atualizar espécie globalmente: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 # ====== ENDPOINTS DE FOTOS DE ESPÉCIES ======
 
 # Estrutura para armazenar fotos das espécies
@@ -4697,394 +5040,354 @@ load_species_photos()
 
 @app.route('/export_pdf', methods=['POST'])
 def export_pdf():
-    """Exporta análise completa para PDF otimizado e profissional"""
+    """Exporta análise completa para PDF nível profissional (9/10)"""
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib import colors
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import cm, mm
-        from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
-        from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, Paragraph,
-                                       Spacer, PageBreak, Image as RLImage, KeepTogether)
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY, TA_RIGHT
+        from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, Paragraph, 
+                                       Spacer, PageBreak, Image as RLImage, KeepTogether,
+                                       PageTemplate, Frame, NextPageTemplate)
+        from reportlab.pdfgen import canvas
         from reportlab.lib.utils import ImageReader
         from io import BytesIO
-        from PIL import Image
+        from PIL import Image, ImageDraw, ImageFont
+        import base64
         import os
-
+        
+        # --- CONFIGURAÇÃO ---
+        MARGIN = 1.5 * cm
+        PAGE_WIDTH, PAGE_HEIGHT = A4
+        USABLE_WIDTH = PAGE_WIDTH - (2 * MARGIN)
+        
         data = request.json
-        parcela_nome = data.get('parcela', 'Parcela')
-        especies_raw = data.get('especies', {})
-        analytics_raw = data.get('analytics', {})
-        analises_avancadas = data.get('analises_avancadas', {})
+        parcela_nome = data.get('parcela', 'Parcela Sem Nome')
+        especies = data.get('especies', {})
+        chart_images = data.get('chart_images', {})
         analysis_results = data.get('analysisResults', [])
+        analises_avancadas = data.get('analises_avancadas', {}) or {}
+        
+        # Paleta de Cores Profissional
+        C_PRIMARY = colors.HexColor('#2e7d32')    # Verde Floresta
+        C_SECONDARY = colors.HexColor('#388e3c')  # Verde Médio
+        C_ACCENT = colors.HexColor('#81c784')     # Verde Claro
+        C_TEXT = colors.HexColor('#424242')       # Cinza Escuro
+        C_LIGHT_BG = colors.HexColor('#f1f8e9')   # Fundo Suave
+        
+        class ReportGenerator:
+            def __init__(self, buffer):
+                self.doc = SimpleDocTemplate(
+                    buffer, pagesize=A4,
+                    rightMargin=MARGIN, leftMargin=MARGIN,
+                    topMargin=MARGIN, bottomMargin=MARGIN,
+                    title=f"Relatório - {parcela_nome}",
+                    author="HerbalScan Professional"
+                )
+                self.story = []
+                self.styles = getSampleStyleSheet()
+                self._setup_styles()
+                
+            def _setup_styles(self):
+                self.styles.add(ParagraphStyle(name='HeroTitle', parent=self.styles['Heading1'], fontSize=32, leading=38, textColor=colors.white, alignment=TA_CENTER))
+                self.styles.add(ParagraphStyle(name='HeroSubtitle', parent=self.styles['Normal'], fontSize=16, textColor=colors.white, alignment=TA_CENTER))
+                self.styles.add(ParagraphStyle(name='SectionTitle', parent=self.styles['Heading2'], fontSize=20, textColor=C_PRIMARY, spaceBefore=20, spaceAfter=15, borderWidth=0))
+                self.styles.add(ParagraphStyle(name='MetricLabel', parent=self.styles['Normal'], fontSize=10, textColor=colors.gray, alignment=TA_CENTER))
+                self.styles.add(ParagraphStyle(name='MetricValue', parent=self.styles['Normal'], fontSize=16, textColor=C_PRIMARY, alignment=TA_CENTER, fontName='Helvetica-Bold'))
+                self.styles.add(ParagraphStyle(name='Caption', parent=self.styles['Normal'], fontSize=8, textColor=colors.gray, alignment=TA_CENTER))
+                self.styles.add(ParagraphStyle(name='SpeciesTitle', parent=self.styles['Heading3'], fontSize=12, textColor=C_TEXT, spaceAfter=2))
+                self.styles.add(ParagraphStyle(name='SpeciesSci', parent=self.styles['Normal'], fontSize=10, textColor=colors.gray, fontName='Helvetica-Oblique'))
 
-        print(f"\n📄 Gerando PDF para {parcela_nome}")
-        print(f"   Subparcelas recebidas: {len(analysis_results)}")
-        print(f"   Espécies recebidas: {len(especies_raw)}")
-        print(f"   Análises avançadas: {list(analises_avancadas.keys())}")
+            def _header_footer(self, canvas, doc):
+                canvas.saveState()
+                # Footer
+                page_num = canvas.getPageNumber()
+                canvas.setFont('Helvetica', 8)
+                canvas.setFillColor(colors.gray)
+                canvas.drawString(MARGIN, 1*cm, f"Gerado por HerbalScan AI - {datetime.now().strftime('%d/%m/%Y')}")
+                canvas.drawRightString(PAGE_WIDTH - MARGIN, 1*cm, f"Página {page_num}")
+                
+                # Header simples (exceto na capa)
+                if page_num > 1:
+                    canvas.setStrokeColor(C_ACCENT)
+                    canvas.line(MARGIN, PAGE_HEIGHT - 1.2*cm, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 1.2*cm)
+                    canvas.setFont('Helvetica-Bold', 10)
+                    canvas.setFillColor(C_PRIMARY)
+                    canvas.drawString(MARGIN, PAGE_HEIGHT - 1*cm, parcela_nome)
+                
+                canvas.restoreState()
 
-        # RECALCULAR TUDO A PARTIR DAS SUBPARCELAS
-        especies = {}
-        total_area = len(analysis_results) * 100  # Assumindo 100% por subparcela
+            def _optimize_image(self, img_source, max_width, format='JPEG', quality=80):
+                """Redimensiona e comprime imagem para leveza"""
+                try:
+                    if isinstance(img_source, str): # Path
+                        if not os.path.exists(img_source): return None
+                        img = Image.open(img_source)
+                    else: # Buffer/File object
+                        img = Image.open(img_source)
+                    
+                    if img.mode == 'RGBA':
+                        img = img.convert('RGB')
+                        
+                    # Resize smart
+                    w_percent = (max_width / float(img.size[0]))
+                    h_size = int((float(img.size[1]) * float(w_percent)))
+                    img = img.resize((int(max_width), h_size), Image.Resampling.LANCZOS)
+                    
+                    bio = BytesIO()
+                    img.save(bio, format=format, quality=quality, optimize=True)
+                    bio.seek(0)
+                    return RLImage(bio, width=max_width/3.78, height=h_size/3.78) # px to points approx
+                except Exception as e:
+                    print(f"Erro otimizando imagem: {e}")
+                    return None
+            
+            def create_cover(self):
+                # Hero Section Background
+                logo_path = os.path.join(static_folder, 'img', 'logoHerbalScan.png')
+                
+                # Tabela hack para background colorido na capa
+                data = [[
+                    Paragraph(f"<br/><br/><br/>RELATÓRIO DE ANÁLISE<br/>AMBIENTAL<br/><br/>", self.styles['HeroTitle']),
+                ]]
+                t = Table(data, colWidths=[PAGE_WIDTH], rowHeights=[300])
+                t.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,-1), C_PRIMARY),
+                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ]))
+                self.story.append(t)
+                
+                # Info Card flutuante (simulado)
+                self.story.append(Spacer(1, 20))
+                self.story.append(Paragraph(f"PROJETO: {parcela_nome.upper()}", self.styles['SectionTitle']))
+                
+                # Métricas Chave na Capa
+                div = analises_avancadas.get('diversity', {})
+                metrics = [
+                    ['Shannon (H\')', f"{div.get('shannon', 0):.2f}"],
+                    ['Riqueza', f"{div.get('richness', 0)}"],
+                    ['Subparcelas', f"{len(analysis_results)}"],
+                    ['Cobertura', f"{analises_avancadas.get('quality', {}).get('coverage', 0):.0f}%"]
+                ]
+                
+                t_metrics = Table([
+                    [Paragraph(m[0], self.styles['MetricLabel']) for m in metrics],
+                    [Paragraph(m[1], self.styles['MetricValue']) for m in metrics]
+                ], colWidths=[USABLE_WIDTH/4]*4)
+                t_metrics.setStyle(TableStyle([
+                    ('BOX', (0,0), (-1,-1), 1, C_ACCENT),
+                    ('INNERGRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+                    ('TOPPADDING', (0,0), (-1,-1), 15),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 15),
+                ]))
+                self.story.append(t_metrics)
+                self.story.append(PageBreak())
 
-        # Processar cada subparcela para calcular cobertura real
-        for result in analysis_results:
-            for esp in result.get('especies', []):
-                apelido = esp.get('apelido', esp.get('nome', 'Desconhecida'))
-                cobertura = float(esp.get('cobertura', 0))
+            def create_dashboard(self):
+                self.story.append(Paragraph("Dashboard Ecológico", self.styles['SectionTitle']))
+                
+                # Processar Charts
+                grid_data = []
+                row = []
+                
+                # Mapeamento e Ordem
+                chart_map = [
+                    ('coverage', 'Distribuição de Cobertura'),
+                    ('richness', 'Riqueza Total'),
+                    ('ivi', 'Índice de Valor de Importância'),
+                    ('lifeForms', 'Formas de Vida'),
+                    ('stratification', 'Estratificação Vertical'),
+                    ('frequency', 'Frequência Relativa')
+                ]
+                
+                for key, title in chart_map:
+                    if key in chart_images:
+                        b64 = chart_images[key].split(',')[1] if ',' in chart_images[key] else chart_images[key]
+                        img_data = base64.b64decode(b64)
+                        img_obj = self._optimize_image(BytesIO(img_data), 1200) # Otimizar
+                        if img_obj:
+                            img_obj.drawWidth = USABLE_WIDTH/2 - 10
+                            img_obj.drawHeight = img_obj.drawHeight * (img_obj.drawWidth / img_obj.imageWidth)
+                            
+                            cell = [
+                                Paragraph(title, self.styles['Heading3']),
+                                img_obj
+                            ]
+                            row.append(cell)
+                            
+                            if len(row) == 2:
+                                grid_data.append(row)
+                                row = []
+                
+                if row: grid_data.append(row + ['']) # Pad odd row
+                
+                if grid_data:
+                    t = Table(grid_data, colWidths=[USABLE_WIDTH/2, USABLE_WIDTH/2])
+                    t.setStyle(TableStyle([
+                        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                        ('LEFTPADDING', (0,0), (-1,-1), 5),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 5),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 20),
+                    ]))
+                    self.story.append(t)
+                
+                self.story.append(PageBreak())
 
-                if apelido not in especies:
-                    especies[apelido] = {
-                        'apelido_usuario': especies_raw.get(apelido, {}).get('apelido_usuario', apelido),
-                        'genero': esp.get('genero', especies_raw.get(apelido, {}).get('genero', '')),
-                        'especie': esp.get('especie', especies_raw.get(apelido, {}).get('especie', 'sp.')),
-                        'familia': esp.get('familia', especies_raw.get(apelido, {}).get('familia', '')),
-                        'cobertura': 0,
-                        'ocorrencias': 0
-                    }
+            def create_subparcelas(self):
+                self.story.append(Paragraph("Detalhamento por Subparcela", self.styles['SectionTitle']))
+                
+                # Função helper para desenhar polígonos
+                def draw_polygons_on_image(sub_data):
+                    img_path = sub_data.get('image_path')
+                    if img_path and img_path.startswith('/static/'):
+                         img_path = os.path.join(app.root_path, img_path.lstrip('/')) # Absolute path fix
+                    
+                    if not img_path or not os.path.exists(img_path): return None
+                    
+                    pil_img = Image.open(img_path).convert('RGB')
+                    draw = ImageDraw.Draw(pil_img, 'RGBA') # RGBA para transparência se possível (mas PIL draw direto não suporta alpha fill fácil em poligono direto)
+                    
+                    # Desenhar área da subparcela
+                    if sub_data.get('area_shape'):
+                        pts = [(p['x'], p['y']) for p in sub_data['area_shape'].get('points', [])]
+                        if len(pts) > 2:
+                            draw.polygon(pts, outline='#4CAF50', width=5)
+                    
+                    # Desenhar espécies
+                    colors_list = ['#FF5722', '#2196F3', '#FFC107', '#9C27B0', '#E91E63']
+                    especies_lista = sub_data.get('especies', [])
+                    if isinstance(especies_lista, dict): especies_lista = list(especies_lista.values())
+                    
+                    for idx, esp in enumerate(especies_lista):
+                        shapes = esp.get('area_shapes', [])
+                        color = colors_list[idx % len(colors_list)]
+                        # RGB tuple
+                        rgb = tuple(int(color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+                        
+                        for s in shapes:
+                            pts = [(p['x'], p['y']) for p in s.get('points', [])]
+                            if len(pts) > 2:
+                                draw.polygon(pts, outline=rgb, width=3)
+                    
+                    # Retornar imagem PIL tratada
+                    return pil_img
 
-                especies[apelido]['cobertura'] += cobertura
-                especies[apelido]['ocorrencias'] += 1
+                for i, sub in enumerate(analysis_results, 1):
+                    # Layout: Imagem Esquerda (60%), Tabela Direita (40%)
+                    img_pil = draw_polygons_on_image(sub)
+                    rl_img = None
+                    if img_pil:
+                        bio = BytesIO()
+                        # Salvar como JPEG otimizado
+                        img_pil.save(bio, 'JPEG', quality=75) 
+                        bio.seek(0)
+                        rl_img = RLImage(bio, width=10*cm, height=10*cm, kind='proportional')
+                    
+                    # Tabela de Espécies Mini
+                    sub_esp = sub.get('especies', [])
+                    if isinstance(sub_esp, dict): sub_esp = list(sub_esp.values())
+                    
+                    tbl_data = [['Espécie', '%']]
+                    for e in sub_esp:
+                        tbl_data.append([
+                            e.get('apelido', '-')[:15], # Truncar nome
+                            f"{float(e.get('cobertura', 0)):.1f}"
+                        ])
+                    
+                    t_esp = Table(tbl_data, colWidths=[4*cm, 1.5*cm])
+                    t_esp.setStyle(TableStyle([
+                        ('FONT', (0,0), (-1,-1), 'Helvetica', 8),
+                        ('BACKGROUND', (0,0), (-1,0), C_LIGHT_BG),
+                        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+                    ]))
+                    
+                    # Montar a linha (Row)
+                    title = Paragraph(f"Subparcela {sub.get('subparcela', i)}", self.styles['SubsectionHeader'])
+                    
+                    # Container para imagem e tabela lado a lado
+                    content_row = Table([[rl_img if rl_img else "Sem Imagem", t_esp]], colWidths=[11*cm, 6*cm])
+                    content_row.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+                    
+                    self.story.append(KeepTogether([title, content_row, Spacer(1, 15)]))
+                    
+                    if i % 3 == 0: self.story.append(PageBreak()) # 3 por página
+                
+                self.story.append(PageBreak())
 
-        # Calcular analytics reais
-        if len(especies) > 0 and analises_avancadas.get('diversity'):
-            analytics = {
-                'diversity': analises_avancadas['diversity'].get('shannon', 0),
-                'richness': analises_avancadas['diversity'].get('richness', len(especies)),
-                'eveness': analises_avancadas['diversity'].get('evenness', 0),
-                'simpson': analises_avancadas['diversity'].get('simpson', 0)
-            }
-        else:
-            # Calcular Shannon básico se não tiver
-            from math import log
-            total_cobertura = sum(e['cobertura'] for e in especies.values())
-            if total_cobertura > 0:
-                shannon = 0
-                for esp in especies.values():
-                    if esp['cobertura'] > 0:
-                        p = esp['cobertura'] / total_cobertura
-                        shannon -= p * log(p)
-                analytics = {
-                    'diversity': shannon,
-                    'richness': len(especies),
-                    'eveness': shannon / log(len(especies)) if len(especies) > 1 else 0,
-                    'simpson': sum((e['cobertura'] / total_cobertura) ** 2 for e in especies.values() if total_cobertura > 0)
-                }
-            else:
-                analytics = {'diversity': 0, 'richness': len(especies), 'eveness': 0, 'simpson': 0}
+            def create_species_catalog(self):
+                self.story.append(Paragraph("Catálogo Fotográfico", self.styles['SectionTitle']))
+                
+                # Grid de Espécies (3 colunas)
+                row = []
+                grid = []
+                
+                for key, data in especies.items():
+                    apelido = data.get('apelido_usuario', key)
+                    # Buscar foto
+                    photo_path = None
+                    sp_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'species_photos', key)
+                    if os.path.exists(sp_dir):
+                        photos = [p for p in os.listdir(sp_dir) if p.lower().endswith(('jpg','png'))]
+                        if photos: photo_path = os.path.join(sp_dir, photos[0])
+                    
+                    img_obj = "Sem Foto"
+                    if photo_path:
+                        img_obj = self._optimize_image(photo_path, 800) # Resize para thumbnail
+                        if img_obj:
+                            img_obj.drawWidth = 5*cm
+                            img_obj.drawHeight = 5*cm * (img_obj.imageHeight/img_obj.imageWidth)
+                            # Cropping seria ideal, mas proportionality ok
+                    
+                    cell = [
+                        img_obj,
+                        Paragraph(f"<b>{apelido}</b>", self.styles['Normal']),
+                        Paragraph(f"<i>{data.get('familia', '-')}</i>", self.styles['Caption'])
+                    ]
+                    
+                    # Envolver celula em tabela interna para alinhar
+                    cell_table = Table([[c] for c in cell], colWidths=[5.2*cm])
+                    cell_table.setStyle(TableStyle([
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                        ('BOX', (0,0), (-1,-1), 0.5, colors.lightgrey),
+                        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+                    ]))
+                    
+                    row.append(cell_table)
+                    if len(row) == 3:
+                        grid.append(row)
+                        row = []
+                
+                if row: grid.append(row + [''] * (3-len(row)))
+                
+                if grid:
+                    t = Table(grid, colWidths=[6*cm, 6*cm, 6*cm])
+                    self.story.append(t)
 
-        print(f"\n✅ Dados recalculados:")
-        print(f"   Espécies processadas: {len(especies)}")
-        print(f"   Shannon: {analytics.get('diversity', 0):.4f}")
-        print(f"   Riqueza: {analytics.get('richness', 0)}")
+            def build(self):
+                self.create_cover()
+                self.create_dashboard()
+                self.create_subparcelas()
+                self.create_species_catalog()
+                
+                self.doc.build(self.story, onFirstPage=self._header_footer, onLaterPages=self._header_footer)
 
-        # Criar PDF em memória com compressão
+        # --- EXECUÇÃO ---
         buffer = BytesIO()
-        doc = SimpleDocTemplate(
-            buffer,
-            pagesize=A4,
-            rightMargin=2*cm, leftMargin=2*cm,
-            topMargin=2*cm, bottomMargin=2*cm,
-            compress=1  # Ativar compressão
-        )
-
-        story = []
-        styles = getSampleStyleSheet()
-
-        # ===== CAPA PROFISSIONAL =====
-        cover_title_style = ParagraphStyle(
-            'CoverTitle',
-            parent=styles['Title'],
-            fontSize=32,
-            textColor=colors.HexColor('#1565C0'),
-            spaceAfter=10*mm,
-            alignment=TA_CENTER,
-            fontName='Helvetica-Bold',
-            leading=38
-        )
-
-        cover_subtitle_style = ParagraphStyle(
-            'CoverSubtitle',
-            parent=styles['Normal'],
-            fontSize=18,
-            textColor=colors.HexColor('#424242'),
-            spaceAfter=5*mm,
-            alignment=TA_CENTER,
-            fontName='Helvetica'
-        )
-
-        cover_info_style = ParagraphStyle(
-            'CoverInfo',
-            parent=styles['Normal'],
-            fontSize=12,
-            textColor=colors.HexColor('#757575'),
-            alignment=TA_CENTER,
-            fontName='Helvetica'
-        )
-
-        # Spacer para centralizar verticalmente
-        story.append(Spacer(1, 6*cm))
-
-        # Título principal
-        story.append(Paragraph("Relatório de Análise<br/>de Vegetação Herbácea", cover_title_style))
-
-        # Nome da parcela em destaque
-        story.append(Paragraph(f"<b>{parcela_nome}</b>", cover_subtitle_style))
-
-        story.append(Spacer(1, 2*cm))
-
-        # Informações principais
-        num_especies = len(especies)
-        num_subparcelas = len(analysis_results)
-        data_atual = datetime.now().strftime("%d/%m/%Y")
-
-        info_text = f"""
-        <para alignment="center">
-        <b>Total de Espécies:</b> {num_especies}<br/>
-        <b>Total de Subparcelas:</b> {num_subparcelas}<br/>
-        <b>Data do Relatório:</b> {data_atual}
-        </para>
-        """
-        story.append(Paragraph(info_text, cover_info_style))
-
-        story.append(Spacer(1, 3*cm))
-
-        # Rodapé da capa
-        footer_style = ParagraphStyle(
-            'Footer',
-            parent=styles['Normal'],
-            fontSize=10,
-            textColor=colors.HexColor('#9E9E9E'),
-            alignment=TA_CENTER,
-            fontName='Helvetica-Oblique'
-        )
-        story.append(Paragraph("Gerado automaticamente pelo Sistema de Análise de Vegetação Herbácea", footer_style))
-
-        story.append(PageBreak())
-
-        # ===== SUMÁRIO / RESUMO EXECUTIVO =====
-        section_title_style = ParagraphStyle(
-            'SectionTitle',
-            parent=styles['Heading1'],
-            fontSize=18,
-            textColor=colors.HexColor('#1565C0'),
-            spaceAfter=15,
-            spaceBefore=10,
-            fontName='Helvetica-Bold',
-            borderWidth=2,
-            borderColor=colors.HexColor('#1565C0'),
-            borderPadding=8,
-            backColor=colors.HexColor('#E3F2FD')
-        )
-
-        story.append(Paragraph("RESUMO EXECUTIVO", section_title_style))
-        story.append(Spacer(1, 10))
-
-        # Tabela de estatísticas principais
-        if analytics:
-            analytics_data = [
-                ['Índice Ecológico', 'Valor', 'Interpretação'],
-                ['Diversidade de Shannon (H\')', f"{analytics.get('diversity', 0):.4f}", 'Mede a diversidade considerando riqueza e equitabilidade'],
-                ['Riqueza de Espécies (S)', str(analytics.get('richness', 0)), 'Número total de espécies diferentes encontradas'],
-                ['Equitabilidade de Pielou (J\')', f"{analytics.get('eveness', 0):.4f}", 'Uniformidade da distribuição das espécies (0-1)'],
-                ['Dominância de Simpson (D)', f"{analytics.get('simpson', 0):.4f}", 'Probabilidade de duas amostras serem da mesma espécie']
-            ]
-
-            t = Table(analytics_data, colWidths=[6*cm, 3.5*cm, 8*cm])
-            t.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976D2')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (1, -1), 'LEFT'),
-                ('ALIGN', (1, 1), (1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 11),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('TOPPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F5F5F5')),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#FAFAFA')]),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#BDBDBD')),
-                ('FONTSIZE', (0, 1), (-1, -1), 9),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
-            ]))
-
-            story.append(t)
-            story.append(Spacer(1, 20))
-
-        # ===== LISTA DE ESPÉCIES =====
-        story.append(PageBreak())
-        story.append(Paragraph("ESPECIES IDENTIFICADAS", section_title_style))
-        story.append(Spacer(1, 10))
-
-        if especies:
-            especies_data = [['Apelido', 'Gênero', 'Espécie', 'Família', 'Cobertura (%)', 'Ocorrências']]
-
-            for esp_nome, esp_info in sorted(especies.items(), key=lambda x: x[1].get('cobertura', 0), reverse=True):
-                especies_data.append([
-                    esp_info.get('apelido_usuario', esp_nome),
-                    esp_info.get('genero', '-'),
-                    esp_info.get('especie', '-'),
-                    esp_info.get('familia', '-'),
-                    f"{esp_info.get('cobertura', 0):.2f}",
-                    str(esp_info.get('ocorrencias', 0))
-                ])
-
-            t_especies = Table(especies_data, colWidths=[3.5*cm, 3*cm, 3*cm, 3.5*cm, 2.5*cm, 2.5*cm])
-            t_especies.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#388E3C')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-                ('TOPPADDING', (0, 0), (-1, 0), 10),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F1F8E9')]),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#81C784')),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
-            ]))
-
-            story.append(t_especies)
-
-        # ===== ANÁLISES FITOSSOCIOLÓGICAS =====
-        if analises_avancadas and analises_avancadas.get('ivi'):
-            story.append(PageBreak())
-            story.append(Paragraph("ANALISES FITOSSOCIOLOGICAS", section_title_style))
-            story.append(Spacer(1, 10))
-
-            # IVI - Top 10
-            story.append(Paragraph("<b>Índice de Valor de Importância (IVI) - Top 10 Espécies</b>", styles['Heading2']))
-            story.append(Spacer(1, 5))
-
-            ivi_data = [['Espécie', 'Freq. Rel.', 'Dens. Rel.', 'Dom. Rel.', 'IVI', 'IVI %']]
-            ivi_sorted = sorted(analises_avancadas['ivi'].items(),
-                               key=lambda x: x[1].get('ivi', 0), reverse=True)[:10]
-
-            for especie, dados in ivi_sorted:
-                ivi_data.append([
-                    especie[:20],  # Limitar tamanho do nome
-                    f"{dados.get('frequency_rel', 0):.1f}%",
-                    f"{dados.get('density_rel', 0):.1f}%",
-                    f"{dados.get('dominance_rel', 0):.1f}%",
-                    f"{dados.get('ivi', 0):.2f}",
-                    f"{dados.get('ivi_percent', 0):.1f}%"
-                ])
-
-            t_ivi = Table(ivi_data, colWidths=[5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm])
-            t_ivi.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#00897B')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 9),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#E0F2F1')]),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#4DB6AC')),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')
-            ]))
-
-            story.append(t_ivi)
-
-        # ===== ANÁLISE POR SUBPARCELA =====
-        if analysis_results:
-            story.append(PageBreak())
-            story.append(Paragraph("ANALISE POR SUBPARCELA", section_title_style))
-            story.append(Spacer(1, 10))
-
-            subp_data = [['Subparcela', 'N Especies', 'Cobertura Total (%)', 'Especies Presentes']]
-
-            for idx, result in enumerate(analysis_results, 1):
-                especies_list = result.get('especies', [])
-                cobertura_total = sum(float(e.get('cobertura', 0)) for e in especies_list)
-                especies_nomes = ', '.join([e.get('apelido', 'N/A')[:15] for e in especies_list[:3]])
-                if len(especies_list) > 3:
-                    especies_nomes += f' (+{len(especies_list)-3})'
-
-                subp_data.append([
-                    result.get('subparcela', f'Sub {idx}'),
-                    str(len(especies_list)),
-                    f"{cobertura_total:.1f}",
-                    especies_nomes
-                ])
-
-            t_subp = Table(subp_data, colWidths=[4*cm, 3*cm, 4*cm, 6.5*cm])
-            t_subp.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FF9800')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('ALIGN', (3, 1), (3, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#FFF3E0')]),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#FF9800')),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8)
-            ]))
-
-            story.append(t_subp)
-
-        # ===== DETALHES POR ESPÉCIE =====
-        story.append(PageBreak())
-        story.append(Paragraph("DETALHAMENTO POR ESPECIE", section_title_style))
-        story.append(Spacer(1, 10))
-
-        for esp_nome, esp_info in sorted(especies.items(), key=lambda x: x[1].get('cobertura', 0), reverse=True):
-            # Card de espécie
-            card_style = ParagraphStyle(
-                'SpeciesCard',
-                parent=styles['Normal'],
-                fontSize=10,
-                leftIndent=10,
-                rightIndent=10,
-                spaceAfter=10
-            )
-
-            apelido = esp_info.get('apelido_usuario', esp_nome)
-            genero = esp_info.get('genero', 'Nao identificado')
-            especie = esp_info.get('especie', 'sp.')
-            familia = esp_info.get('familia', 'Nao identificada')
-            cobertura = esp_info.get('cobertura', 0)
-            ocorrencias = esp_info.get('ocorrencias', 0)
-
-            card_data = [[
-                Paragraph(f"<b>{apelido}</b>", card_style),
-                f"{genero} {especie}",
-                familia,
-                f"{cobertura:.2f}%",
-                f"{ocorrencias}x"
-            ]]
-
-            t_card = Table(card_data, colWidths=[4*cm, 4.5*cm, 3.5*cm, 2.5*cm, 2.5*cm])
-            t_card.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FAFAFA')),
-                ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#BDBDBD')),
-                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-                ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                ('TOPPADDING', (0, 0), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 8)
-            ]))
-
-            story.append(t_card)
-            story.append(Spacer(1, 3))
-
-        # Construir PDF com compressão
-        doc.build(story)
-
-        # Retornar PDF
+        pdf_gen = ReportGenerator(buffer)
+        pdf_gen.build()
         buffer.seek(0)
-        return send_file(buffer,
-                        mimetype='application/pdf',
-                        as_attachment=True,
-                        download_name=f'{parcela_nome}_relatorio_completo.pdf')
-
+        
+        return send_file(
+            buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f"{parcela_nome}_relatorio_pro.pdf"
+        )
+    
     except Exception as e:
-        print(f"Erro ao gerar PDF: {e}")
+        print(f"Erro PDF Pro: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

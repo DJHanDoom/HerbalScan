@@ -14,7 +14,7 @@ const SpeciesDetailsModal = {
         this.renderContent();
         this.modal.classList.add('active');
         document.body.style.overflow = 'hidden';
-        
+
         // Mudar para a aba especificada se não for a padrão
         if (initialTab !== 'overview') {
             setTimeout(() => this.switchTab(initialTab), 100);
@@ -265,8 +265,8 @@ const SpeciesDetailsModal = {
                         <strong>Formas de Vida:</strong>
                         <div class="analysis-detail">
                             ${Object.entries(data.formasVida).map(([forma, count]) =>
-                                `${forma}: ${count}x`
-                            ).join(' | ')}
+            `${forma}: ${count}x`
+        ).join(' | ')}
                         </div>
                     </div>
                 </div>
@@ -334,8 +334,8 @@ const SpeciesDetailsModal = {
                     <h3>Galeria de Fotos (${this.uploadedPhotos.length})</h3>
                     <div class="photos-grid" id="photos-grid">
                         ${this.uploadedPhotos.length === 0 ?
-                            '<p class="no-photos">Nenhuma foto adicionada ainda</p>' :
-                            this.uploadedPhotos.map((photo, index) => `
+                '<p class="no-photos">Nenhuma foto adicionada ainda</p>' :
+                this.uploadedPhotos.map((photo, index) => `
                                 <div class="photo-item" data-index="${index}">
                                     <img src="${photo.url}" alt="Foto ${index + 1}">
                                     <div class="photo-actions">
@@ -351,7 +351,7 @@ const SpeciesDetailsModal = {
                                     </div>
                                 </div>
                             `).join('')
-                        }
+            }
                     </div>
                 </div>
             </div>
@@ -386,11 +386,19 @@ const SpeciesDetailsModal = {
                             <input type="text" id="edit-familia" value="${data.familia || ''}" placeholder="Ex: Poaceae">
                         </div>
 
+
                         <div class="form-group full-width">
                             <label>🔗 Link das Fotos (URL)</label>
                             <input type="url" id="edit-link-fotos" value="${data.link_fotos || ''}"
                                    placeholder="https://exemplo.com/fotos-da-especie">
                             <small>Cole o link para fotos de referência online da espécie</small>
+                        </div>
+
+                        <div class="form-group full-width">
+                            <label>📝 Descrição / Observações</label>
+                            <textarea id="edit-observacoes" rows="6" class="form-control" 
+                                      placeholder="Descrição detalhada e observações sobre a espécie...">${data.observacoes || ''}</textarea>
+                            <small>Texto descritivo gerado pela IA ou editado manualmente</small>
                         </div>
                     </div>
 
@@ -579,7 +587,7 @@ const SpeciesDetailsModal = {
                     },
                     tooltip: {
                         callbacks: {
-                            label: function(context) {
+                            label: function (context) {
                                 const value = context.parsed.y;
                                 return value > 0 ? `Cobertura: ${value.toFixed(1)}%` : 'Ausente';
                             }
@@ -747,7 +755,8 @@ const SpeciesDetailsModal = {
                     genero,
                     especie: especieNome,
                     familia,
-                    link_fotos: linkFotos
+                    link_fotos: linkFotos,
+                    observacoes: document.getElementById('edit-observacoes').value.trim()
                 })
             });
 
@@ -768,6 +777,7 @@ const SpeciesDetailsModal = {
                             esp.especie = especieNome;
                             esp.familia = familia;
                             esp.link_fotos = linkFotos;
+                            esp.observacoes = result.especie.observacoes || esp.observacoes;
                         }
                     });
                 });
@@ -813,7 +823,7 @@ const SpeciesDetailsModal = {
             // Remover de cada subparcela
             for (const subparcela of data.subparcelasPresenca) {
                 console.log(`📤 Removendo da subparcela ${subparcela}...`);
-                
+
                 const response = await fetch('/api/especies/remove', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },

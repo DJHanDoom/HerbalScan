@@ -11,14 +11,14 @@ const AdvancedAnalytics = {
         console.log('   - especies:', analysisData?.especies ? Object.keys(analysisData.especies).length + ' espécies' : 'NULO');
         console.log('   - analysisResults:', analysisData?.analysisResults ? analysisData.analysisResults.length + ' resultados' : 'NULO');
         console.log('   - subparcelas:', analysisData?.subparcelas);
-        
+
         // Validar dados
         if (!analysisData || !analysisData.especies || Object.keys(analysisData.especies).length === 0) {
             console.error('❌ Dados insuficientes para análise');
             this.showErrorMessage('Não há dados suficientes para gerar análises avançadas');
             return;
         }
-        
+
         this.data = analysisData;
         console.log('✅ Dados validados, iniciando render');
         this.render();
@@ -80,7 +80,7 @@ const AdvancedAnalytics = {
                 // Remove active de todos
                 tabs.forEach(t => t.classList.remove('active'));
                 document.querySelectorAll('.analytics-tab-content').forEach(c => c.classList.remove('active'));
-                
+
                 // Adiciona active no clicado
                 e.target.classList.add('active');
                 const tabId = e.target.getAttribute('data-tab');
@@ -305,22 +305,22 @@ const AdvancedAnalytics = {
             console.warn('⚠️ Shannon: Dados de espécies não disponíveis');
             return 0;
         }
-        
+
         const especies = Object.values(this.data.especies);
         console.log('📊 Shannon: Total de espécies:', especies.length);
-        
+
         const totalCoverage = especies.reduce((sum, sp) => {
             const cobertura = parseFloat(sp.cobertura) || 0;
             return sum + cobertura;
         }, 0);
-        
+
         console.log('📊 Shannon: Cobertura total:', totalCoverage);
-        
+
         if (totalCoverage === 0) {
             console.warn('⚠️ Shannon: Cobertura total é zero');
             return 0;
         }
-        
+
         let shannon = 0;
         especies.forEach(sp => {
             const cobertura = parseFloat(sp.cobertura) || 0;
@@ -329,7 +329,7 @@ const AdvancedAnalytics = {
                 shannon -= pi * Math.log(pi);
             }
         });
-        
+
         console.log('✅ Shannon calculado:', shannon);
         return shannon;
     },
@@ -361,18 +361,18 @@ const AdvancedAnalytics = {
             console.warn('⚠️ Simpson: Dados de espécies não disponíveis');
             return 0;
         }
-        
+
         const especies = Object.values(this.data.especies);
         const totalCoverage = especies.reduce((sum, sp) => {
             const cobertura = parseFloat(sp.cobertura) || 0;
             return sum + cobertura;
         }, 0);
-        
+
         if (totalCoverage === 0) {
             console.warn('⚠️ Simpson: Cobertura total é zero');
             return 0;
         }
-        
+
         let simpson = 0;
         especies.forEach(sp => {
             const cobertura = parseFloat(sp.cobertura) || 0;
@@ -381,7 +381,7 @@ const AdvancedAnalytics = {
                 simpson += pi * pi;
             }
         });
-        
+
         console.log('✅ Simpson calculado:', simpson);
         return simpson;
     },
@@ -407,10 +407,10 @@ const AdvancedAnalytics = {
             console.warn('⚠️ Frequência: Dados de análise não disponíveis');
             return {};
         }
-        
+
         const frequency = {};
         const totalSubparcelas = this.data.analysisResults.length;
-        
+
         // Contar em quantas subparcelas cada espécie aparece
         Object.keys(this.data.especies || {}).forEach(especie => {
             let count = 0;
@@ -419,13 +419,13 @@ const AdvancedAnalytics = {
                     count++;
                 }
             });
-            
+
             frequency[especie] = {
                 absolute: count,
                 relative: totalSubparcelas > 0 ? (count / totalSubparcelas) * 100 : 0
             };
         });
-        
+
         console.log('✅ Frequência calculada para', Object.keys(frequency).length, 'espécies');
         return frequency;
     },
@@ -435,13 +435,13 @@ const AdvancedAnalytics = {
             console.warn('⚠️ Densidade: Dados de espécies não disponíveis');
             return {};
         }
-        
+
         const density = {};
         const totalOccurrences = Object.values(this.data.especies).reduce((sum, sp) => {
             const ocorrencias = parseInt(sp.ocorrencias) || 0;
             return sum + ocorrencias;
         }, 0);
-        
+
         Object.entries(this.data.especies).forEach(([nome, esp]) => {
             const ocorrencias = parseInt(esp.ocorrencias) || 0;
             density[nome] = {
@@ -449,7 +449,7 @@ const AdvancedAnalytics = {
                 relative: totalOccurrences > 0 ? (ocorrencias / totalOccurrences) * 100 : 0
             };
         });
-        
+
         console.log('✅ Densidade calculada para', Object.keys(density).length, 'espécies');
         return density;
     },
@@ -459,13 +459,13 @@ const AdvancedAnalytics = {
             console.warn('⚠️ Dominância: Dados de espécies não disponíveis');
             return {};
         }
-        
+
         const dominance = {};
         const totalCoverage = Object.values(this.data.especies).reduce((sum, sp) => {
             const cobertura = parseFloat(sp.cobertura) || 0;
             return sum + cobertura;
         }, 0);
-        
+
         Object.entries(this.data.especies).forEach(([nome, esp]) => {
             const cobertura = parseFloat(esp.cobertura) || 0;
             dominance[nome] = {
@@ -473,19 +473,19 @@ const AdvancedAnalytics = {
                 relative: totalCoverage > 0 ? (cobertura / totalCoverage) * 100 : 0
             };
         });
-        
+
         console.log('✅ Dominância calculada para', Object.keys(dominance).length, 'espécies');
         return dominance;
     },
 
     calculateIVI(frequency, density, dominance) {
         const ivi = {};
-        
+
         Object.keys(this.data.especies || {}).forEach(especie => {
             const freq = frequency[especie]?.relative || 0;
             const dens = density[especie]?.relative || 0;
             const dom = dominance[especie]?.relative || 0;
-            
+
             ivi[especie] = {
                 frequency: freq,
                 density: dens,
@@ -494,7 +494,7 @@ const AdvancedAnalytics = {
                 iviPercent: (freq + dens + dom) / 3
             };
         });
-        
+
         console.log('✅ IVI calculado para', Object.keys(ivi).length, 'espécies');
         return ivi;
     },
@@ -524,10 +524,10 @@ const AdvancedAnalytics = {
 
     renderPhytosociologicalTable(frequency, density, dominance, ivi) {
         if (!this.data || !this.data.especies) return '<p>Sem dados disponíveis</p>';
-        
+
         // Ordenar por IVI descendente
         const sortedSpecies = Object.entries(ivi).sort((a, b) => b[1].ivi - a[1].ivi);
-        
+
         let html = `
             <table>
                 <thead>
@@ -545,13 +545,13 @@ const AdvancedAnalytics = {
                 </thead>
                 <tbody>
         `;
-        
+
         sortedSpecies.forEach(([especie, data]) => {
             const esp = this.data.especies[especie];
             const freq = frequency[especie];
             const dens = density[especie];
             const dom = dominance[especie];
-            
+
             html += `
                 <tr>
                     <td><strong>${esp?.apelido_usuario || especie}</strong></td>
@@ -566,24 +566,24 @@ const AdvancedAnalytics = {
                 </tr>
             `;
         });
-        
+
         html += '</tbody></table>';
         return html;
     },
 
     renderSuccessionAnalysis() {
         if (!this.data || !this.data.especies) return '<p>Sem dados</p>';
-        
+
         // Classificação simples por altura (pode ser melhorada com dados reais)
         let pioneer = 0, secondary = 0, climax = 0;
-        
+
         Object.values(this.data.especies).forEach(esp => {
             const avgHeight = esp.altura_media || 0;
             if (avgHeight < 30) pioneer++;
             else if (avgHeight < 60) secondary++;
             else climax++;
         });
-        
+
         return `
             <div class="succession-stages">
                 <div class="stage">
@@ -607,7 +607,7 @@ const AdvancedAnalytics = {
         const richness = this.calculateSpeciesRichness();
         const diversity = this.calculateShannonDiversity();
         const eveness = this.calculateEveness();
-        
+
         return `
             <div class="quality-indicator">
                 <div class="label">Cobertura Total</div>
@@ -632,16 +632,16 @@ const AdvancedAnalytics = {
         if (!this.data || !this.data.analysisResults || this.data.analysisResults.length < 2) {
             return '<p>Necessário pelo menos 2 subparcelas para comparação</p>';
         }
-        
+
         const subparcelas = this.data.analysisResults;
         const n = subparcelas.length;
-        
+
         let html = '<table><thead><tr><th></th>';
         subparcelas.forEach((_, i) => {
             html += `<th>Sub ${i + 1}</th>`;
         });
         html += '</tr></thead><tbody>';
-        
+
         for (let i = 0; i < n; i++) {
             html += `<tr><th>Sub ${i + 1}</th>`;
             for (let j = 0; j < n; j++) {
@@ -658,7 +658,7 @@ const AdvancedAnalytics = {
             }
             html += '</tr>';
         }
-        
+
         html += '</tbody></table>';
         return html;
     },
@@ -666,10 +666,10 @@ const AdvancedAnalytics = {
     calculateJaccardSimilarity(especies1, especies2) {
         const set1 = new Set(Object.keys(especies1));
         const set2 = new Set(Object.keys(especies2));
-        
+
         const intersection = new Set([...set1].filter(x => set2.has(x)));
         const union = new Set([...set1, ...set2]);
-        
+
         return union.size > 0 ? intersection.size / union.size : 0;
     },
 
@@ -685,7 +685,7 @@ const AdvancedAnalytics = {
         const totalCoverage = this.calculateTotalCoverage();
         const avgHeightSum = Object.values(this.data.especies || {}).reduce((sum, esp) => sum + (esp.altura_media || 0), 0);
         const avgHeight = richness > 0 ? avgHeightSum / richness : 0;
-        
+
         return `
             <div style="padding: 20px;">
                 <p><strong>📊 Riqueza Total:</strong> ${richness} espécies</p>
@@ -701,11 +701,11 @@ const AdvancedAnalytics = {
     generateCharts() {
         // Destruir gráficos existentes antes de recriar
         this.destroyCharts();
-        
+
         setTimeout(() => {
             // Aplicar altura fixa em todos os canvas para evitar crescimento infinito
             this.setCanvasFixedHeight();
-            
+
             this.createCoverageDistributionChart();
             this.createHeightDistributionChart();
             this.createRichnessChart();
@@ -747,14 +747,14 @@ const AdvancedAnalytics = {
     createCoverageDistributionChart() {
         const ctx = document.getElementById('chart-coverage-distribution');
         if (!ctx || !this.data.especies) return;
-        
+
         // Definir tamanho fixo do canvas
         ctx.style.maxHeight = '300px';
         ctx.height = 300;
-        
+
         const especies = Object.values(this.data.especies);
         const top10 = especies.sort((a, b) => b.cobertura - a.cobertura).slice(0, 10);
-        
+
         this.charts.coverage = new Chart(ctx, {
             type: 'bar',
             data: {
@@ -785,9 +785,9 @@ const AdvancedAnalytics = {
     createHeightDistributionChart() {
         const ctx = document.getElementById('chart-height-distribution');
         if (!ctx || !this.data.especies) return;
-        
+
         const especies = Object.values(this.data.especies).filter(e => e.altura_media > 0);
-        
+
         // Agrupar por faixas de altura
         const ranges = { '0-20cm': 0, '20-40cm': 0, '40-60cm': 0, '60-80cm': 0, '80+cm': 0 };
         especies.forEach(e => {
@@ -798,7 +798,7 @@ const AdvancedAnalytics = {
             else if (h < 80) ranges['60-80cm']++;
             else ranges['80+cm']++;
         });
-        
+
         this.charts.height = new Chart(ctx, {
             type: 'doughnut',
             data: {
@@ -823,9 +823,9 @@ const AdvancedAnalytics = {
     createRichnessChart() {
         const ctx = document.getElementById('chart-richness');
         if (!ctx) return;
-        
+
         const richness = this.calculateSpeciesRichness();
-        
+
         this.charts.richness = new Chart(ctx, {
             type: 'bar',
             data: {
@@ -848,14 +848,14 @@ const AdvancedAnalytics = {
     createIVIChart() {
         const ctx = document.getElementById('chart-ivi');
         if (!ctx) return;
-        
+
         const frequency = this.calculateFrequency();
         const density = this.calculateDensity();
         const dominance = this.calculateDominance();
         const ivi = this.calculateIVI(frequency, density, dominance);
-        
+
         const sortedIVI = Object.entries(ivi).sort((a, b) => b[1].ivi - a[1].ivi).slice(0, 10);
-        
+
         this.charts.ivi = new Chart(ctx, {
             type: 'bar',
             data: {
@@ -885,12 +885,12 @@ const AdvancedAnalytics = {
     createFrequencyChart() {
         const ctx = document.getElementById('chart-frequency');
         if (!ctx) return;
-        
+
         const frequency = this.calculateFrequency();
         const top10 = Object.entries(frequency)
             .sort((a, b) => b[1].relative - a[1].relative)
             .slice(0, 10);
-        
+
         this.charts.frequency = new Chart(ctx, {
             type: 'bar',
             data: {
@@ -912,12 +912,12 @@ const AdvancedAnalytics = {
     createDensityChart() {
         const ctx = document.getElementById('chart-density');
         if (!ctx) return;
-        
+
         const density = this.calculateDensity();
         const top10 = Object.entries(density)
             .sort((a, b) => b[1].relative - a[1].relative)
             .slice(0, 10);
-        
+
         this.charts.density = new Chart(ctx, {
             type: 'bar',
             data: {
@@ -939,12 +939,12 @@ const AdvancedAnalytics = {
     createDominanceChart() {
         const ctx = document.getElementById('chart-dominance');
         if (!ctx) return;
-        
+
         const dominance = this.calculateDominance();
         const top10 = Object.entries(dominance)
             .sort((a, b) => b[1].relative - a[1].relative)
             .slice(0, 10);
-        
+
         this.charts.dominance = new Chart(ctx, {
             type: 'bar',
             data: {
@@ -966,10 +966,10 @@ const AdvancedAnalytics = {
     createStratificationChart() {
         const ctx = document.getElementById('chart-stratification');
         if (!ctx) return;
-        
+
         const especies = Object.values(this.data.especies || {});
         const strata = { 'Rasteira (0-20cm)': 0, 'Baixa (20-50cm)': 0, 'Média (50-80cm)': 0, 'Alta (>80cm)': 0 };
-        
+
         especies.forEach(e => {
             const h = e.altura_media || 0;
             if (h < 20) strata['Rasteira (0-20cm)']++;
@@ -977,7 +977,7 @@ const AdvancedAnalytics = {
             else if (h < 80) strata['Média (50-80cm)']++;
             else strata['Alta (>80cm)']++;
         });
-        
+
         this.charts.stratification = new Chart(ctx, {
             type: 'pie',
             data: {
@@ -997,9 +997,9 @@ const AdvancedAnalytics = {
     createSubparcelComparisonChart() {
         const ctx = document.getElementById('chart-subparcel-comparison');
         if (!ctx || !this.data.analysisResults) return;
-        
+
         const subparcelas = this.data.analysisResults;
-        
+
         this.charts.subparcel = new Chart(ctx, {
             type: 'bar',
             data: {
@@ -1021,13 +1021,13 @@ const AdvancedAnalytics = {
     createSpatialVariabilityChart() {
         const ctx = document.getElementById('chart-spatial-variability');
         if (!ctx || !this.data.analysisResults) return;
-        
+
         const subparcelas = this.data.analysisResults;
         const coverages = subparcelas.map(s => {
             const especies = Object.values(s.especies || {});
             return especies.reduce((sum, e) => sum + (e.cobertura || 0), 0);
         });
-        
+
         this.charts.spatial = new Chart(ctx, {
             type: 'line',
             data: {
@@ -1052,7 +1052,7 @@ const AdvancedAnalytics = {
     createDiversityHeatmap() {
         const ctx = document.getElementById('chart-diversity-heatmap');
         if (!ctx || !this.data.analysisResults) return;
-        
+
         // Placeholder - implementar heatmap real com biblioteca especializada
         const subparcelas = this.data.analysisResults;
         const diversities = subparcelas.map(s => {
@@ -1067,7 +1067,7 @@ const AdvancedAnalytics = {
             });
             return shannon;
         });
-        
+
         this.charts.heatmap = new Chart(ctx, {
             type: 'bar',
             data: {
@@ -1092,16 +1092,16 @@ const AdvancedAnalytics = {
     createSpeciesAccumulationChart() {
         const ctx = document.getElementById('chart-species-accumulation');
         if (!ctx || !this.data.analysisResults) return;
-        
+
         const subparcelas = this.data.analysisResults;
         const accumulated = [];
         const seenSpecies = new Set();
-        
+
         subparcelas.forEach((s, i) => {
             Object.keys(s.especies || {}).forEach(sp => seenSpecies.add(sp));
             accumulated.push(seenSpecies.size);
         });
-        
+
         this.charts.accumulation = new Chart(ctx, {
             type: 'line',
             data: {
@@ -1132,11 +1132,11 @@ const AdvancedAnalytics = {
     createLifeFormsChart() {
         const ctx = document.getElementById('chart-life-forms');
         if (!ctx) return;
-        
+
         // Classificação simples por altura (pode ser melhorada)
         const especies = Object.values(this.data.especies || {});
         const forms = { 'Rasteiras': 0, 'Herbáceas': 0, 'Subarbustos': 0, 'Trepadeiras': 0 };
-        
+
         especies.forEach(e => {
             const h = e.altura_media || 0;
             if (h < 15) forms['Rasteiras']++;
@@ -1144,7 +1144,7 @@ const AdvancedAnalytics = {
             else if (h < 100) forms['Subarbustos']++;
             else forms['Trepadeiras']++;
         });
-        
+
         this.charts.lifeForms = new Chart(ctx, {
             type: 'doughnut',
             data: {
@@ -1164,10 +1164,10 @@ const AdvancedAnalytics = {
     createFrequencyDistributionChart() {
         const ctx = document.getElementById('chart-frequency-distribution');
         if (!ctx) return;
-        
+
         const frequency = this.calculateFrequency();
         const classes = { 'Muito Rara (0-20%)': 0, 'Rara (20-40%)': 0, 'Comum (40-60%)': 0, 'Frequente (60-80%)': 0, 'Muito Frequente (80-100%)': 0 };
-        
+
         Object.values(frequency).forEach(f => {
             const rel = f.relative;
             if (rel < 20) classes['Muito Rara (0-20%)']++;
@@ -1176,7 +1176,7 @@ const AdvancedAnalytics = {
             else if (rel < 80) classes['Frequente (60-80%)']++;
             else classes['Muito Frequente (80-100%)']++;
         });
-        
+
         this.charts.freqDist = new Chart(ctx, {
             type: 'bar',
             data: {
@@ -1195,6 +1195,22 @@ const AdvancedAnalytics = {
         });
     },
 
+    // === EXPORT IMAGES FOR PDF ===
+    getChartsImages() {
+        const images = {};
+        Object.keys(this.charts).forEach(key => {
+            if (this.charts[key] && this.charts[key].canvas) {
+                try {
+                    images[key] = this.charts[key].toBase64Image('image/png', 1.0);
+                } catch (e) {
+                    console.warn(`⚠️ Erro ao capturar imagem do gráfico ${key}:`, e);
+                }
+            }
+        });
+        console.log(`🖼️ ${Object.keys(images).length} gráficos capturados para exportação`);
+        return images;
+    },
+
     // === EXPORT DATA FOR XLSX ===
     getExportData() {
         if (!this.data) {
@@ -1206,10 +1222,20 @@ const AdvancedAnalytics = {
         const density = this.calculateDensity();
         const dominance = this.calculateDominance();
         const ivi = this.calculateIVI(frequency, density, dominance);
-        const diversity = this.calculateDiversity();
+
+        // Calculate all ecological indices
+        const shannon = this.calculateShannonDiversity();
+        const richness = this.calculateSpeciesRichness();
+        const evenness = this.calculateEveness();
+        const simpson = this.calculateSimpsonDominance();
 
         return {
-            diversity: diversity,
+            diversity: {
+                shannon: shannon,
+                richness: richness,
+                evenness: evenness,
+                simpson: simpson
+            },
             frequency: frequency,
             density: density,
             dominance: dominance,
