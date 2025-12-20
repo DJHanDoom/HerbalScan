@@ -4303,10 +4303,12 @@ function showAlert(type, message) {
 }
 
 // ====== INTEGRAÇÃO COM COVERAGE DRAWER ======
+const USE_FABRIC_EDITOR = true; // Flag para ativar novo editor
 
-// Inicializar CoverageDrawer quando o viewer abre
+// Inicializar CoverageDrawer ou FabricPolygonEditor quando o viewer abre
 function initializeCoverageDrawer() {
     const img = viewerModal.querySelector('#viewer-image');
+    const container = viewerModal.querySelector('#viewer-img-container');
     const result = appState.analysisResults[currentViewerIndex];
 
     if (img && result) {
@@ -4318,40 +4320,80 @@ function initializeCoverageDrawer() {
             area_shape: result.area_shape || null
         };
 
-        // Aguardar imagem carregar
-        if (img.complete) {
-            CoverageDrawer.init(img, subparcelaData);
+        if (USE_FABRIC_EDITOR && window.FabricPolygonEditor) {
+            // Inicializar novo editor Fabric.js
+            // Esconder imagem original pois ela será carregada dentro do canvas
+            img.style.display = 'none';
+
+            // Usar o src da imagem diretamente
+            const imageUrl = img.src;
+
+            // Inicializar FabricPolygonEditor
+            FabricPolygonEditor.init(container, imageUrl, subparcelaData)
+                .then(() => {
+                    console.log('✅ FabricPolygonEditor carregado com sucesso');
+                    // Alias global para compatibilidade com chamadas existentes
+                    window.CurrentDrawer = FabricPolygonEditor;
+                })
+                .catch(err => {
+                    console.error('❌ Erro ao carregar FabricPolygonEditor:', err);
+                    // Fallback para antigo?
+                    img.style.display = 'block';
+                });
+
         } else {
-            img.onload = () => {
+            // Legado: Inicializar SVGCoverageDrawer (SVG)
+            // Aguardar imagem carregar
+            if (img.complete) {
                 CoverageDrawer.init(img, subparcelaData);
-            };
+                window.CurrentDrawer = CoverageDrawer;
+            } else {
+                img.onload = () => {
+                    CoverageDrawer.init(img, subparcelaData);
+                    window.CurrentDrawer = CoverageDrawer;
+                };
+            }
         }
     }
 }
 
 // Função global para desenhar área de cobertura para uma espécie
 function startDrawCoverageForSpecies(speciesIndex) {
-    CoverageDrawer.startDrawSpecies(speciesIndex, 'polygon'); // Default: Polígono
+    if (USE_FABRIC_EDITOR && window.FabricPolygonEditor) {
+        FabricPolygonEditor.startDrawSpecies(speciesIndex);
+    } else {
+        CoverageDrawer.startDrawSpecies(speciesIndex, 'polygon');
+    }
 }
 
 // Função para começar a desenhar a área da subparcela
 function startDrawSubparcelaArea() {
-    CoverageDrawer.startDrawSubparcela('polygon'); // Default: Polígono
+    if (USE_FABRIC_EDITOR && window.FabricPolygonEditor) {
+        FabricPolygonEditor.startDrawSubparcela();
+    } else {
+        CoverageDrawer.startDrawSubparcela('polygon');
+    }
 }
 
 function importAIAreas() {
-    if (!CoverageDrawer.svg) {
+    const drawer = USE_FABRIC_EDITOR ? FabricPolygonEditor : CoverageDrawer;
+
+    // Verificação de segurança adaptada para cada editor
+    const isReady = USE_FABRIC_EDITOR ? drawer.canvas : drawer.svg;
+    const hasSubparcela = drawer.subparcelaPolygon; // Both drawers use this property
+
+    if (!isReady) {
         showAlert('error', 'Sistema de desenho não inicializado. Abra o modal de visualização primeiro.');
         return;
     }
 
-    if (!CoverageDrawer.subparcelaPolygon) {
+    if (!hasSubparcela) {
         showAlert('warning', '⚠️ Primeiro defina a área de 100% da subparcela antes de importar áreas da IA!');
         return;
     }
 
     if (confirm('Importar áreas detectadas pela IA?\n\nIsso irá adicionar polígonos automaticamente para as espécies que tiverem coordenadas detectadas.')) {
-        CoverageDrawer.importAIDetectedAreas();
+        drawer.importAIDetectedAreas();
     }
 }
 
@@ -4359,32 +4401,124 @@ function clearSpeciesAreas(speciesIndex) {
     const result = appState.analysisResults[currentViewerIndex];
     const species = result.especies[speciesIndex];
 
-    if (!CoverageDrawer.svg) {
+    const drawer = USE_FABRIC_EDITOR ? FabricPolygonEditor : CoverageDrawer;
+    const isReady = USE_FABRIC_EDITOR ? drawer.canvas : drawer.svg;
+
+    if (!isReady) {
         showAlert('error', 'Sistema de desenho não inicializado');
         return;
     }
 
     // Verificar se há áreas para esta espécie
-    const hasAreas = CoverageDrawer.speciesPolygons[speciesIndex]?.length > 0;
+    // Fabric usa array de objetos, SVG usa array de coordenadas ou objetos
+    const polygons = drawer.speciesPolygons[speciesIndex];
+    const hasAreas = polygons && polygons.length > 0;
+
     if (!hasAreas) {
         showAlert('info', `A espécie "${species.apelido}" não possui áreas desenhadas`);
         return;
     }
 
-    const numAreas = CoverageDrawer.speciesPolygons[speciesIndex].length;
+    const numAreas = polygons.length;
     if (confirm(`Limpar todas as ${numAreas} área(s) desenhada(s) de "${species.apelido}"?`)) {
-        // Remover todas as áreas desta espécie
-        delete CoverageDrawer.speciesPolygons[speciesIndex];
-
-        // Renderizar e persistir
-        CoverageDrawer.render();
-        CoverageDrawer.persistSpeciesArea(speciesIndex, []);
+        if (USE_FABRIC_EDITOR) {
+            // Lógica específica do Fabric para limpar
+            const objectsToRemove = [...polygons]; // Cópia para iterar
+            objectsToRemove.forEach(poly => {
+                drawer.canvas.remove(poly);
+                // Remover label associado também
+                if (poly.label) drawer.canvas.remove(poly.label);
+            });
+            drawer.speciesPolygons[speciesIndex] = [];
+            drawer.persistSpeciesArea(speciesIndex);
+        } else {
+            // Lógica legado SVG
+            delete drawer.speciesPolygons[speciesIndex];
+            drawer.render();
+            drawer.persistSpeciesArea(speciesIndex, []);
+        }
 
         showAlert('success', `Todas as áreas de "${species.apelido}" foram removidas`);
     }
 }
 
-// Funções para controlar visualização dos polígonos
+// Recalcular TODAS as coberturas baseado nos polígonos desenhados
+function recalculateAllCoverages() {
+    const drawer = USE_FABRIC_EDITOR ? FabricPolygonEditor : CoverageDrawer;
+    const isReady = USE_FABRIC_EDITOR ? drawer.canvas : drawer.svg;
+
+    if (!isReady) {
+        showAlert('error', 'Sistema de desenho não inicializado. Defina a área 100% primeiro.');
+        return;
+    }
+
+    if (!drawer.subparcelaPolygon) {
+        showAlert('warning', '⚠️ Primeiro defina a área de 100% da subparcela antes de recalcular coberturas!');
+        return;
+    }
+
+    // Usar a implementação interna de cada drawer se disponível
+    if (USE_FABRIC_EDITOR) {
+        drawer.recalculateAllCoverages();
+        updateViewerContent(); // Atualizar UI geral
+        return;
+    }
+
+    // Implementação legado para SVG (mantida aqui ou mover para dentro da classe como fiz no Fabric)
+    const result = appState.analysisResults[currentViewerIndex];
+    if (!result || !result.especies) {
+        showAlert('error', 'Nenhuma espécie encontrada para recalcular');
+        return;
+    }
+
+    console.log('🔄 Recalculando coberturas (SVG Legacy Mode)...');
+
+    let updated = 0;
+    let skipped = 0;
+    const updates = [];
+
+    result.especies.forEach((esp, index) => {
+        // Verificar se há polígonos para esta espécie
+        const polygons = drawer.speciesPolygons[index];
+
+        if (!polygons || polygons.length === 0) {
+            skipped++;
+            return;
+        }
+
+        // Calcular cobertura real usando o método do drawer
+        const newCoverage = drawer.calculateCoveragePercentage(index);
+        const oldCoverage = esp.cobertura;
+
+        if (Math.abs(newCoverage - oldCoverage) > 0.1) {
+            esp.cobertura = parseFloat(newCoverage.toFixed(1));
+            updated++;
+            updates.push({
+                name: esp.apelido,
+                old: oldCoverage,
+                new: esp.cobertura
+            });
+            // Persistir no backend
+            drawer.persistCoveragePercentage(index, esp.cobertura);
+        }
+    });
+
+    // Atualizar UI
+    updateViewerContent();
+
+    // Mostrar resumo
+    if (updated > 0) {
+        let message = `✅ ${updated} cobertura(s) atualizada(s):\n`;
+        updates.forEach(u => {
+            message += `\n• ${u.name}: ${u.old}% → ${u.new}%`;
+        });
+        showAlert('success', message);
+    } else if (skipped === result.especies.length) {
+        showAlert('info', '⚠️ Nenhuma espécie possui polígonos desenhados.');
+    } else {
+        showAlert('info', 'Nenhuma alteração necessária - coberturas já correspondem aos polígonos');
+    }
+}
 
 function toggleGrid() {
     const gridToggle = document.getElementById('grid-toggle');

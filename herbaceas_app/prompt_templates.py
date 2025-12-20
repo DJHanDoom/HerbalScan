@@ -1200,16 +1200,22 @@ Retorne um objeto JSON com o array "entidades" contendo todos os elementos detec
     # Regras finais
     prompt += f"""
 
-⚠️ **REGRAS CRÍTICAS:**
+⚠️ **REGRAS CRÍTICAS DE FORMATO:**
+1. Retorne APENAS um objeto JSON válido.
+2. NÃO use marcadores de código como ```json ou ```.
+3. NÃO inclua texto antes ou depois do JSON.
+4. Verifique se todas as vírgulas e chaves estão corretas.
+
+⚠️ **REGRAS DE CONTEÚDO:**
 - Identifique entre {params.get('min_species', 1)} e {params.get('max_species', 30)} entidades
 - SEMPRE distinga FAUNA NATIVA de PECUÁRIA
 - Use apelidos descritivos e específicos
-- Forneça coordenadas de polígono (0-100%) para cada entidade
+- **OBRIGATÓRIO:** Inclua "area_shape": [[0,0], [100,0], [100,100], [0,100]] na raiz do JSON para representar a área total.
+- **OBRIGATÓRIO:** Para cada entidade, inclua o campo "areas" com coordenadas [[x,y], [x,y], ...] em % (0-100).
 - Estime medidas em unidades métricas (m, cm)
 - NÃO deixe campos obrigatórios vazios
-- Retorne APENAS JSON válido sem marcadores markdown
 
-Retorne APENAS JSON válido sem marcadores markdown."""
+Respeite estritamente a sintaxe JSON."""
 
     return prompt
 

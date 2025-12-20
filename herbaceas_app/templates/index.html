@@ -20,6 +20,8 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- Fabric.js para editor de polígonos robusto -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
 </head>
 
 <body>
@@ -370,6 +372,7 @@
     <script src="{{ url_for('static', filename='js/analysis-manager.js') }}"></script>
     <script src="{{ url_for('static', filename='js/reference-species.js') }}"></script>
     <script src="{{ url_for('static', filename='js/svg-coverage-drawer.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/fabric-polygon-editor.js') }}"></script>
     <script>
         // Alias para compatibilidade
         window.CoverageDrawer = window.SVGCoverageDrawer;
