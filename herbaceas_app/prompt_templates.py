@@ -327,6 +327,50 @@ PROMPT_TEMPLATES = {
             "include_polygon_json": True,
             "include_eco_traits": False
         }
+    },
+    
+    "paisagem_drone": {
+        "name": "🛰️ Análise de Paisagem (Drone)",
+        "description": "Análise abrangente de imagens de drone: árvores adultas, mudas, solo, erosão, antropização, fauna",
+        "objective": "landscape",
+        "featured": True,
+        "analysis_mode": "landscape",
+        "params": {
+            "analysis_mode": "landscape",
+            "max_species": 30,
+            "min_species": 1,
+            "detail_level": "high",
+            "taxonomic_precision": "moderate",
+            "include_genus": "when_possible",
+            "include_family": "always_attempt",
+            "separate_grasses": False,
+            "include_soil": True,
+            "include_litter": False,
+            "focus_functional": False,
+            "focus_succession": True,
+            "focus_carbon": True,
+            "standardize_across_subplots": "moderate",
+            "detect_coordinates": True,
+            "include_polygon_json": True,
+            "include_eco_traits": True,
+            # Landscape-specific params
+            "include_trees": True,
+            "include_seedlings": True,
+            "include_erosion": True,
+            "include_anthropic": True,
+            "include_fauna": True,
+            "estimate_dbh": True,
+            "estimate_crown": True,
+            "special_instructions": [
+                "Identifique ÁRVORES ADULTAS: estime diâmetro de copa (m), altura (m) e DAP aproximado (cm)",
+                "Identifique MUDAS DE REFLORESTAMENTO: avalie sobrevivência, vigor e qualidade do plantio",
+                "Detecte SOLO EXPOSTO: classifique tipo de erosão (laminar, sulcos, ravinas, voçoroca)",
+                "Detecte ANTROPIZAÇÃO: fogo, estradas, trilhas, construções, cercas, desmate, lixo, poluição",
+                "Detecte FAUNA: distinga entre FAUNA NATIVA e PECUÁRIA (bovinos, equinos, suínos)",
+                "Para fauna: registre tipo de evidência (avistamento, rastros, pegadas, tocas, fezes, pastejo)",
+                "Estime IMPACTO na vegetação quando aplicável (pastejo, pisoteio, queima)"
+            ]
+        }
     }
 }
 
@@ -352,7 +396,11 @@ def build_prompt(template_name="default", custom_params=None):
     if custom_params:
         params.update(custom_params)
     
-    # Construir prompt base
+    # Verificar se é modo paisagem/drone
+    if params.get('analysis_mode') == 'landscape':
+        return build_landscape_prompt(template, params)
+    
+    # Construir prompt base (modo herbáceo original)
     prompt = f"""Você é um botânico especializado em análise de vegetação herbácea e arbustiva do Brasil.
 
 OBJETIVO DA ANÁLISE: {template['description']}
@@ -1004,17 +1052,185 @@ Retorne APENAS JSON válido sem marcadores markdown."""
     return prompt
 
 
+def build_landscape_prompt(template, params):
+    """
+    Constrói prompt especializado para análise de paisagem/drone
+    
+    Args:
+        template: template dict
+        params: parâmetros de configuração
+    
+    Returns:
+        str: prompt formatado para análise de paisagem
+    """
+    prompt = f"""Você é um especialista em ecologia de paisagem, geoprocessamento e monitoramento ambiental.
+
+🛰️ OBJETIVO DA ANÁLISE: {template['description']}
+
+Analise esta imagem aérea/drone de uma área de paisagem para identificar e mapear as seguintes CATEGORIAS DE ENTIDADES:
+
+"""
+    
+    # Categorias de entidades ativadas
+    if params.get('include_trees', True):
+        prompt += """
+🌳 **ÁRVORES ADULTAS**
+   - Identifique cada árvore ou agrupamento visível
+   - Estime: diâmetro de copa (metros), altura (metros), DAP aproximado (cm)
+   - Para DAP, use a relação aproximada: DAP ≈ diâmetro_copa × 3 a 5 (dependendo da espécie)
+   - Classifique por: espécie (se identificável), vigor (excelente/bom/regular/ruim)
+   - Use apelidos descritivos: "Árvore Copa Ampla", "Agrupamento de Pioneiras", etc.
+"""
+
+    if params.get('include_seedlings', True):
+        prompt += """
+🌱 **MUDAS DE REFLORESTAMENTO**
+   - Identifique linhas ou agrupamentos de mudas plantadas
+   - Avalie: sobrevivência (viva/morta/estressada), vigor (excelente/bom/regular/ruim)
+   - Qualidade do plantio: espaçamento, alinhamento, coroamento
+   - Estime: altura média (cm), quantidade aproximada
+   - Use apelidos: "Linha de Mudas Nativas", "Área de Replantio", etc.
+"""
+
+    if params.get('include_erosion', True):
+        prompt += """
+🟤 **SOLO EXPOSTO E EROSÃO**
+   - Identifique áreas de solo sem cobertura vegetal
+   - Classifique tipo de erosão: Laminar, Sulcos, Ravinas, Voçoroca
+   - Avalie severidade: Leve, Moderada, Severa
+   - Estime: área afetada (% da imagem)
+   - Use apelidos: "Solo Exposto Compactado", "Erosão em Sulcos Ativos", etc.
+"""
+
+    if params.get('include_anthropic', True):
+        prompt += """
+🔥 **SINAIS DE ANTROPIZAÇÃO**
+   - Detecte marcas de fogo (recente/antigo, intensidade)
+   - Identifique: estradas, trilhas, construções, cercas, desmate recente
+   - Detecte: lixo, poluição, entulho, resíduos
+   - Avalie impacto na vegetação circundante
+   - Use apelidos: "Área de Queimada Recente", "Trilha de Acesso", "Ponto de Descarte", etc.
+"""
+
+    if params.get('include_fauna', True):
+        prompt += """
+🐾 **FAUNA E PECUÁRIA** (SEMPRE distingua entre nativo e doméstico!)
+   
+   📍 FAUNA NATIVA:
+   - Avistamento direto ou evidências indiretas
+   - Tipos de evidência: avistamento, rastros, pegadas, tocas/ninhos, fezes, trilhas
+   - Espécies comuns: capivara, tatu, veado, anta, onça, cateto, quati, etc.
+   - Use apelidos: "Rastro de Capivara", "Toca de Tatu", "Pegadas de Veado"
+   
+   🐄 PECUÁRIA (animais domésticos):
+   - Bovinos, equinos, suínos, caprinos, ovinos
+   - Evidências: animais, trilhas de gado, marcas de pastejo, pisoteio
+   - Avalie impacto na vegetação: leve, moderado, severo
+   - Use apelidos: "Bovinos em Pastejo", "Trilha de Gado", "Área Pisoteada"
+"""
+
+    # Instruções de formato JSON
+    prompt += """
+
+📐 **FORMATO DE RESPOSTA (JSON):**
+
+Retorne um objeto JSON com o array "entidades" contendo todos os elementos detectados:
+
+{
+  "entidades": [
+    {
+      "indice": 1,
+      "tipo": "arvore",  // arvore, muda, solo, erosao, antropico, fauna_nativa, pecuaria
+      "apelido": "Árvore Copa Ampla",
+      "especie": "",  // Se identificável
+      "familia": "",  // Se identificável
+      "observacoes": "Descrição detalhada das características visuais",
+      "cobertura": 5,  // % da área da imagem
+      "areas": [[x1,y1], [x2,y2], ...],  // Polígono em % (0-100)
+      
+      // CAMPOS ESPECÍFICOS POR TIPO:
+      
+      // Para arvore:
+      "diametro_copa_m": 8.5,
+      "altura_m": 12,
+      "dap_estimado_cm": 35,
+      "vigor": "bom",
+      
+      // Para muda:
+      "sobrevivencia": "viva",  // viva, morta, estressada
+      "vigor": "bom",
+      "altura_cm": 80,
+      "qualidade_plantio": "adequada",
+      "quantidade_estimada": 25,
+      
+      // Para solo/erosao:
+      "tipo_erosao": "sulcos",  // laminar, sulcos, ravinas, vocoroca
+      "severidade": "moderada",  // leve, moderada, severa
+      "causa_provavel": "escoamento superficial",
+      
+      // Para antropico:
+      "tipo_antropico": "fogo",  // fogo, estrada, trilha, construcao, cerca, desmate, lixo, poluicao
+      "intensidade": "alta",
+      "impacto_vegetacao": "severo",
+      "data_aproximada": "recente",  // recente, antigo, em recuperacao
+      
+      // Para fauna_nativa ou pecuaria:
+      "tipo_animal": "bovino",  // ou espécie nativa
+      "tipo_evidencia": "avistamento",  // avistamento, rastro, pegada, toca, fezes, pastejo, trilha
+      "quantidade_estimada": 5,
+      "impacto_vegetacao": "moderado"
+    }
+  ],
+  "area_shape": {
+    "points": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}]
+  },
+  "entity_shapes": {
+    "0": [{"points": [{"x": 10, "y": 15}, {"x": 30, "y": 15}, {"x": 30, "y": 40}, {"x": 10, "y": 40}]}]
+  }
+}
+
+"""
+
+    # Instruções especiais do template
+    if 'special_instructions' in params:
+        prompt += "\n🎯 **INSTRUÇÕES ESPECIAIS:**\n"
+        for instruction in params['special_instructions']:
+            prompt += f"- {instruction}\n"
+
+    # Regras finais
+    prompt += f"""
+
+⚠️ **REGRAS CRÍTICAS:**
+- Identifique entre {params.get('min_species', 1)} e {params.get('max_species', 30)} entidades
+- SEMPRE distinga FAUNA NATIVA de PECUÁRIA
+- Use apelidos descritivos e específicos
+- Forneça coordenadas de polígono (0-100%) para cada entidade
+- Estime medidas em unidades métricas (m, cm)
+- NÃO deixe campos obrigatórios vazios
+- Retorne APENAS JSON válido sem marcadores markdown
+
+Retorne APENAS JSON válido sem marcadores markdown."""
+
+    return prompt
+
+
 def get_template_list():
     """Retorna lista de templates disponíveis"""
-    return [
-        {
+    templates = []
+    for key, value in PROMPT_TEMPLATES.items():
+        template_info = {
             'id': key,
             'name': value['name'],
             'description': value['description'],
-            'objective': value['objective']
+            'objective': value['objective'],
+            'featured': value.get('featured', False),
+            'analysis_mode': value.get('analysis_mode', 'herbaceous')
         }
-        for key, value in PROMPT_TEMPLATES.items()
-    ]
+        templates.append(template_info)
+    
+    # Ordenar para que featured apareça primeiro
+    templates.sort(key=lambda x: (not x['featured'], x['name']))
+    return templates
 
 
 def get_template_params(template_name):

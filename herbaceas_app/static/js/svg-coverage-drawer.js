@@ -1232,6 +1232,148 @@ const SVGCoverageDrawer = {
     },
 
     // ========================================
+    // IMPORTAÇÃO DE ÁREAS DA IA
+    // ========================================
+
+    importAIDetectedAreas() {
+        if (!this.currentSubparcela) {
+            console.error('❌ Dados da subparcela não disponíveis');
+            if (typeof showAlert === 'function') {
+                showAlert('error', 'Erro: Dados da subparcela não carregados. Reabra o modal.');
+            }
+            return;
+        }
+
+        console.log('🤖 Importando áreas detectadas pela IA...');
+
+        let areasImportadas = 0;
+        let especiesComAreas = 0;
+
+        // Verificar se há dados de polígonos da IA nas espécies
+        if (this.currentSubparcela.especies) {
+            this.currentSubparcela.especies.forEach((esp, index) => {
+                // Verificar diferentes formatos de dados de polígonos da IA
+                let polygonData = null;
+
+                // Formato 1: species_shapes no resultado (polígonos por espécie)
+                if (esp.species_shapes && Array.isArray(esp.species_shapes)) {
+                    polygonData = esp.species_shapes;
+                }
+                // Formato 2: area_shapes já processados
+                else if (esp.area_shapes && Array.isArray(esp.area_shapes)) {
+                    polygonData = esp.area_shapes;
+                }
+                // Formato 3: polygon_json com coordenadas percentuais
+                else if (esp.polygon_json && esp.polygon_json.points) {
+                    // Converter coordenadas percentuais para absolutas
+                    const imgWidth = this.image?.naturalWidth || 100;
+                    const imgHeight = this.image?.naturalHeight || 100;
+
+                    const convertedPoints = esp.polygon_json.points.map(p => ({
+                        x: (p.x / 100) * imgWidth,
+                        y: (p.y / 100) * imgHeight
+                    }));
+
+                    polygonData = [{ points: convertedPoints }];
+                }
+                // Formato 4: coordenadas JSON diretas (x, y em %)
+                else if (esp.coordenadas || esp.polygon) {
+                    const coords = esp.coordenadas || esp.polygon;
+                    if (coords.points && Array.isArray(coords.points)) {
+                        const imgWidth = this.image?.naturalWidth || 100;
+                        const imgHeight = this.image?.naturalHeight || 100;
+
+                        const convertedPoints = coords.points.map(p => ({
+                            x: (p.x / 100) * imgWidth,
+                            y: (p.y / 100) * imgHeight
+                        }));
+
+                        polygonData = [{ points: convertedPoints }];
+                    }
+                }
+
+                if (polygonData && polygonData.length > 0) {
+                    // Inicializar array se necessário
+                    if (!this.speciesPolygons[index]) {
+                        this.speciesPolygons[index] = [];
+                    }
+
+                    // Adicionar polígonos (convertendo formato se necessário)
+                    polygonData.forEach(poly => {
+                        let points = poly.points;
+
+                        // Se pontos estão em formato percentual (0-100), converter
+                        if (points && points.length > 0) {
+                            const maxX = Math.max(...points.map(p => p.x));
+                            const maxY = Math.max(...points.map(p => p.y));
+
+                            // Se todos os valores são <= 100, provavelmente são percentuais
+                            if (maxX <= 100 && maxY <= 100) {
+                                const imgWidth = this.image?.naturalWidth || 100;
+                                const imgHeight = this.image?.naturalHeight || 100;
+
+                                points = points.map(p => ({
+                                    x: (p.x / 100) * imgWidth,
+                                    y: (p.y / 100) * imgHeight
+                                }));
+                            }
+
+                            this.speciesPolygons[index].push({ points });
+                            areasImportadas++;
+                        }
+                    });
+
+                    especiesComAreas++;
+                    console.log(`  ✅ Espécie "${esp.apelido}": ${polygonData.length} polígono(s) importado(s)`);
+                }
+            });
+        }
+
+        // Verificar área da subparcela (area_shape)
+        if (this.currentSubparcela.area_shape && !this.subparcelaPolygon) {
+            let points = this.currentSubparcela.area_shape.points;
+
+            if (points && points.length > 0) {
+                // Converter se necessário
+                const maxX = Math.max(...points.map(p => p.x));
+                const maxY = Math.max(...points.map(p => p.y));
+
+                if (maxX <= 100 && maxY <= 100) {
+                    const imgWidth = this.image?.naturalWidth || 100;
+                    const imgHeight = this.image?.naturalHeight || 100;
+
+                    points = points.map(p => ({
+                        x: (p.x / 100) * imgWidth,
+                        y: (p.y / 100) * imgHeight
+                    }));
+                }
+
+                this.subparcelaPolygon = { points };
+                console.log('  ✅ Área 100% da subparcela importada');
+            }
+        }
+
+        // Re-renderizar
+        this.render();
+
+        // Mostrar SVG
+        if (this.subparcelaPolygon || Object.keys(this.speciesPolygons).length > 0) {
+            this.svg.style.display = 'block';
+        }
+
+        // Feedback ao usuário
+        if (typeof showAlert === 'function') {
+            if (areasImportadas > 0) {
+                showAlert('success', `✅ Importadas ${areasImportadas} área(s) de ${especiesComAreas} espécie(s) da IA`);
+            } else {
+                showAlert('warning', '⚠️ Nenhuma área detectada pela IA foi encontrada. A IA pode não ter retornado polígonos ou os dados não estão no formato esperado.');
+            }
+        }
+
+        console.log(`🤖 Importação concluída: ${areasImportadas} áreas de ${especiesComAreas} espécies`);
+    },
+
+    // ========================================
     // LIMPEZA
     // ========================================
 
@@ -1253,3 +1395,6 @@ const SVGCoverageDrawer = {
 
 // Exportar globalmente
 window.SVGCoverageDrawer = SVGCoverageDrawer;
+
+// Alias para compatibilidade com app.js
+window.CoverageDrawer = SVGCoverageDrawer;

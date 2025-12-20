@@ -416,7 +416,9 @@
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* Responsive */
@@ -424,7 +426,7 @@
     .prompt-config-body {
         flex-direction: column;
     }
-    
+
     .prompt-config-sidebar {
         width: 100%;
         max-height: 200px;
@@ -568,4 +570,118 @@
     border-top: 1px solid rgba(139, 92, 246, 0.2);
     color: #64748b;
     font-size: 0.75rem;
+}
+
+/* ===========================
+   TEMPLATE FEATURED (NOVO!)
+   =========================== */
+
+.template-card.featured {
+    border-color: rgba(16, 185, 129, 0.5);
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.1));
+    position: relative;
+    overflow: hidden;
+}
+
+.template-card.featured::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(45deg,
+            transparent 30%,
+            rgba(16, 185, 129, 0.1) 50%,
+            transparent 70%);
+    animation: shimmer 3s infinite;
+}
+
+@keyframes shimmer {
+    0% {
+        transform: translateX(-100%) rotate(45deg);
+    }
+
+    100% {
+        transform: translateX(100%) rotate(45deg);
+    }
+}
+
+.template-card.featured:hover {
+    border-color: #10b981;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.15));
+    transform: translateX(4px);
+}
+
+.template-card.featured.active {
+    border-color: #10b981;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.3), rgba(5, 150, 105, 0.25));
+    box-shadow: 0 0 25px rgba(16, 185, 129, 0.4);
+}
+
+.template-featured-badge {
+    background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    margin-left: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.7;
+    }
+}
+
+.template-mode-badge {
+    background: rgba(59, 130, 246, 0.3);
+    color: #93c5fd;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    margin-left: 4px;
+}
+
+.template-mode-badge.landscape {
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.3) 0%, rgba(16, 185, 129, 0.3) 100%);
+    color: #6ee7b7;
+}
+
+/* ===========================
+   LANDSCAPE MODE UI
+   =========================== */
+
+.landscape-mode-group {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(5, 150, 105, 0.05));
+    border-color: rgba(16, 185, 129, 0.3);
+}
+
+.landscape-mode-group h4 {
+    color: #6ee7b7;
+}
+
+.landscape-mode-group .param-item label {
+    color: #a7f3d0;
+}
+
+.landscape-mode-group .param-item small {
+    color: rgba(167, 243, 208, 0.6) !important;
+}
+
+/* Herbaceous mode group retains default styling */
+.herbaceous-mode-group {
+    background: rgba(30, 41, 59, 0.4);
+    border-color: rgba(139, 92, 246, 0.2);
 }

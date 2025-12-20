@@ -375,18 +375,159 @@ def fix_malformed_json(text, json_error):
     
     return text
 
+
+def _map_entity_type_to_life_form(entity_type):
+    """
+    Mapeia tipos de entidade de paisagem para formas de vida equivalentes.
+    
+    Args:
+        entity_type: tipo da entidade (arvore, muda, solo, erosao, antropizacao, fauna, etc.)
+    
+    Returns:
+        str: forma de vida correspondente
+    """
+    type_mapping = {
+        'arvore': 'Árvore',
+        'muda': 'Muda/Plântula',
+        'muda_reflorestamento': 'Muda/Plântula',
+        'solo': 'Solo Exposto',
+        'solo_exposto': 'Solo Exposto',
+        'erosao': 'Erosão',
+        'antropizacao': 'Antropização',
+        'fogo': 'Antropização (Fogo)',
+        'edificacao': 'Antropização (Edificação)',
+        'estrada': 'Antropização (Estrada)',
+        'lixo': 'Antropização (Lixo)',
+        'poluicao': 'Antropização (Poluição)',
+        'fauna': 'Fauna (Nativa)',
+        'fauna_nativa': 'Fauna (Nativa)',
+        'pecuaria': 'Fauna (Pecuária)',
+        'gado': 'Fauna (Pecuária)',
+    }
+    
+    entity_type_lower = (entity_type or '').lower().strip()
+    return type_mapping.get(entity_type_lower, entity_type or 'Outro')
+
+
+def _convert_entities_to_species(analysis_result):
+    """
+    Converte a resposta de modo paisagem (entidades) para formato de espécies.
+    
+    Args:
+        analysis_result: dict contendo 'entidades' array
+    
+    Returns:
+        dict: resultado com 'especies' array no formato padrão
+    """
+    entidades = analysis_result.pop('entidades', [])
+    especies_convertidas = []
+    
+    for ent in entidades:
+        tipo = ent.get('tipo', 'desconhecido')
+        altura_metros = ent.get('altura_m', 0) or ent.get('altura', 0)
+        
+        # Para árvores e mudas, converter altura de metros para centímetros
+        # Para outros tipos, altura não é aplicável
+        if tipo in ['arvore', 'muda', 'muda_reflorestamento']:
+            altura_cm = altura_metros * 100 if altura_metros else 0
+        else:
+            altura_cm = 0  # Solo, erosão, fauna não têm altura de planta
+        
+        # Mapear campos de entidade para formato de espécie
+        especie = {
+            'apelido': ent.get('apelido', f"Entidade {ent.get('indice', '?')}"),
+            'tipo_entidade': tipo,  # arvore, muda, solo, erosao, antropizacao, fauna
+            'especie': ent.get('especie', 'Não identificável'),
+            'familia': ent.get('familia', ''),
+            'genero': ent.get('genero', ''),
+            'cobertura': ent.get('cobertura', 0) or ent.get('area_percentual', 0) or 5,  # Padrão 5% se não especificado
+            'altura': altura_cm,  # Altura padrão em centímetros
+            'altura_m': altura_metros if tipo in ['arvore', 'muda'] else None,  # Altura original em metros (para árvores)
+            'forma_vida': _map_entity_type_to_life_form(tipo),
+            'observacoes': ent.get('observacoes', ''),
+            # Campos específicos de paisagem
+            'diametro_copa_m': ent.get('diametro_copa_m'),
+            'dap_estimado_cm': ent.get('dap_estimado_cm'),
+            'vigor': ent.get('vigor'),
+            'qualidade_plantio': ent.get('qualidade_plantio'),
+            'tipo_erosao': ent.get('tipo_erosao'),
+            'severidade': ent.get('severidade'),
+            'causa_provavel': ent.get('causa_provavel'),
+            'tipo_antropico': ent.get('tipo_antropico'),
+            'intensidade': ent.get('intensidade'),
+            'tipo_animal': ent.get('tipo_animal'),
+            'grupo_animal': ent.get('grupo_animal'),
+            'tipo_evidencia': ent.get('tipo_evidencia'),
+            'tamanho_evidencia': ent.get('tamanho_evidencia'),
+        }
+        
+        # Remover campos None para não poluir o objeto
+        especie = {k: v for k, v in especie.items() if v is not None and v != ''}
+        especies_convertidas.append(especie)
+        print(f"  ✓ Convertido: {especie['apelido']} ({especie.get('tipo_entidade', 'N/A')})")
+    
+    analysis_result['especies'] = especies_convertidas
+    analysis_result['modo_paisagem'] = True
+    print(f"🛰️ {len(especies_convertidas)} entidades convertidas para formato de espécies")
+    
+    return analysis_result
+
+
 def validate_and_filter_results(analysis_result, template_config=None):
     """
     Valida e filtra os resultados da análise de acordo com as configurações do template.
     Remove categorias não solicitadas e ajusta número de morfotipos se necessário.
     
     Args:
-        analysis_result: dict com 'especies' array
+        analysis_result: dict com 'especies' array ou 'entidades' (modo paisagem)
         template_config: dict com 'template' e 'params'
     
     Returns:
         dict: resultado filtrado e validado
     """
+    # 🛰️ SUPORTE A MODO PAISAGEM: Converter 'entidades' para 'especies'
+    if 'entidades' in analysis_result and 'especies' not in analysis_result:
+        print("🛰️ Modo Paisagem detectado: convertendo 'entidades' para 'especies'")
+        entidades = analysis_result.pop('entidades')
+        especies_convertidas = []
+        
+        for ent in entidades:
+            # Mapear campos de entidade para formato de espécie
+            especie = {
+                'apelido': ent.get('apelido', f"Entidade {ent.get('indice', '?')}"),
+                'tipo_entidade': ent.get('tipo', 'desconhecido'),  # arvore, muda, solo, erosao, antropizacao, fauna
+                'especie': ent.get('especie', 'Não identificável'),
+                'familia': ent.get('familia', ''),
+                'genero': ent.get('genero', ''),
+                'cobertura': ent.get('cobertura', 0) or ent.get('area_percentual', 0) or 5,  # Padrão 5% se não especificado
+                'altura': ent.get('altura_m', 0) or ent.get('altura', 0),
+                'forma_vida': _map_entity_type_to_life_form(ent.get('tipo', '')),
+                'observacoes': ent.get('observacoes', ''),
+                # Campos específicos de paisagem
+                'diametro_copa_m': ent.get('diametro_copa_m'),
+                'dap_estimado_cm': ent.get('dap_estimado_cm'),
+                'vigor': ent.get('vigor'),
+                'qualidade_plantio': ent.get('qualidade_plantio'),
+                'tipo_erosao': ent.get('tipo_erosao'),
+                'severidade': ent.get('severidade'),
+                'causa_provavel': ent.get('causa_provavel'),
+                'tipo_antropico': ent.get('tipo_antropico'),
+                'intensidade': ent.get('intensidade'),
+                'tipo_animal': ent.get('tipo_animal'),
+                'grupo_animal': ent.get('grupo_animal'),
+                'tipo_evidencia': ent.get('tipo_evidencia'),
+                'tamanho_evidencia': ent.get('tamanho_evidencia'),
+            }
+            
+            # Remover campos None para não poluir o objeto
+            especie = {k: v for k, v in especie.items() if v is not None and v != ''}
+            especies_convertidas.append(especie)
+            print(f"  ✓ Convertido: {especie['apelido']} ({especie.get('tipo_entidade', 'N/A')})")
+        
+        analysis_result['especies'] = especies_convertidas
+        analysis_result['modo_paisagem'] = True
+        print(f"🛰️ {len(especies_convertidas)} entidades convertidas para formato de espécies")
+    
     if not template_config or 'especies' not in analysis_result:
         return analysis_result
     
@@ -907,6 +1048,12 @@ def analyze_image_with_gemini(image_path, api_key=None, model_version=None, temp
                 try:
                     result = json.loads(response_text)
                     print(f"✓ JSON parseado com sucesso")
+                    
+                    # 🛰️ Conversão antecipada de entidades para espécies (modo paisagem)
+                    if 'entidades' in result and 'especies' not in result:
+                        print(f"🛰️ Detectado modo paisagem com {len(result['entidades'])} entidades")
+                        result = _convert_entities_to_species(result)
+                    
                     print(f"✓ Número de espécies na resposta: {len(result.get('especies', []))}")
                     if result.get('especies'):
                         print(f"✓ Primeira espécie: {result['especies'][0].get('apelido', 'SEM NOME')}")
@@ -1860,7 +2007,10 @@ def analyze_parcela(parcela):
                 'subparcela': subparcela,
                 'image': img_info['filename'],
                 'image_path': image_url,
-                'especies': especies_encontradas
+                'especies': especies_encontradas,
+                'area_shape': analysis.get('area_shape'),  # Polígono da área 100%
+                'species_shapes': analysis.get('species_shapes'),  # Polígonos por espécie
+                'modo_paisagem': analysis.get('modo_paisagem', False)  # Flag de modo paisagem
             })
             
             # 📊 Enviar resumo acumulativo após processar cada subparcela
@@ -5783,7 +5933,7 @@ if __name__ == '__main__':
             app.run(debug=False, host='127.0.0.1', port=5000, use_reloader=False)
         else:
             # Modo desenvolvimento
-            app.run(debug=True, host='0.0.0.0', port=5000)
+            app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
     except KeyboardInterrupt:
         print("\n\nAplicativo encerrado pelo usuário.")
         if is_frozen:

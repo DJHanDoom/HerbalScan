@@ -114,8 +114,8 @@ const PromptConfig = {
                             </div>
                         </div>
                         
-                        <div class="param-group">
-                            <h4>🔍 Opções de Análise</h4>
+                        <div class="param-group herbaceous-mode-group">
+                            <h4>🔍 Opções de Análise (Herbáceas)</h4>
                             <div class="param-item">
                                 <label>Padronização entre Subparcelas</label>
                                 <select id="param-standardize-subplots">
@@ -179,6 +179,60 @@ const PromptConfig = {
                                 <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
                                     Grupo sucessional, tolerância à sombra, tipo de dispersão
                                 </small>
+                            </div>
+                        </div>
+                        
+                        <!-- Landscape Mode Parameters -->
+                        <div class="param-group landscape-mode-group" style="display: none;">
+                            <h4>🛰️ Entidades de Paisagem (Drone)</h4>
+                            <div class="param-item checkbox-group">
+                                <input type="checkbox" id="param-include-trees" checked>
+                                <label for="param-include-trees">🌳 Detectar árvores adultas</label>
+                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
+                                    Estimar copa (m), altura (m) e DAP (cm)
+                                </small>
+                            </div>
+                            
+                            <div class="param-item checkbox-group">
+                                <input type="checkbox" id="param-include-seedlings" checked>
+                                <label for="param-include-seedlings">🌱 Detectar mudas de reflorestamento</label>
+                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
+                                    Sobrevivência, vigor, qualidade do plantio
+                                </small>
+                            </div>
+                            
+                            <div class="param-item checkbox-group">
+                                <input type="checkbox" id="param-include-erosion" checked>
+                                <label for="param-include-erosion">🟤 Detectar erosão e solo exposto</label>
+                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
+                                    Laminar, sulcos, ravinas, voçoroca
+                                </small>
+                            </div>
+                            
+                            <div class="param-item checkbox-group">
+                                <input type="checkbox" id="param-include-anthropic" checked>
+                                <label for="param-include-anthropic">🔥 Detectar sinais de antropização</label>
+                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
+                                    Fogo, estradas, construções, lixo, poluição
+                                </small>
+                            </div>
+                            
+                            <div class="param-item checkbox-group">
+                                <input type="checkbox" id="param-include-fauna" checked>
+                                <label for="param-include-fauna">🐾 Detectar fauna e pecuária</label>
+                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
+                                    Fauna nativa vs doméstica: rastros, tocas, pastejo
+                                </small>
+                            </div>
+                            
+                            <div class="param-item checkbox-group">
+                                <input type="checkbox" id="param-estimate-dbh" checked>
+                                <label for="param-estimate-dbh">📏 Estimar DAP das árvores</label>
+                            </div>
+                            
+                            <div class="param-item checkbox-group">
+                                <input type="checkbox" id="param-estimate-crown" checked>
+                                <label for="param-estimate-crown">🌿 Estimar diâmetro de copa</label>
                             </div>
                         </div>
                         
@@ -276,16 +330,22 @@ const PromptConfig = {
 
         container.innerHTML = this.templates.map(template => {
             const isCustom = template.custom === true;
+            const isFeatured = template.featured === true;
+            const isLandscape = template.analysis_mode === 'landscape';
             const deleteBtn = isCustom ? `<button class="template-delete-btn" onclick="event.stopPropagation(); PromptConfig.deleteTemplate('${template.filename}')" title="Deletar template">🗑️</button>` : '';
             const customBadge = isCustom ? '<span class="template-custom-badge">⭐ Customizado</span>' : '';
+            const featuredBadge = isFeatured ? '<span class="template-featured-badge">🚀 NOVO</span>' : '';
+            const modeBadge = isLandscape ? '<span class="template-mode-badge landscape">🛰️ Drone</span>' : '';
 
             return `
-                <div class="template-card ${template.id === this.currentTemplate ? 'active' : ''} ${isCustom ? 'custom' : ''}" 
+                <div class="template-card ${template.id === this.currentTemplate ? 'active' : ''} ${isCustom ? 'custom' : ''} ${isFeatured ? 'featured' : ''}" 
                      onclick="PromptConfig.selectTemplate('${template.id}')">
                     <div class="template-card-header">
                         <div class="template-card-title">
                             ${template.name}
+                            ${featuredBadge}
                             ${customBadge}
+                            ${modeBadge}
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center;">
                             <div class="template-card-badge">${template.objective}</div>
@@ -338,6 +398,7 @@ const PromptConfig = {
         const isCustom = templateId.startsWith('custom_');
 
         let params;
+        let analysisMode = 'herbaceous';
 
         if (isCustom) {
             // Template customizado - buscar dos dados locais
@@ -347,6 +408,7 @@ const PromptConfig = {
 
             if (template && template.params) {
                 params = template.params;
+                analysisMode = template.analysis_mode || params.analysis_mode || 'herbaceous';
                 console.log('✅ Params carregados:', params);
             } else {
                 console.error('❌ Template customizado não encontrado ou sem params');
@@ -359,6 +421,7 @@ const PromptConfig = {
                 const response = await fetch(`/api/templates/${templateId}`);
                 const data = await response.json();
                 params = data.params;
+                analysisMode = data.analysis_mode || params?.analysis_mode || 'herbaceous';
             } catch (error) {
                 console.error('Erro ao carregar template:', error);
                 return;
@@ -366,32 +429,37 @@ const PromptConfig = {
         }
 
         console.log('🎯 Aplicando params aos inputs:', params);
+        console.log('🛰️ Modo de análise:', analysisMode);
+
+        // Alternar visibilidade dos grupos de parâmetros baseado no modo
+        this.switchModeUI(analysisMode);
+        this.currentMode = analysisMode;
 
         // Aplicar parâmetros aos inputs com validação
         const setInputValue = (id, value, type = 'value') => {
             const el = document.getElementById(id);
             if (!el) {
-                console.error(`❌ Elemento não encontrado: ${id}`);
+                // Não logar erro para campos que podem não existir
                 return false;
             }
 
             if (type === 'checkbox') {
                 el.checked = value;
-                console.log(`✓ ${id} = ${value} (checked)`);
             } else {
                 el.value = value;
-                console.log(`✓ ${id} = ${value}`);
             }
             return true;
         };
 
-        // Aplicar parâmetros com log individual
+        // Aplicar parâmetros comuns
         setInputValue('param-min-species', params.min_species || 1);
-        setInputValue('param-max-species', params.max_species || 8);
+        setInputValue('param-max-species', params.max_species || (analysisMode === 'landscape' ? 30 : 8));
         setInputValue('param-detail-level', params.detail_level || 'medium');
         setInputValue('param-taxonomic-precision', params.taxonomic_precision || 'conservative');
         setInputValue('param-include-genus', params.include_genus || 'only_obvious');
         setInputValue('param-include-family', params.include_family || 'when_clear');
+
+        // Aplicar parâmetros herbáceos
         setInputValue('param-standardize-subplots', params.standardize_across_subplots || 'moderate');
         setInputValue('param-separate-grasses', params.separate_grasses !== false, 'checkbox');
         setInputValue('param-include-soil', params.include_soil !== false, 'checkbox');
@@ -403,10 +471,35 @@ const PromptConfig = {
         setInputValue('param-include-polygon-json', params.include_polygon_json !== false, 'checkbox');
         setInputValue('param-include-eco-traits', params.include_eco_traits === true, 'checkbox');
 
+        // Aplicar parâmetros paisagem/drone
+        setInputValue('param-include-trees', params.include_trees !== false, 'checkbox');
+        setInputValue('param-include-seedlings', params.include_seedlings !== false, 'checkbox');
+        setInputValue('param-include-erosion', params.include_erosion !== false, 'checkbox');
+        setInputValue('param-include-anthropic', params.include_anthropic !== false, 'checkbox');
+        setInputValue('param-include-fauna', params.include_fauna !== false, 'checkbox');
+        setInputValue('param-estimate-dbh', params.estimate_dbh !== false, 'checkbox');
+        setInputValue('param-estimate-crown', params.estimate_crown !== false, 'checkbox');
+
         console.log('✅ Todos os parâmetros aplicados');
 
         this.renderTemplates();
         this.updatePreview();
+    },
+
+    // Alternar visibilidade dos grupos de modo
+    switchModeUI(mode) {
+        const herbaceousGroup = document.querySelector('.herbaceous-mode-group');
+        const landscapeGroup = document.querySelector('.landscape-mode-group');
+
+        if (mode === 'landscape') {
+            if (herbaceousGroup) herbaceousGroup.style.display = 'none';
+            if (landscapeGroup) landscapeGroup.style.display = 'block';
+            console.log('🛰️ UI alternada para modo PAISAGEM');
+        } else {
+            if (herbaceousGroup) herbaceousGroup.style.display = 'block';
+            if (landscapeGroup) landscapeGroup.style.display = 'none';
+            console.log('🌿 UI alternada para modo HERBÁCEO');
+        }
     },
 
     attachEvents() {
@@ -417,7 +510,11 @@ const PromptConfig = {
             'param-separate-grasses', 'param-include-soil', 'param-include-litter',
             'param-normalize-coverage',
             'param-focus-functional', 'param-focus-succession', 'param-focus-carbon',
-            'param-include-polygon-json', 'param-include-eco-traits'
+            'param-include-polygon-json', 'param-include-eco-traits',
+            // Landscape mode params
+            'param-include-trees', 'param-include-seedlings', 'param-include-erosion',
+            'param-include-anthropic', 'param-include-fauna',
+            'param-estimate-dbh', 'param-estimate-crown'
         ];
 
         inputs.forEach(id => {
@@ -442,24 +539,47 @@ const PromptConfig = {
     },
 
     getCustomParams() {
-        return {
+        // Helper to safely get checkbox value
+        const getChecked = (id) => {
+            const el = document.getElementById(id);
+            return el ? el.checked : false;
+        };
+
+        const params = {
+            // Common params
             min_species: parseInt(document.getElementById('param-min-species').value),
             max_species: parseInt(document.getElementById('param-max-species').value),
             detail_level: document.getElementById('param-detail-level').value,
             taxonomic_precision: document.getElementById('param-taxonomic-precision').value,
             include_genus: document.getElementById('param-include-genus').value,
             include_family: document.getElementById('param-include-family').value,
-            standardize_across_subplots: document.getElementById('param-standardize-subplots').value,
-            separate_grasses: document.getElementById('param-separate-grasses').checked,
-            include_soil: document.getElementById('param-include-soil').checked,
-            include_litter: document.getElementById('param-include-litter').checked,
-            normalize_coverage: document.getElementById('param-normalize-coverage').checked,
-            focus_functional: document.getElementById('param-focus-functional').checked,
-            focus_succession: document.getElementById('param-focus-succession').checked,
-            focus_carbon: document.getElementById('param-focus-carbon').checked,
-            include_polygon_json: document.getElementById('param-include-polygon-json').checked,
-            include_eco_traits: document.getElementById('param-include-eco-traits').checked
+            // Herbaceous params
+            standardize_across_subplots: document.getElementById('param-standardize-subplots')?.value || 'moderate',
+            separate_grasses: getChecked('param-separate-grasses'),
+            include_soil: getChecked('param-include-soil'),
+            include_litter: getChecked('param-include-litter'),
+            normalize_coverage: getChecked('param-normalize-coverage'),
+            focus_functional: getChecked('param-focus-functional'),
+            focus_succession: getChecked('param-focus-succession'),
+            focus_carbon: getChecked('param-focus-carbon'),
+            include_polygon_json: getChecked('param-include-polygon-json'),
+            include_eco_traits: getChecked('param-include-eco-traits'),
+            // Landscape params
+            include_trees: getChecked('param-include-trees'),
+            include_seedlings: getChecked('param-include-seedlings'),
+            include_erosion: getChecked('param-include-erosion'),
+            include_anthropic: getChecked('param-include-anthropic'),
+            include_fauna: getChecked('param-include-fauna'),
+            estimate_dbh: getChecked('param-estimate-dbh'),
+            estimate_crown: getChecked('param-estimate-crown')
         };
+
+        // Add analysis_mode if in landscape mode
+        if (this.currentMode === 'landscape') {
+            params.analysis_mode = 'landscape';
+        }
+
+        return params;
     },
 
     async updatePreview() {
