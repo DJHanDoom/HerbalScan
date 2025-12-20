@@ -1291,6 +1291,35 @@ const SVGCoverageDrawer = {
                         polygonData = [{ points: convertedPoints }];
                     }
                 }
+                // Formato 5: 'areas' como array de pontos [[x1,y1], [x2,y2], ...]
+                // Este é o formato que o prompt de paisagem pede
+                else if (esp.areas && Array.isArray(esp.areas) && esp.areas.length > 0) {
+                    const imgWidth = this.image?.naturalWidth || 100;
+                    const imgHeight = this.image?.naturalHeight || 100;
+
+                    // Verificar se é array de arrays [[x,y], ...] ou array de objetos [{x, y}, ...]
+                    const firstPoint = esp.areas[0];
+                    let convertedPoints;
+
+                    if (Array.isArray(firstPoint)) {
+                        // Formato [[x,y], [x,y], ...]
+                        convertedPoints = esp.areas.map(p => ({
+                            x: (p[0] / 100) * imgWidth,
+                            y: (p[1] / 100) * imgHeight
+                        }));
+                    } else if (typeof firstPoint === 'object') {
+                        // Formato [{x, y}, {x, y}, ...]
+                        convertedPoints = esp.areas.map(p => ({
+                            x: ((p.x || 0) / 100) * imgWidth,
+                            y: ((p.y || 0) / 100) * imgHeight
+                        }));
+                    }
+
+                    if (convertedPoints && convertedPoints.length >= 3) {
+                        polygonData = [{ points: convertedPoints }];
+                        console.log(`  📐 'areas' convertido: ${convertedPoints.length} pontos`);
+                    }
+                }
 
                 if (polygonData && polygonData.length > 0) {
                     // Inicializar array se necessário

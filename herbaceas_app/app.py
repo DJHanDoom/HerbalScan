@@ -459,6 +459,8 @@ def _convert_entities_to_species(analysis_result):
             'grupo_animal': ent.get('grupo_animal'),
             'tipo_evidencia': ent.get('tipo_evidencia'),
             'tamanho_evidencia': ent.get('tamanho_evidencia'),
+            # Polígonos de área (coordenadas em % 0-100)
+            'areas': ent.get('areas'),  # [[x1,y1], [x2,y2], ...] formato do prompt de paisagem
         }
         
         # Remover campos None para não poluir o objeto
@@ -1982,7 +1984,12 @@ def analyze_parcela(parcela):
                     'observacoes': esp.get('observacoes', ''),
                     'cobertura': esp['cobertura'],
                     'altura': esp['altura'],
-                    'forma_vida': esp['forma_vida']
+                    'forma_vida': esp['forma_vida'],
+                    # Campos de paisagem
+                    'tipo_entidade': esp.get('tipo_entidade'),
+                    'altura_m': esp.get('altura_m'),
+                    # Polígonos de área (para importação)
+                    'areas': esp.get('areas'),
                 })
 
             # Converter caminho absoluto para URL relativa
