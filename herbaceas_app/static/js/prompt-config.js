@@ -234,6 +234,22 @@ const PromptConfig = {
                                 <input type="checkbox" id="param-estimate-crown" checked>
                                 <label for="param-estimate-crown">🌿 Estimar diâmetro de copa</label>
                             </div>
+
+                            <div class="param-item checkbox-group">
+                                <input type="checkbox" id="param-include-water">
+                                <label for="param-include-water">💧 Detectar corpos d'água</label>
+                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
+                                    Rios, lagos, áreas alagadas, mata ciliar
+                                </small>
+                            </div>
+
+                            <div class="param-item checkbox-group">
+                                <input type="checkbox" id="param-count-individuals">
+                                <label for="param-count-individuals">🔢 Contar indivíduos</label>
+                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
+                                    Estimar contagem numérica para cada entidade
+                                </small>
+                            </div>
                         </div>
                         
                         <div class="prompt-preview">
@@ -479,6 +495,8 @@ const PromptConfig = {
         setInputValue('param-include-fauna', params.include_fauna !== false, 'checkbox');
         setInputValue('param-estimate-dbh', params.estimate_dbh !== false, 'checkbox');
         setInputValue('param-estimate-crown', params.estimate_crown !== false, 'checkbox');
+        setInputValue('param-include-water', params.include_water === true, 'checkbox');
+        setInputValue('param-count-individuals', params.count_individuals === true, 'checkbox');
 
         console.log('✅ Todos os parâmetros aplicados');
 
@@ -514,7 +532,8 @@ const PromptConfig = {
             // Landscape mode params
             'param-include-trees', 'param-include-seedlings', 'param-include-erosion',
             'param-include-anthropic', 'param-include-fauna',
-            'param-estimate-dbh', 'param-estimate-crown'
+            'param-estimate-dbh', 'param-estimate-crown',
+            'param-include-water', 'param-count-individuals'
         ];
 
         inputs.forEach(id => {
@@ -571,7 +590,9 @@ const PromptConfig = {
             include_anthropic: getChecked('param-include-anthropic'),
             include_fauna: getChecked('param-include-fauna'),
             estimate_dbh: getChecked('param-estimate-dbh'),
-            estimate_crown: getChecked('param-estimate-crown')
+            estimate_crown: getChecked('param-estimate-crown'),
+            include_water: getChecked('param-include-water'),
+            count_individuals: getChecked('param-count-individuals')
         };
 
         // Add analysis_mode if in landscape mode

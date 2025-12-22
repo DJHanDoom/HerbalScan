@@ -1004,17 +1004,47 @@ const SVGCoverageDrawer = {
     loadSavedData() {
         console.log('💾 Carregando dados salvos...');
 
+        const imgWidth = this.image?.naturalWidth || 100;
+        const imgHeight = this.image?.naturalHeight || 100;
+
+        // Helper para converter percentual para pixel se necessário
+        const convertPointsIfNeeded = (points) => {
+            if (!points || points.length === 0) return points;
+
+            const maxX = Math.max(...points.map(p => p.x));
+            const maxY = Math.max(...points.map(p => p.y));
+
+            // Se coordenadas estão em 0-100, escalar para dimensões da imagem
+            if (maxX <= 100 && maxY <= 100 && (imgWidth > 100 || imgHeight > 100)) {
+                console.log('  🔄 Convertendo coordenadas de % para px');
+                return points.map(p => ({
+                    x: (p.x / 100) * imgWidth,
+                    y: (p.y / 100) * imgHeight
+                }));
+            }
+            return points;
+        };
+
         // Carregar área da subparcela
         if (this.currentSubparcela.area_shape) {
-            this.subparcelaPolygon = this.currentSubparcela.area_shape;
-            console.log('  ✅ Área da subparcela carregada');
+            let points = this.currentSubparcela.area_shape.points;
+            if (points) {
+                points = convertPointsIfNeeded(points);
+                this.subparcelaPolygon = { points: points };
+                console.log('  ✅ Área da subparcela carregada');
+            }
         }
 
         // Carregar áreas das espécies
         if (this.currentSubparcela.especies) {
             this.currentSubparcela.especies.forEach((esp, index) => {
                 if (esp.area_shapes && Array.isArray(esp.area_shapes)) {
-                    this.speciesPolygons[index] = esp.area_shapes;
+                    // Deep copy e conversão para cada polígono
+                    const processedShapes = esp.area_shapes.map(shape => ({
+                        points: convertPointsIfNeeded([...shape.points])
+                    }));
+
+                    this.speciesPolygons[index] = processedShapes;
                     console.log(`  ✅ Áreas da espécie ${index} "${esp.apelido}" carregadas`);
                 }
             });
@@ -1252,6 +1282,8 @@ const SVGCoverageDrawer = {
         // Verificar se há dados de polígonos da IA nas espécies
         if (this.currentSubparcela.especies) {
             this.currentSubparcela.especies.forEach((esp, index) => {
+                console.log(`🔍 Inspecionando espécie ${index} (${esp.apelido}):`, Object.keys(esp));
+
                 // Verificar diferentes formatos de dados de polígonos da IA
                 let polygonData = null;
 
@@ -1291,33 +1323,39 @@ const SVGCoverageDrawer = {
                         polygonData = [{ points: convertedPoints }];
                     }
                 }
-                // Formato 5: 'areas' como array de pontos [[x1,y1], [x2,y2], ...]
-                // Este é o formato que o prompt de paisagem pede
+                // Formato 5: 'areas' como array de polígonos (multishape) ou array de pontos (single shape)
                 else if (esp.areas && Array.isArray(esp.areas) && esp.areas.length > 0) {
                     const imgWidth = this.image?.naturalWidth || 100;
                     const imgHeight = this.image?.naturalHeight || 100;
+                    const firstItem = esp.areas[0];
 
-                    // Verificar se é array de arrays [[x,y], ...] ou array de objetos [{x, y}, ...]
-                    const firstPoint = esp.areas[0];
-                    let convertedPoints;
-
-                    if (Array.isArray(firstPoint)) {
-                        // Formato [[x,y], [x,y], ...]
-                        convertedPoints = esp.areas.map(p => ({
-                            x: (p[0] / 100) * imgWidth,
-                            y: (p[1] / 100) * imgHeight
+                    // Caso 5A: Array de Polígonos [[{x,y}...], [{x,y}...]]
+                    if (Array.isArray(firstItem) && firstItem.length > 0 && typeof firstItem[0] === 'object' && 'x' in firstItem[0]) {
+                        polygonData = esp.areas.map(polyPoints => ({
+                            points: polyPoints.map(p => ({
+                                x: ((p.x || 0) / 100) * imgWidth,
+                                y: ((p.y || 0) / 100) * imgHeight
+                            }))
                         }));
-                    } else if (typeof firstPoint === 'object') {
-                        // Formato [{x, y}, {x, y}, ...]
-                        convertedPoints = esp.areas.map(p => ({
+                        console.log(`  📐 Identificado 'areas' como lista de ${polygonData.length} polígonos`);
+                    }
+                    // Caso 5B: Único Polígono em formato de array de pontos [{x,y}, {x,y}...]
+                    else if (typeof firstItem === 'object' && 'x' in firstItem) {
+                        const points = esp.areas.map(p => ({
                             x: ((p.x || 0) / 100) * imgWidth,
                             y: ((p.y || 0) / 100) * imgHeight
                         }));
+                        polygonData = [{ points }];
+                        console.log(`  📐 Identificado 'areas' como único polígono de ${points.length} pontos`);
                     }
-
-                    if (convertedPoints && convertedPoints.length >= 3) {
-                        polygonData = [{ points: convertedPoints }];
-                        console.log(`  📐 'areas' convertido: ${convertedPoints.length} pontos`);
+                    // Caso 5C: Único polígono em formato array arrays [[x,y], [x,y]...]
+                    else if (Array.isArray(firstItem) && firstItem.length >= 2 && typeof firstItem[0] === 'number') {
+                        const points = esp.areas.map(p => ({
+                            x: (p[0] / 100) * imgWidth,
+                            y: (p[1] / 100) * imgHeight
+                        }));
+                        polygonData = [{ points }];
+                        console.log(`  📐 Identificado 'areas' como único polígono (formato array) de ${points.length} pontos`);
                     }
                 }
 
@@ -1405,6 +1443,113 @@ const SVGCoverageDrawer = {
     // ========================================
     // LIMPEZA
     // ========================================
+
+    // === CÁLCULO DE COBERTURA (RECALCULAR BUTTON) ===
+    calculateCoverage() {
+        console.log('🔄 Recalculando cobertura para TODAS as espécies...');
+
+        // Verificações básicas
+        if (!this.subparcelaPolygon) {
+            if (typeof showAlert === 'function') {
+                showAlert('warning', '⚠️ Primeiro defina a área 100% antes de recalcular!');
+            }
+            console.warn('⚠️ Área total (100%) não definida');
+            return;
+        }
+
+        if (!this.currentSubparcela || !this.currentSubparcela.especies) {
+            if (typeof showAlert === 'function') {
+                showAlert('error', 'Dados da subparcela não carregados.');
+            }
+            return;
+        }
+
+        let updatedCount = 0;
+        const especies = this.currentSubparcela.especies;
+
+        // Iterar sobre todas as espécies
+        for (let speciesIndex = 0; speciesIndex < especies.length; speciesIndex++) {
+            const polygons = this.speciesPolygons[speciesIndex];
+            const especie = especies[speciesIndex];
+
+            if (polygons && polygons.length > 0) {
+                // Calcular cobertura
+                const percentage = this.calculateCoveragePercentage(speciesIndex);
+                especie.cobertura = parseFloat(percentage.toFixed(1));
+
+                // Atualizar numero_individuos baseado na contagem de polígonos
+                especie.numero_individuos = polygons.length;
+
+                console.log(`  ✓ ${especie.apelido}: ${percentage.toFixed(1)}% cob, ${polygons.length} ind`);
+
+                // Atualizar UI do viewer
+                const speciesCard = document.getElementById(`viewer-species-${speciesIndex}`);
+                if (speciesCard) {
+                    const details = speciesCard.querySelectorAll('.viewer-species-detail');
+                    details.forEach(detail => {
+                        const label = detail.querySelector('.viewer-species-detail-label');
+                        const value = detail.querySelector('.viewer-species-detail-value');
+                        if (label && value) {
+                            if (label.textContent === 'Cobertura') {
+                                value.textContent = `${especie.cobertura}%`;
+                            } else if (label.textContent === 'Indivíduos') {
+                                value.textContent = especie.numero_individuos;
+                            }
+                        }
+                    });
+                }
+
+                // Persistir no backend
+                this.persistCoveragePercentage(speciesIndex, percentage);
+
+                updatedCount++;
+            } else {
+                // Sem polígonos desenhados
+                console.log(`  ⚠️ ${especie.apelido}: sem polígonos desenhados`);
+            }
+        }
+
+        // Atualizar appState se disponível
+        if (window.appState && window.appState.analysisResults) {
+            const subparcelaId = this.currentSubparcela.subparcela || this.currentSubparcela.id;
+            const result = window.appState.analysisResults.find(r => r.subparcela == subparcelaId);
+            if (result) {
+                result.especies = especies;
+                console.log('✅ appState.analysisResults atualizado');
+            }
+        }
+
+        // Atualizar tabelas principais
+        if (typeof recalcularEspeciesUnificadas === 'function') {
+            recalcularEspeciesUnificadas();
+        }
+        if (typeof displaySubparcelas === 'function') {
+            displaySubparcelas();
+        }
+        if (typeof displaySpeciesTable === 'function') {
+            displaySpeciesTable();
+        }
+
+        if (typeof showAlert === 'function') {
+            showAlert('success', `✅ ${updatedCount} espécies recalculadas com base nos polígonos desenhados!`);
+        }
+
+        console.log(`🔄 Recálculo concluído: ${updatedCount} espécies atualizadas`);
+    },
+
+    calculatePolygonArea(vertices) {
+        let total = 0;
+        for (let i = 0, l = vertices.length; i < l; i++) {
+            const addX = vertices[i].x;
+            const addY = vertices[i == vertices.length - 1 ? 0 : i + 1].y;
+            const subX = vertices[i == vertices.length - 1 ? 0 : i + 1].x;
+            const subY = vertices[i].y;
+
+            total += (addX * addY * 0.5);
+            total -= (subX * subY * 0.5);
+        }
+        return Math.abs(total);
+    },
 
     destroy() {
         if (this.svg) {

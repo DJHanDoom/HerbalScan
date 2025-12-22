@@ -15,6 +15,103 @@ const appState = {
         deepseek: localStorage.getItem('DEEPSEEK_API_KEY') || '',
         qwen: localStorage.getItem('QWEN_API_KEY') || '',
         huggingface: localStorage.getItem('HUGGINGFACE_API_KEY') || ''
+    },
+
+    // Método para atualizar espécie (chamado pelo modal)
+    updateSpecies: function (oldApelido, newData) {
+        console.log(`🔄 appState.updateSpecies: Atualizando '${oldApelido}'`, newData);
+
+        // 1. Atualizar na lista unificada
+        if (this.especies[oldApelido]) {
+            // Mesclar dados
+            Object.assign(this.especies[oldApelido], newData);
+
+            // Verificar renomeação
+            if (newData.apelido_usuario && newData.apelido_usuario !== oldApelido) {
+                const newName = newData.apelido_usuario;
+                console.log(`📝 Renomeando na lista unificada: ${oldApelido} -> ${newName}`);
+
+                // Mover para nova chave
+                this.especies[newName] = this.especies[oldApelido];
+                delete this.especies[oldApelido];
+
+                // Atualizar referência local para o loop abaixo
+                oldApelido = newName;
+            }
+        }
+
+        // 2. Propagar para todas as ocorrências nos resultados (subparcelas)
+        let countUpdated = 0;
+        this.analysisResults.forEach(result => {
+            if (result.especies) {
+                result.especies.forEach(esp => {
+                    // Verificar match (pelo apelido atual ou original)
+                    if (esp.apelido === oldApelido || esp.apelido_original === oldApelido || esp.apelido === newData.apelido_original) {
+                        // Atualizar campos
+                        Object.assign(esp, newData);
+
+                        // Se houve renomeação explicita no objeto data
+                        if (newData.apelido_usuario) {
+                            esp.apelido = newData.apelido_usuario;
+                        }
+                        countUpdated++;
+                    }
+                });
+            }
+        });
+
+        console.log(`✅ ${countUpdated} ocorrências atualizadas no appState.`);
+    },
+
+    // Método para atualizar a interface (chamado pelo modal)
+    refreshUI: function () {
+        console.log('🔄 appState.refreshUI: Re-renderizando interface...');
+
+        // Re-renderizar tabelas e grids
+        displayResults();
+
+        // Forçar atualização do gráfico de análise se existir
+        if (typeof AdvancedAnalytics !== 'undefined' && this.analysisResults.length > 0) {
+            // Pequeno delay para garantir que DOM atualizou
+            setTimeout(() => {
+                // Recriar dados agregados para analytics
+                const especiesWithData = {};
+
+                Object.keys(this.especies).forEach(apelido => {
+                    const esp = this.especies[apelido];
+                    let totalCobertura = 0;
+                    let totalAltura = 0;
+                    let count = 0;
+
+                    // Percorrer todas as subparcelas para coletar dados recalculados
+                    this.analysisResults.forEach(result => {
+                        if (result.especies) {
+                            result.especies.forEach(e => {
+                                if (e.apelido === apelido) {
+                                    totalCobertura += parseFloat(e.cobertura) || 0;
+                                    totalAltura += parseFloat(e.altura) || 0;
+                                    count++;
+                                }
+                            });
+                        }
+                    });
+
+                    especiesWithData[apelido] = {
+                        ...esp,
+                        cobertura: totalCobertura,
+                        altura_media: count > 0 ? totalAltura / count : 0,
+                        ocorrencias: count
+                    };
+                });
+
+                console.log('📊 Re-inicializando AdvancedAnalytics com dados atualizados...');
+                AdvancedAnalytics.initialize({
+                    especies: especiesWithData,
+                    analysisResults: this.analysisResults,
+                    subparcelas: this.uploadedFiles.map(f => f.name)
+                });
+            }, 100);
+        }
     }
 };
 
@@ -1287,7 +1384,8 @@ function recalcularEspeciesUnificadas() {
                     especie: esp.especie || '',
                     familia: esp.familia || '',
                     observacoes: esp.observacoes || '',
-                    ocorrencias: 0
+                    ocorrencias: 0,
+                    numero_individuos: 0
                 };
             } else {
                 // Atualizar dados se estiverem vazios
@@ -1302,6 +1400,8 @@ function recalcularEspeciesUnificadas() {
                 }
             }
 
+            const countInd = parseInt(esp.numero_individuos) || 1;
+            novasEspecies[apelido].numero_individuos += countInd;
             novasEspecies[apelido].ocorrencias++;
         });
     });
@@ -1433,7 +1533,7 @@ function displaySubparcelas() {
                         </div>
                         <div class="especie-dados">
                             ${getDisplayTaxonomy(esp.apelido)}<br>
-                            Cobertura: <span class="species-coverage">${esp.cobertura}</span>% | Altura: ${esp.altura}cm | ${esp.forma_vida}
+                            Cobertura: <span class="species-coverage">${esp.cobertura}</span>% | Altura: ${esp.altura > 100 ? (esp.altura / 100).toFixed(2) + 'm' : esp.altura + 'cm'} | ${esp.forma_vida}
                         </div>
                     </div>
                 </div>
@@ -2844,6 +2944,9 @@ function createViewerModal() {
                     <div class="viewer-edit-header">
                         <div class="viewer-edit-title">Espécies Detectadas</div>
                         <button class="viewer-add-species-btn" onclick="toggleAddSpeciesForm()">+ Adicionar Espécie</button>
+                        <button class="btn btn-sm btn-info" onclick="recalculateCoverageWrapper()" title="Recalcular % com base nos desenhos" style="margin-left: 10px; background-color: #17a2b8; border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer;">
+                            🔄 Recalcular
+                        </button>
                     </div>
 
                     <!-- Formulário inline para adicionar espécie -->
@@ -2889,6 +2992,20 @@ function createViewerModal() {
                                     <div>
                                         <label style="color: #cbd5e0; font-size: 0.9rem; display: block; margin-bottom: 5px;">Altura (cm)</label>
                                         <input type="number" id="manual-altura" value="10" min="0" style="width: 100%; padding: 8px; border-radius: 6px; border: 2px solid #4a5568; background: #2d3748; color: white;">
+                                    </div>
+                                    <div style="grid-column: span 2;">
+                                        <label style="color: #cbd5e0; font-size: 0.9rem; display: block; margin-bottom: 5px;">Nº Indivíduos</label>
+                                        <input type="number" id="manual-n-indiv" value="1" min="1" style="width: 100%; padding: 8px; border-radius: 6px; border: 2px solid #4a5568; background: #2d3748; color: white;">
+                                    </div>
+                                    
+                                    <!-- Biometria (Opcional) -->
+                                    <div>
+                                        <label style="color: #cbd5e0; font-size: 0.9rem; display: block; margin-bottom: 5px;">DAP (cm)</label>
+                                        <input type="number" id="manual-dap" placeholder="-" step="0.1" style="width: 100%; padding: 8px; border-radius: 6px; border: 2px solid #4a5568; background: #2d3748; color: white;">
+                                    </div>
+                                    <div>
+                                        <label style="color: #cbd5e0; font-size: 0.9rem; display: block; margin-bottom: 5px;">Diâm. Copa (m)</label>
+                                        <input type="number" id="manual-diam-copa" placeholder="-" step="0.1" style="width: 100%; padding: 8px; border-radius: 6px; border: 2px solid #4a5568; background: #2d3748; color: white;">
                                     </div>
                                 </div>
 
@@ -3054,12 +3171,30 @@ function loadViewerSpecies() {
                     </div>
                     <div class="viewer-species-detail">
                         <div class="viewer-species-detail-label">Altura</div>
-                        <div class="viewer-species-detail-value">${esp.altura} cm</div>
+                        <div class="viewer-species-detail-value">
+                            ${(esp.altura > 100)
+            ? (esp.altura / 100).toFixed(2) + ' m'
+            : esp.altura + ' cm'}
+                        </div>
                     </div>
                     <div class="viewer-species-detail">
                         <div class="viewer-species-detail-label">Forma</div>
                         <div class="viewer-species-detail-value">${esp.forma_vida}</div>
                     </div>
+                    <div class="viewer-species-detail">
+                        <div class="viewer-species-detail-label">Indivíduos</div>
+                        <div class="viewer-species-detail-value">${esp.numero_individuos || 1}</div>
+                    </div>
+                    ${esp.dap_estimado_cm ? `
+                    <div class="viewer-species-detail">
+                        <div class="viewer-species-detail-label">DAP Est.</div>
+                        <div class="viewer-species-detail-value">${esp.dap_estimado_cm} cm</div>
+                    </div>` : ''}
+                    ${esp.area_copa_estimada_m2 ? `
+                    <div class="viewer-species-detail">
+                        <div class="viewer-species-detail-label">Área Copa</div>
+                        <div class="viewer-species-detail-value">${esp.area_copa_estimada_m2} m²</div>
+                    </div>` : ''}
                 </div>
                 <div class="viewer-species-actions">
                     <button class="viewer-draw-btn" onclick="startDrawCoverageForSpecies(${index})" title="Desenhar áreas de cobertura">📐 Desenhar Área</button>
@@ -3109,6 +3244,11 @@ function loadViewerSpecies() {
                     </div>
                 </div>
                 <div style="margin-bottom: 15px;">
+                    <label style="display: block; color: #cbd5e0; font-size: 0.85rem; margin-bottom: 5px;">Nº Indivíduos</label>
+                    <input type="number" id="viewer-edit-n-indiv-${index}" value="${esp.numero_individuos || 1}" min="1"
+                           style="width: 100%; padding: 10px; background: #1a202c; border: 2px solid #4a5568; border-radius: 6px; color: white; font-size: 1rem;">
+                </div>
+                <div style="margin-bottom: 15px;">
                     <label style="display: block; color: #cbd5e0; font-size: 0.85rem; margin-bottom: 5px;">Forma de Vida</label>
                     <select id="viewer-edit-forma-${index}" 
                             style="width: 100%; padding: 10px; background: #1a202c; border: 2px solid #4a5568; border-radius: 6px; color: white; font-size: 1rem;">
@@ -3118,6 +3258,26 @@ function loadViewerSpecies() {
                         <option value="Trepadeira" ${esp.forma_vida === 'Trepadeira' ? 'selected' : ''}>Trepadeira</option>
                         <option value="Subarbusto" ${esp.forma_vida === 'Subarbusto' ? 'selected' : ''}>Subarbusto</option>
                     </select>
+                    </select>
+                </div>
+                
+                <h4 style="color: #cbd5e0; font-size: 0.9rem; margin: 15px 0 10px 0; border-bottom: 1px solid #4a5568; padding-bottom: 5px;">Biometria (Estimada/Real)</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 15px;">
+                    <div>
+                        <label style="display: block; color: #cbd5e0; font-size: 0.75rem; margin-bottom: 5px;">DAP (cm)</label>
+                        <input type="number" id="viewer-edit-dap-${index}" value="${esp.dap_estimado_cm || ''}" step="0.1" min="0" placeholder="-"
+                               style="width: 100%; padding: 8px; background: #1a202c; border: 2px solid #4a5568; border-radius: 6px; color: white; font-size: 0.9rem;">
+                    </div>
+                    <div>
+                        <label style="display: block; color: #cbd5e0; font-size: 0.75rem; margin-bottom: 5px;">Diâm. Copa (m)</label>
+                        <input type="number" id="viewer-edit-diam-copa-${index}" value="${esp.diametro_copa_m || ''}" step="0.1" min="0" placeholder="-"
+                               style="width: 100%; padding: 8px; background: #1a202c; border: 2px solid #4a5568; border-radius: 6px; color: white; font-size: 0.9rem;">
+                    </div>
+                    <div>
+                        <label style="display: block; color: #cbd5e0; font-size: 0.75rem; margin-bottom: 5px;">Área Copa (m²)</label>
+                        <input type="number" id="viewer-edit-area-copa-${index}" value="${esp.area_copa_estimada_m2 || ''}" step="0.1" min="0" placeholder="-"
+                               style="width: 100%; padding: 8px; background: #1a202c; border: 2px solid #4a5568; border-radius: 6px; color: white; font-size: 0.9rem;">
+                    </div>
                 </div>
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; color: #cbd5e0; font-size: 0.85rem; margin-bottom: 5px;">🔗 Link das Fotos (URL)</label>
@@ -3170,7 +3330,11 @@ async function saveEditSpeciesInViewer(especieIndex) {
     const observacoes = document.getElementById(`viewer-edit-observacoes-${especieIndex}`).value.trim();
     const cobertura = parseInt(document.getElementById(`viewer-edit-cobertura-${especieIndex}`).value) || 0;
     const altura = parseInt(document.getElementById(`viewer-edit-altura-${especieIndex}`).value) || 0;
+    const numero_individuos = parseInt(document.getElementById(`viewer-edit-n-indiv-${especieIndex}`).value) || 1;
     const forma_vida = document.getElementById(`viewer-edit-forma-${especieIndex}`).value;
+    const dap_estimado_cm = parseFloat(document.getElementById(`viewer-edit-dap-${especieIndex}`).value) || null;
+    const diametro_copa_m = parseFloat(document.getElementById(`viewer-edit-diam-copa-${especieIndex}`).value) || null;
+    const area_copa_estimada_m2 = parseFloat(document.getElementById(`viewer-edit-area-copa-${especieIndex}`).value) || null;
     const link_fotos = document.getElementById(`viewer-edit-link-fotos-${especieIndex}`).value.trim();
 
     if (!apelido) {
@@ -3185,7 +3349,11 @@ async function saveEditSpeciesInViewer(especieIndex) {
         observacoes,
         cobertura,
         altura,
+        numero_individuos,
         forma_vida,
+        dap_estimado_cm,
+        diametro_copa_m,
+        area_copa_estimada_m2,
         link_fotos
     };
 
@@ -3957,10 +4125,14 @@ async function saveManualSpecies() {
         const apelidoEl = document.getElementById('manual-apelido');
         const coberturaEl = document.getElementById('manual-cobertura');
         const alturaEl = document.getElementById('manual-altura');
+        const nIndivEl = document.getElementById('manual-n-indiv');
         const formaVidaEl = document.getElementById('manual-forma-vida');
         const generoEl = document.getElementById('manual-genero');
         const familiaEl = document.getElementById('manual-familia');
         const observacoesEl = document.getElementById('manual-observacoes');
+        // Biometria
+        const dapEl = document.getElementById('manual-dap');
+        const diamCopaEl = document.getElementById('manual-diam-copa');
 
         console.log('📋 Verificando elementos do formulário:');
         console.log(`   - manual-apelido: ${apelidoEl ? 'ENCONTRADO' : '❌ NÃO ENCONTRADO'}`);
@@ -3976,10 +4148,15 @@ async function saveManualSpecies() {
         const apelido = apelidoEl.value.trim();
         const cobertura = parseInt(coberturaEl.value);
         const altura = parseInt(alturaEl.value);
+        const numero_individuos = parseInt(nIndivEl.value) || 1;
         const formaVida = formaVidaEl.value;
         const genero = generoEl ? generoEl.value.trim() : '';
         const familia = familiaEl ? familiaEl.value.trim() : '';
         const observacoes = observacoesEl ? observacoesEl.value.trim() : '';
+        // Biometria
+        const dapEstimado = dapEl && dapEl.value ? parseFloat(dapEl.value) : null;
+        const diametroCopa = diamCopaEl && diamCopaEl.value ? parseFloat(diamCopaEl.value) : null;
+        const areaCopa = diametroCopa ? Math.PI * Math.pow(diametroCopa / 2, 2) : null; // Calcular área se diâmetro existe
 
         console.log('📝 Valores lidos do formulário:');
         console.log(`   - Apelido: "${apelido}"`);
@@ -4039,7 +4216,11 @@ async function saveManualSpecies() {
             observacoes: observacoes || '',
             cobertura: cobertura,
             altura: altura,
+            numero_individuos: numero_individuos,
             forma_vida: formaVida,
+            dap_estimado_cm: dapEstimado,
+            diametro_copa_m: diametroCopa,
+            area_copa_estimada_m2: areaCopa ? parseFloat(areaCopa.toFixed(2)) : null,
             indice: result.especies.length + 1
         };
 
@@ -4828,3 +5009,17 @@ window.updateSpeciesCoverageInTables = function (subparcelaId, speciesIndex, per
     // Persistência já é feita automaticamente pelo backend via persistSpeciesArea
     console.log('💾 Dados já persistidos automaticamente no backend');
 };
+
+// Wrapper para recalcular cobertura
+function recalculateCoverageWrapper() {
+    console.log('🔄 Iniciando recálculo de cobertura...');
+
+    if (typeof SVGCoverageDrawer !== 'undefined' && SVGCoverageDrawer.svg) {
+        SVGCoverageDrawer.calculateCoverage();
+    } else {
+        console.error('❌ SVGCoverageDrawer não disponível ou não inicializado');
+        if (typeof showAlert === 'function') {
+            showAlert('error', 'Editor de polígonos não está ativo');
+        }
+    }
+}

@@ -372,6 +372,11 @@ const SpeciesDetailsModal = {
                         </div>
 
                         <div class="form-group">
+                            <label>Número de Indivíduos *</label>
+                            <input type="number" id="edit-numero-individuos" value="${data.numero_individuos !== undefined ? data.numero_individuos : (data.count || 0)}" min="0" required>
+                        </div>
+
+                        <div class="form-group">
                             <label>Gênero</label>
                             <input type="text" id="edit-genero" value="${data.genero || ''}" placeholder="Ex: Paspalum">
                         </div>
@@ -440,6 +445,22 @@ const SpeciesDetailsModal = {
                             <label>Habitat Preferencial</label>
                             <input type="text" id="edit-habitat-preferencial" value="${data.habitat_preferencial || ''}" 
                                    placeholder="Ex: Borda de mata, Campo úmido">
+                        </div>
+                    </div>
+
+                    <h3 style="margin-top: 20px;">📏 Biometria Estimada (IA)</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>DAP Estimado (cm)</label>
+                            <input type="number" id="edit-dap-estimado" value="${data.dap_estimado_cm || ''}" step="0.1" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Diâmetro Copa (m)</label>
+                            <input type="number" id="edit-diametro-copa" value="${data.diametro_copa_m || ''}" step="0.1" min="0">
+                        </div>
+                        <div class="form-group full-width">
+                            <label>Área de Copa Estimada (m²)</label>
+                            <input type="number" id="edit-area-copa" value="${data.area_copa_estimada_m2 || ''}" step="0.1" min="0">
                         </div>
                     </div>
 
@@ -777,6 +798,7 @@ const SpeciesDetailsModal = {
         event.preventDefault();
 
         const apelidoUsuario = document.getElementById('edit-apelido-usuario').value.trim();
+        const numeroIndividuos = parseInt(document.getElementById('edit-numero-individuos').value) || 0;
         const genero = document.getElementById('edit-genero').value.trim();
         const especieNome = document.getElementById('edit-especie').value.trim();
         const familia = document.getElementById('edit-familia').value.trim();
@@ -787,6 +809,11 @@ const SpeciesDetailsModal = {
         const toleranciaSombra = document.getElementById('edit-tolerancia-sombra').value;
         const tipoDispersao = document.getElementById('edit-tipo-dispersao').value;
         const habitatPreferencial = document.getElementById('edit-habitat-preferencial').value.trim();
+
+        // Biometria
+        const dapEstimado = parseFloat(document.getElementById('edit-dap-estimado').value) || null;
+        const diametroCopa = parseFloat(document.getElementById('edit-diametro-copa').value) || null;
+        const areaCopa = parseFloat(document.getElementById('edit-area-copa').value) || null;
 
         if (!apelidoUsuario) {
             showAlert('error', 'Apelido personalizado é obrigatório');
@@ -799,6 +826,7 @@ const SpeciesDetailsModal = {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     apelido_usuario: apelidoUsuario,
+                    numero_individuos: numeroIndividuos,
                     genero,
                     especie: especieNome,
                     familia,
@@ -808,7 +836,12 @@ const SpeciesDetailsModal = {
                     grupo_sucessional: grupoSucessional,
                     tolerancia_sombra: toleranciaSombra,
                     tipo_dispersao: tipoDispersao,
-                    habitat_preferencial: habitatPreferencial
+                    tipo_dispersao: tipoDispersao,
+                    habitat_preferencial: habitatPreferencial,
+                    // Biometria
+                    dap_estimado_cm: dapEstimado,
+                    diametro_copa_m: diametroCopa,
+                    area_copa_estimada_m2: areaCopa
                 })
             });
 
@@ -834,7 +867,12 @@ const SpeciesDetailsModal = {
                             esp.grupo_sucessional = grupoSucessional;
                             esp.tolerancia_sombra = toleranciaSombra;
                             esp.tipo_dispersao = tipoDispersao;
+                            esp.tipo_dispersao = tipoDispersao;
                             esp.habitat_preferencial = habitatPreferencial;
+                            // Biometria
+                            esp.dap_estimado_cm = dapEstimado;
+                            esp.diametro_copa_m = diametroCopa;
+                            esp.area_copa_estimada_m2 = areaCopa;
                         }
                     });
                 });

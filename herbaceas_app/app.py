@@ -373,6 +373,40 @@ def fix_malformed_json(text, json_error):
         # Reconstruir texto
         text = '\n'.join(lines)
     
+    # Caso 3: JSON Truncado Geral (Erro de delimitador ou valor inesperado no fim)
+    # Tentar balancear chaves e colchetes cegamente
+    print("🔧 Tentativa de reparo genérico: balanceamento de chaves/colchetes...")
+    text = text.strip()
+    
+    # Remover vírgula final se houver
+    if text.endswith(','):
+        text = text[:-1]
+        
+    # Fechar string aberta se houver
+    if text.count('"') % 2 != 0:
+        text += '"'
+        
+    # Balancear
+    open_braces = text.count('{')
+    close_braces = text.count('}')
+    open_brackets = text.count('[')
+    close_brackets = text.count(']')
+    
+    # Adicionar fechamentos faltantes na ordem provável (invertida)
+    # Heurística simples: fechar o que estiver aberto
+    # (Isso pode não ser perfeito se a estrutura for complexa, mas ajuda em truncamentos no fim)
+    
+    missing_brackets = open_brackets - close_brackets
+    missing_braces = open_braces - close_braces
+    
+    if missing_brackets > 0 or missing_braces > 0:
+        # Tentar fechar arrays e objetos alternadamente ou em bloco
+        # Geralmente em JSON de lista de objetos: [... { ... 
+        # Precisa fechar } primeiro, depois ]
+        text += '}' * missing_braces
+        text += ']' * missing_brackets
+        print(f"✓ Adicionados {missing_braces} '}}' e {missing_brackets} ']'")
+    
     return text
 
 
@@ -505,6 +539,7 @@ def validate_and_filter_results(analysis_result, template_config=None):
                 'altura': ent.get('altura_m', 0) or ent.get('altura', 0),
                 'forma_vida': _map_entity_type_to_life_form(ent.get('tipo', '')),
                 'observacoes': ent.get('observacoes', ''),
+                'areas': ent.get('areas', []) if ent.get('areas') else ([ent['points']] if 'points' in ent else []),
                 # Campos específicos de paisagem
                 'diametro_copa_m': ent.get('diametro_copa_m'),
                 'dap_estimado_cm': ent.get('dap_estimado_cm'),
@@ -545,35 +580,126 @@ def validate_and_filter_results(analysis_result, template_config=None):
             return analysis_result
     
     print(f"🔍 validate_and_filter_results - INÍCIO")
-    print(f"   Total espécies RECEBIDAS: {len(analysis_result.get('especies', []))}")
-    if analysis_result.get('especies'):
-        print(f"   Lista espécies:")
-        for i, esp in enumerate(analysis_result['especies'][:5], 1):
-            print(f"      {i}. '{esp.get('apelido', 'N/A')}' (cob: {esp.get('cobertura', 0)}%)")
-    print(f"🔍 Parâmetros: include_soil={params.get('include_soil')}, include_litter={params.get('include_litter')}")
-    print(f"🔍 Limites: min={params.get('min_species', 1)}, max={params.get('max_species', 12)}")
+    print(f"   Total espécies RECEBIDAS da IA: {len(analysis_result.get('especies', []))}")
+
+    # 1. AGRUPAMENTO E NORMALIZAÇÃO DE ESPÉCIES
+    # Mapa para agrupar espécies pelo nome normalizado
+    especies_map = {}
     
-    especies_filtradas = []
-    
-    for esp in analysis_result['especies']:
-        apelido = esp.get('apelido', '').lower()
+    # Helper para calcular área de polígono (Shoelace Formula)
+    def calculate_polygon_area(points):
+        if not points or len(points) < 3:
+            return 0
+        area = 0.0
+        for i in range(len(points)):
+            j = (i + 1) % len(points)
+            area += points[i]['x'] * points[j]['y']
+            area -= points[j]['x'] * points[i]['y']
+        return abs(area) / 2.0
+
+    # Área total da imagem (sistema de coordenadas 0-100)
+    TOTAL_IMAGE_AREA = 10000.0  # 100 * 100
+
+    for esp in analysis_result.get('especies', []):
+        apelido_raw = esp.get('apelido', 'Desconhecido')
+        # Normalizar: minúsculo, remover acentos (simples), remover espaços extras
+        import unicodedata
+        nfkd_form = unicodedata.normalize('NFKD', apelido_raw.lower())
+        apelido_norm = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
         
-        # Filtrar solo exposto se não deve ser incluído
+        # Ignorar sufixos de localizacao comuns que a IA inventa
+        for suffix in [' norte', ' sul', ' leste', ' oeste', ' centro', ' canto', ' borda']:
+            if apelido_norm.endswith(suffix):
+                apelido_norm = apelido_norm.replace(suffix, '')
+        
+        apelido_norm = apelido_norm.strip()
+
+        # Filtragem preliminar (solo, serapilheira)
         if not params.get('include_soil', True):
-            if any(termo in apelido for termo in ['solo exposto', 'solo nu', 'bare soil', 'exposed soil']):
-                print(f"  ⊗ Filtrado (solo): {esp.get('apelido')}")
+            if any(termo in apelido_norm for termo in ['solo exposto', 'solo nu', 'bare soil', 'exposed soil']):
                 continue
-        
-        # Filtrar serapilheira se não deve ser incluída
         if not params.get('include_litter', True):
-            if any(termo in apelido for termo in ['serapilheira', 'folhiço', 'litter', 'material morto', 'detritos']):
-                print(f"  ⊗ Filtrado (serapilheira): {esp.get('apelido')}")
+            if any(termo in apelido_norm for termo in ['serapilheira', 'folhico', 'litter', 'material morto']):
                 continue
+
+        # Recuperar ou inicializar entrada no mapa
+        if apelido_norm not in especies_map:
+            especies_map[apelido_norm] = {
+                'apelido': apelido_raw.split(' - ')[0], # Tentar manter nome limpo
+                'genero': esp.get('genero', ''),
+                'familia': esp.get('familia', ''),
+                'observacoes': esp.get('observacoes', ''),
+                'numero_individuos': 0,
+                'areas': [], # Lista de listas de pontos (polígonos)
+                'area_total_pixels': 0.0,
+                # Campos extras
+                'altura': esp.get('altura', 0),
+                'forma_vida': esp.get('forma_vida', 'Erva'),
+                'diametro_copa_m': esp.get('diametro_copa_m'),
+                'dap_estimado_cm': esp.get('dap_estimado_cm'),
+            }
         
-        print(f"  ✓ Aceito: {esp.get('apelido')}")
-        especies_filtradas.append(esp)
+        target = especies_map[apelido_norm]
+        
+        # 1. Somar Indivíduos
+        try:
+            target['numero_individuos'] += int(esp.get('numero_individuos', 1))
+        except:
+            target['numero_individuos'] += 1
+            
+        # 2. Agregar Polígonos
+        # A IA pode retornar 'areas' (lista de poligonos) ou 'points' (um poligono em 'area_shape' as vezes incorreto)
+        # Mas no modo paisagem, esperamos 'areas' dentro da entidade, ou convertemos.
+        # O _convert_entities_to_species infelizmente não traz 'areas' explicitamente no código anterior...
+        # VAMOS CHECAR: na conversão anterior em validate_and_filter_results não copiamos 'areas'.
+        # PRECISAMOS COPIAR 'areas' no bloco anterior de "Modo Paisagem".
+        # Mas assumindo que 'areas' pode estar em 'esp' se trouxermos:
+        poly_list = esp.get('areas', [])
+        if not poly_list and 'points' in esp: # Fallback
+             poly_list = [esp['points']]
+             
+        if poly_list:
+            target['areas'].extend(poly_list)
+            # Somar área geométrica
+            for poly in poly_list:
+                target['area_total_pixels'] += calculate_polygon_area(poly)
+        else:
+            # Se não tem área desenhada, assumimos a cobertura estimada pela IA para calcular uma área fictícia
+            # ou apenas 0 se quisermos ser estritos. Vamos ser estritos para forçar correcao geometrica?
+            # Usuário pediu cobertura baseada em poligonos.
+            pass
+
+        # Manter a observação mais longa (geralmente mais detalhada)
+        if len(esp.get('observacoes', '')) > len(target['observacoes']):
+             target['observacoes'] = esp.get('observacoes', '')
+
+    # Converter mapa de volta para lista
+    especies_filtradas = []
+    index_counter = 1
     
-    print(f"🔍 Após filtragem: {len(especies_filtradas)} espécies")
+    for key, data in especies_map.items():
+        # Calcular cobertura baseada na área geométrica
+        # Se area_total_pixels > 0, usamos. Se não, fallback para 5% (ou 1% para ser menos intrusivo)
+        if data['area_total_pixels'] > 0:
+            calculated_coverage = (data['area_total_pixels'] / TOTAL_IMAGE_AREA) * 100.0
+            # Cap em 100%
+            calculated_coverage = min(100.0, calculated_coverage)
+        else:
+            # Fallback se não tiver poligonos desenhados
+            calculated_coverage = 5.0 
+
+        # Arredondar
+        data['cobertura'] = round(calculated_coverage, 2)
+        
+        # Limpar campos temporários
+        del data['area_total_pixels']
+        
+        data['indice'] = index_counter
+        index_counter += 1
+        
+        especies_filtradas.append(data)
+
+    print(f"🔍 Após agrupamento: {len(especies_filtradas)} espécies únicas")
     
     # Verificar limites de espécies
     max_especies = params.get('max_species', 12)
@@ -643,6 +769,20 @@ def validate_and_filter_results(analysis_result, template_config=None):
     # 🌱 Verificar presença de campos ecológicos
     eco_traits_count = 0
     for esp in especies_filtradas:
+        # Validar número de indivíduos
+        if 'numero_individuos' in esp:
+            try:
+                esp['numero_individuos'] = int(str(esp['numero_individuos']).strip())
+            except:
+                esp['numero_individuos'] = 1
+        elif 'count' in esp:  # Fallback comum de LLMs
+            try:
+                esp['numero_individuos'] = int(str(esp['count']).strip())
+            except:
+                esp['numero_individuos'] = 1
+        else:
+            esp['numero_individuos'] = 1  # Default para 1 indivíduo se não especificado
+
         if esp.get('grupo_sucessional') or esp.get('tolerancia_sombra') or esp.get('tipo_dispersao'):
             eco_traits_count += 1
     if eco_traits_count > 0:
@@ -982,11 +1122,14 @@ def analyze_image_with_gemini(image_path, api_key=None, model_version=None, temp
                 print(f"Tentando modelo Gemini: {model_name}")
                 
                 # Configurar modelo com geração de conteúdo
+                # Configurar modelo com geração de conteúdo
                 generation_config = {
                     "temperature": 0.4,
                     "top_p": 0.95,
                     "top_k": 40,
-                    "max_output_tokens": 8192,  # 🔧 FIX: Aumentado para evitar JSON truncado
+                    # 🔧 FIX: Aumentado drasticamente para evitar JSON truncado em análises detalhadas
+                    # Flash suporta contexto enorme, então podemos usar mais tokens na saída
+                    "max_output_tokens": 65536 if "flash" in model_name else 8192,
                 }
                 
                 # Configurações de segurança mais permissivas para análise de vegetação
@@ -1025,9 +1168,13 @@ def analyze_image_with_gemini(image_path, api_key=None, model_version=None, temp
                     img
                 ])
 
-                # Verificar se houve bloqueio por segurança
+                # Checking finish reason and blocking
+                finish_reason = None
+                if response.candidates:
+                    finish_reason = response.candidates[0].finish_reason
+                    print(f"🏁 Finish Reason: {finish_reason} (1=STOP, 2=MAX_TOKENS, 3=SAFETY, 4=RECITATION)")
+                
                 if not response.candidates or not response.candidates[0].content.parts:
-                    finish_reason = response.candidates[0].finish_reason if response.candidates else None
                     if finish_reason == 2:  # SAFETY
                         raise Exception("Conteúdo bloqueado por filtros de segurança. Tente outra imagem ou modelo.")
                     elif finish_reason == 3:  # RECITATION
@@ -1591,6 +1738,7 @@ def preview_prompt():
     custom_params = data.get('params', {})
     
     try:
+        print(f"🔍 DEBUG PREVIEW - Params received: {custom_params}")
         prompt = build_prompt(template_name, custom_params)
         return jsonify({
             'success': True,
@@ -3402,10 +3550,12 @@ def add_species_with_ai(parcela, subparcela):
                     'especie': '',
                     'familia': esp.get('familia', ''),
                     'observacoes': esp.get('observacoes', ''),
-                    'ocorrencias': 0
+                    'ocorrencias': 0,
+                    'numero_individuos': 0
                 }
 
             analysis_data['especies_unificadas'][apelido]['ocorrencias'] += 1
+            analysis_data['especies_unificadas'][apelido]['numero_individuos'] += esp.get('numero_individuos', 1)
 
         print(f"✓ {len(new_species)} novas espécies adicionadas")
 
@@ -3614,7 +3764,7 @@ def export_excel():
             ["Riqueza de Espécies", len(especies_unificadas)],
             ["Total de Registros", sum(e.get('ocorrencias', 0) for e in especies_unificadas)],
             ["Cobertura Média por Espécie (%)", round(estatisticas.get('cobertura_total', 0) / len(especies_unificadas), 2) if especies_unificadas else 0],
-            ["Altura Média Geral (cm)", round(estatisticas.get('altura_media', 0), 2)],
+            ["Altura Média Geral (m)", round(estatisticas.get('altura_media', 0) / 100, 2)],
             ["Espécie Mais Frequente", max(especies_unificadas, key=lambda e: e.get('ocorrencias', 0)).get('apelido_original', 'N/A') if especies_unificadas else 'N/A'],
         ]
         
@@ -4387,6 +4537,109 @@ def delete_saved_analysis(filename):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/especies/<apelido>', methods=['PUT'])
+def update_species(apelido):
+    """Atualiza dados de uma espécie unificada e propaga para todas as ocorrências"""
+    try:
+        data = request.json
+        print(f"🔄 Recebendo atualização para espécie '{apelido}':", data)
+        
+        if not analysis_data['especies_unificadas']:
+            return jsonify({'error': 'Nenhuma análise carregada'}), 404
+
+        # Encontrar a espécie (suporta estrutura aninhada por parcela ou plana)
+        target_species = None
+        parcela_encontrada = None
+        
+        # Tentar encontrar na estrutura aninhada {parcela: {apelido: data}}
+        for parcela_key, species_dict in analysis_data['especies_unificadas'].items():
+            if isinstance(species_dict, dict) and apelido in species_dict:
+                target_species = species_dict[apelido]
+                parcela_encontrada = parcela_key
+                break
+        
+        # Se não achou, tentar estrutura plana {apelido: data} (legado ou simplificado)
+        if not target_species and apelido in analysis_data['especies_unificadas']:
+             target_species = analysis_data['especies_unificadas'][apelido]
+        
+        if not target_species:
+            return jsonify({'error': 'Espécie não encontrada'}), 404
+
+        # Atualizar dados da espécie unificada
+        # Campos permitidos para atualização
+        fields = [
+            'apelido_usuario', 'genero', 'especie', 'familia', 
+            'observacoes', 'link_fotos', 'numero_individuos',
+            'grupo_sucessional', 'tolerancia_sombra', 'tipo_dispersao', 'habitat_preferencial' # Campos ecológicos
+        ]
+        
+        old_apelido_usuario = target_species.get('apelido_usuario')
+        new_apelido_usuario = data.get('apelido_usuario')
+        renamed = new_apelido_usuario and new_apelido_usuario != old_apelido_usuario
+        
+        # Atualizar campos
+        for field in fields:
+            if field in data:
+                target_species[field] = data[field]
+                
+        # Propagar para todas as ocorrências nas subparcelas
+        count_updated = 0
+        
+        # Iterar sobre todas as parcelas
+        for p_name, p_data in analysis_data['parcelas'].items():
+            subparcelas = p_data.get('subparcelas', {})
+            
+            for sub_id, sub_data in subparcelas.items():
+                especies = sub_data.get('especies', [])
+                
+                for esp in especies:
+                    # Verificar se é a mesma espécie (pelo apelido original ou usuário antigo)
+                    match = (esp.get('apelido') == apelido) or \
+                            (esp.get('apelido_original') == apelido) or \
+                            (esp.get('apelido') == old_apelido_usuario)
+                            
+                    if match:
+                        # Atualizar campos na ocorrência
+                        for field in fields:
+                            if field in data:
+                                esp[field] = data[field]
+                        
+                        # Se foi renomeada, atualizar o apelido principal da ocorrência
+                        if renamed:
+                            esp['apelido'] = new_apelido_usuario
+                            
+                        count_updated += 1
+
+        # Se houve renomeação, precisamos atualizar a chave no dicionário unificado
+        if renamed and parcela_encontrada:
+            # Remover chave antiga e adicionar nova
+            sp_data = analysis_data['especies_unificadas'][parcela_encontrada].pop(apelido)
+            analysis_data['especies_unificadas'][parcela_encontrada][new_apelido_usuario] = sp_data
+            # Atualizar referência de apelido original se necessário? 
+            # Mantemos apelido_original como a chave imutável de rastreio se possível, 
+            # mas aqui a chave do dicionário costuma ser o apelido de exibição.
+            # Vamos assumir que a chave do dicionário deve refletir o apelido_usuario.
+            
+        elif renamed and not parcela_encontrada:
+             # Caso plano
+             sp_data = analysis_data['especies_unificadas'].pop(apelido)
+             analysis_data['especies_unificadas'][new_apelido_usuario] = sp_data
+
+        print(f"✅ Espécie atualizada com sucesso. {count_updated} ocorrências atualizadas.")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Espécie atualizada com sucesso',
+            'updated_occurrences': count_updated
+        })
+
+    except Exception as e:
+        print(f"❌ Erro ao atualizar espécie: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/reference-species', methods=['GET'])
 def get_reference_species():
     """Retorna a lista de espécies de referência"""
@@ -5105,7 +5358,8 @@ def update_especie_global(apelido):
         # Campos permitidos para atualização (incluindo campos ecológicos)
         campos_atualizaveis = [
             'apelido_usuario', 'genero', 'especie', 'familia', 'link_fotos', 'observacoes',
-            'grupo_sucessional', 'tolerancia_sombra', 'tipo_dispersao', 'habitat_preferencial'
+            'grupo_sucessional', 'tolerancia_sombra', 'tipo_dispersao', 'habitat_preferencial',
+            'numero_individuos'
         ]
         
         # Verificar se houve renomeação (apelido_usuario diferente do atual)
@@ -5128,6 +5382,7 @@ def update_especie_global(apelido):
             if 'tolerancia_sombra' in data: esp_unif['tolerancia_sombra'] = data['tolerancia_sombra']
             if 'tipo_dispersao' in data: esp_unif['tipo_dispersao'] = data['tipo_dispersao']
             if 'habitat_preferencial' in data: esp_unif['habitat_preferencial'] = data['habitat_preferencial']
+            if 'numero_individuos' in data: esp_unif['numero_individuos'] = data['numero_individuos']
             
             # Se renomeou, precisamos atualizar a chave no dicionário unificado?
             # Por enquanto, mantemos a chave original (apelido_original) e só mudamos o display name
@@ -5153,6 +5408,7 @@ def update_especie_global(apelido):
                         if 'tolerancia_sombra' in data: esp['tolerancia_sombra'] = data['tolerancia_sombra']
                         if 'tipo_dispersao' in data: esp['tipo_dispersao'] = data['tipo_dispersao']
                         if 'habitat_preferencial' in data: esp['habitat_preferencial'] = data['habitat_preferencial']
+                        if 'numero_individuos' in data: esp['numero_individuos'] = data['numero_individuos']
                         
                         # Se houve renomeação, atualiza o apelido na ocorrência
                         if renomeou:
@@ -5368,10 +5624,10 @@ def export_pdf():
         
         data = request.json
         parcela_nome = data.get('parcela', 'Parcela Sem Nome')
-        especies = data.get('especies', {})
-        chart_images = data.get('chart_images', {})
-        analysis_results = data.get('analysisResults', [])
-        analises_avancadas = data.get('analises_avancadas', {}) or {}
+        especies = data.get('especies') or {}
+        chart_images = data.get('chart_images') or {}
+        analysis_results = data.get('analysisResults') or []
+        analises_avancadas = data.get('analises_avancadas') or {}
         
         # Paleta de Cores Profissional
         C_PRIMARY = colors.HexColor('#2e7d32')    # Verde Floresta
@@ -5402,6 +5658,8 @@ def export_pdf():
                 self.styles.add(ParagraphStyle(name='Caption', parent=self.styles['Normal'], fontSize=8, textColor=colors.gray, alignment=TA_CENTER))
                 self.styles.add(ParagraphStyle(name='SpeciesTitle', parent=self.styles['Heading3'], fontSize=12, textColor=C_TEXT, spaceAfter=2))
                 self.styles.add(ParagraphStyle(name='SpeciesSci', parent=self.styles['Normal'], fontSize=10, textColor=colors.gray, fontName='Helvetica-Oblique'))
+                # 🔧 FIX: Adicionado estilo SubsectionHeader que estava faltando
+                self.styles.add(ParagraphStyle(name='SubsectionHeader', parent=self.styles['Heading3'], fontSize=14, textColor=C_SECONDARY, spaceBefore=10, spaceAfter=5))
 
             def _header_footer(self, canvas, doc):
                 canvas.saveState()
@@ -5562,6 +5820,7 @@ def export_pdf():
                     # Desenhar espécies
                     colors_list = ['#FF5722', '#2196F3', '#FFC107', '#9C27B0', '#E91E63']
                     especies_lista = sub_data.get('especies', [])
+                    if especies_lista is None: especies_lista = []
                     if isinstance(especies_lista, dict): especies_lista = list(especies_lista.values())
                     
                     for idx, esp in enumerate(especies_lista):
@@ -5591,6 +5850,7 @@ def export_pdf():
                     
                     # Tabela de Espécies Mini
                     sub_esp = sub.get('especies', [])
+                    if sub_esp is None: sub_esp = []
                     if isinstance(sub_esp, dict): sub_esp = list(sub_esp.values())
                     
                     tbl_data = [['Espécie', '%']]

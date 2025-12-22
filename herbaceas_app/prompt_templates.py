@@ -25,7 +25,8 @@ PROMPT_TEMPLATES = {
             "standardize_across_subplots": "moderate",  # none, conservative, moderate, aggressive
             "detect_coordinates": True,  # Detectar coordenadas de polígonos das espécies
             "include_polygon_json": True,  # Incluir polígonos no formato JSON de importação
-            "include_eco_traits": False  # Incluir características ecológicas (grupo sucessional, etc.)
+            "include_eco_traits": False,  # Incluir características ecológicas (grupo sucessional, etc.)
+            "count_individuals": True  # Contar número de indivíduos (touceiras, rosetas, etc.)
         }
     },
     
@@ -361,15 +362,8 @@ PROMPT_TEMPLATES = {
             "include_fauna": True,
             "estimate_dbh": True,
             "estimate_crown": True,
-            "special_instructions": [
-                "Identifique ÁRVORES ADULTAS: estime diâmetro de copa (m), altura (m) e DAP aproximado (cm)",
-                "Identifique MUDAS DE REFLORESTAMENTO: avalie sobrevivência, vigor e qualidade do plantio",
-                "Detecte SOLO EXPOSTO: classifique tipo de erosão (laminar, sulcos, ravinas, voçoroca)",
-                "Detecte ANTROPIZAÇÃO: fogo, estradas, trilhas, construções, cercas, desmate, lixo, poluição",
-                "Detecte FAUNA: distinga entre FAUNA NATIVA e PECUÁRIA (bovinos, equinos, suínos)",
-                "Para fauna: registre tipo de evidência (avistamento, rastros, pegadas, tocas, fezes, pastejo)",
-                "Estime IMPACTO na vegetação quando aplicável (pastejo, pisoteio, queima)"
-            ]
+            "include_water": False,
+            "count_individuals": False
         }
     }
 }
@@ -794,6 +788,11 @@ Para cada morfotipo CLARAMENTE visível, forneça:
 
     prompt += """
 
+7. **numero_individuos** - Conte o número aproximado de indivíduos distintos (touceiras, rosetas ou plantas isoladas) visíveis no quadrado
+   - ⚠️ **NÃO confunda com índice/ID!** Queremos a QUANTIDADE (ex: 5, 12, 1).
+   - Se for uma touceira grande, conte como 1
+   - Se for um tapete contínuo impossível de separar, estime 1 ou use 0 se não aplicável
+
 6. **altura** - Altura média em cm (considere o quadrado de 1x1m como referência)
 
 7. **forma_vida**: "Erva", "Arbusto", "Subarbusto", "Plântula", "Liana", "Trepadeira", ou "-" (para solo/serapilheira)
@@ -1129,66 +1128,116 @@ Analise esta imagem aérea/drone de uma área de paisagem para identificar e map
    - Use apelidos: "Bovinos em Pastejo", "Trilha de Gado", "Área Pisoteada"
 """
 
+    if params.get('include_water', False):
+        prompt += """
+💧 **CORPOS D'ÁGUA**
+   - Identifique: rios, riachos, lagos, lagoas, represas, áreas alagadas
+   - Classifique: tipo (lêntico/lótico), turbidez (clara/turva/barrenta)
+   - Avalie: presença de mata ciliar (preservada/degradada/ausente)
+   - Use apelidos: "Rio com Mata Ciliar", "Lagoa Artificial", "Área Alagada Sazonal"
+"""
+
+    if params.get('count_individuals', False):
+        prompt += """
+🔢 **CONTAGEM DE INDIVÍDUOS**
+   - Para cada entidade biológica (árvores, animais, mudas), forneça uma CONTAGEM ESTIMADA
+   - Se for um indivíduo isolado: contagem = 1
+   - Se for um grupo/mancha: estime o número de indivíduos visíveis
+   - Adicione o campo "contagem" (número inteiro) no JSON para cada entidade
+"""
+
+    # Instruções de Geometria (CRÍTICO)
+    prompt += """
+📐 **INSTRUÇÕES DE GEOMETRIA E FORMAS (CRÍTICO):**
+
+1. **Polígonos de Entidades ("areas"):**
+   - ❌ **PROIBIDO** usar retângulos simples ou quadrados de 4 pontos (exceto para casas/estruturas).
+   - ✅ **OBRIGATÓRIO** usar polígonos irregulares e detalhados (Mínimo 8-10 pontos).
+   - 🎯 Siga o contorno exato da vegetação/entidade. Não faça caixas delimitadoras.
+   - Se a entidade for fragmentada, use múltiplos polígonos.
+
+2. **Polígono de Área Total ("area_shape"):**
+   - ❌ NÃO desenhe um quadrado pequeno num canto.
+   - ✅ **OBRIGATÓRIO**: Assuma que a análise cobre TODA a imagem.
+   - Use sempre: {"points": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}]}
+"""
+
+
     # Instruções de formato JSON
     prompt += """
 
 📐 **FORMATO DE RESPOSTA (JSON):**
 
 Retorne um objeto JSON com o array "entidades" contendo todos os elementos detectados:
+"""
 
-{
-  "entidades": [
-    {
-      "indice": 1,
-      "tipo": "arvore",  // arvore, muda, solo, erosao, antropico, fauna_nativa, pecuaria
-      "apelido": "Árvore Copa Ampla",
-      "especie": "",  // Se identificável
-      "familia": "",  // Se identificável
-      "observacoes": "Descrição detalhada das características visuais",
-      "cobertura": 5,  // % da área da imagem
-      "areas": [[x1,y1], [x2,y2], ...],  // Polígono em % (0-100)
-      
-      // CAMPOS ESPECÍFICOS POR TIPO:
-      
-      // Para arvore:
-      "diametro_copa_m": 8.5,
-      "altura_m": 12,
-      "dap_estimado_cm": 35,
-      "vigor": "bom",
-      
-      // Para muda:
-      "sobrevivencia": "viva",  // viva, morta, estressada
-      "vigor": "bom",
-      "altura_cm": 80,
-      "qualidade_plantio": "adequada",
-      "quantidade_estimada": 25,
-      
-      // Para solo/erosao:
-      "tipo_erosao": "sulcos",  // laminar, sulcos, ravinas, vocoroca
-      "severidade": "moderada",  // leve, moderada, severa
-      "causa_provavel": "escoamento superficial",
-      
-      // Para antropico:
-      "tipo_antropico": "fogo",  // fogo, estrada, trilha, construcao, cerca, desmate, lixo, poluicao
-      "intensidade": "alta",
-      "impacto_vegetacao": "severo",
-      "data_aproximada": "recente",  // recente, antigo, em recuperacao
-      
-      // Para fauna_nativa ou pecuaria:
-      "tipo_animal": "bovino",  // ou espécie nativa
-      "tipo_evidencia": "avistamento",  // avistamento, rastro, pegada, toca, fezes, pastejo, trilha
-      "quantidade_estimada": 5,
-      "impacto_vegetacao": "moderado"
-    }
-  ],
-  "area_shape": {
-    "points": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}]
-  },
-  "entity_shapes": {
-    "0": [{"points": [{"x": 10, "y": 15}, {"x": 30, "y": 15}, {"x": 30, "y": 40}, {"x": 10, "y": 40}]}]
-  }
-}
+    # Instruções de formato JSON dinâmico
+    json_fields = []
+    
+    # Campos comuns
+    json_fields.append('      "indice": 1,')
+    json_fields.append('      "tipo": "arvore",')
+    json_fields.append('      "apelido": "Árvore Copa Ampla",')
+    json_fields.append('      "especie": "",')
+    json_fields.append('      "familia": "",')
+    json_fields.append('      "observacoes": "Descrição visual",')
+    if params.get('count_individuals', False):
+        json_fields.append('      "numero_individuos": 5,  // QUANTIDADE TOTAL de plantas deste morfotipo (NÃO é ID!)')
+    json_fields.append('      "cobertura": 5,')
+    
+    # Campos específicos dinâmicos
+    specific_fields = []
+    
+    if params.get('include_trees', True):
+        specific_fields.append('      // Para arvore:')
+        specific_fields.append('      "diametro_copa_m": 8.5,')
+        specific_fields.append('      "area_copa_estimada_m2": 56.7,')
+        specific_fields.append('      "altura_m": 12,')
+        specific_fields.append('      "dap_estimado_cm": 35,')
+        specific_fields.append('      "vigor": "bom",')
+        
+    if params.get('include_seedlings', True):
+        specific_fields.append('      // Para muda:')
+        specific_fields.append('      "sobrevivencia": "viva",')
+        specific_fields.append('      "vigor": "bom",')
+        specific_fields.append('      "altura_cm": 80,')
+        specific_fields.append('      "qualidade_plantio": "adequada",')
+        
+    if params.get('include_erosion', True):
+        specific_fields.append('      // Para solo/erosao:')
+        specific_fields.append('      "tipo_erosao": "sulcos",')
+        specific_fields.append('      "severidade": "moderada",')
+        
+    if params.get('include_anthropic', True):
+        specific_fields.append('      // Para antropico:')
+        specific_fields.append('      "tipo_antropico": "fogo",')
+        specific_fields.append('      "intensidade": "alta",')
+        
+    if params.get('include_fauna', True):
+        specific_fields.append('      // Para fauna_nativa ou pecuaria:')
+        specific_fields.append('      "tipo_animal": "bovino",')
+        specific_fields.append('      "tipo_evidencia": "avistamento",')
+        specific_fields.append('      "quantidade_estimada": 5,')
+        
+    # Construir o JSON de exemplo
+    json_example = "{\n  \"entidades\": [\n    {\n"
+    json_example += "\n".join(json_fields) + "\n"
+    json_example += '      "areas": [[{"x":45,"y":20}, {"x":55,"y":18}, {"x":60,"y":40}, {"x":40,"y":38}]],\n'
+    
+    if specific_fields:
+        json_example += "\n" + "\n".join(specific_fields) + "\n"
+        
+    json_example += "    }\n  ],\n"
+    json_example += '  "area_shape": {"points": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}]}\n'
+    json_example += "}"
 
+    prompt += f"""
+📐 **FORMATO DE RESPOSTA (JSON):**
+
+Retorne um objeto JSON com o array "entidades" contendo todos os elementos detectados.
+Exemplo de estrutura esperada:
+
+{json_example}
 """
 
     # Instruções especiais do template
@@ -1202,10 +1251,17 @@ Retorne um objeto JSON com o array "entidades" contendo todos os elementos detec
 
 ⚠️ **REGRAS CRÍTICAS:**
 - Identifique entre {params.get('min_species', 1)} e {params.get('max_species', 30)} entidades
-- SEMPRE distinga FAUNA NATIVA de PECUÁRIA
 - Use apelidos descritivos e específicos
-- Forneça coordenadas de polígono (0-100%) para cada entidade
-- Estime medidas em unidades métricas (m, cm)
+- ⚠️ **REGRA DE AGRUPAMENTO (CRÍTICA)**:
+  - SE detectar vários indivíduos da MESMA ESPÉCIE/TIPO:
+  - ❌ NÃO crie entradas separadas por localização (ex: "ipe norte", "ipe sul")
+  - ✅ CRIE APENAS UMA entrada JSON para essa espécie (ex: "Ipe Amarelo")
+  - ✅ SOME todos os indivíduos em "numero_individuos"
+  - ✅ Inclua TODOS os polígonos na lista "areas" dessa única entrada
+  - Exemplo correto: Uma entrada "Ipe", numero_individuos=5, areas=[5 polígonos]
+- Use "area_shape": {{"points":[{{"x":0,"y":0}},{{"x":100,"y":0}},{{"x":100,"y":100}},{{"x":0,"y":100}}]}}
+- Limite as coordenadas a 1 casa decimal (ex: 55.5) ou inteiros
+- Mantenha o JSON compacto e válido
 - NÃO deixe campos obrigatórios vazios
 - Retorne APENAS JSON válido sem marcadores markdown
 
