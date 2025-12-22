@@ -1754,6 +1754,7 @@ def save_custom_template():
     try:
         data = request.get_json()
         template_name = data.get('name')
+        template_description = data.get('description', '')
         template_params = data.get('params', {})
         template_prompt = data.get('prompt', '')
         
@@ -1771,6 +1772,7 @@ def save_custom_template():
         # Preparar dados do template
         template_data = {
             'name': template_name,
+            'description': template_description,
             'params': template_params,
             'prompt': template_prompt,
             'created_at': datetime.now().isoformat(),

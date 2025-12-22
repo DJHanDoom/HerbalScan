@@ -4808,78 +4808,238 @@ async function exportToPDF() {
 
     try {
         btn.disabled = true;
-        btn.textContent = '🔄 Gerando PDF profissional...';
+        btn.textContent = '🔄 Gerando PDF WebView...';
+        showNotification('📄 Renderizando relatório...', 'info');
 
-        showNotification('📄 Gerando relatório PDF otimizado...', 'info');
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pageWidth = 210;
+        const pageHeight = 297;
+        const margin = 10;
+        const contentWidth = pageWidth - (2 * margin);
+        let yOffset = margin;
 
-        // Coletar dados de análises avançadas e gráficos
-        let analises_avancadas = {};
-        let chart_images = {};
+        // --- HELPER: Adicionar imagem ao PDF com paginação automática ---
+        async function addImageToPdf(element, title = null) {
+            if (!element) return;
 
-        if (typeof AdvancedAnalytics !== 'undefined') {
-            // Coletar dados de análise
-            if (typeof AdvancedAnalytics.getExportData === 'function') {
-                try {
-                    analises_avancadas = AdvancedAnalytics.getExportData();
-                    console.log('✅ Dados de análises avançadas coletados para PDF');
-                } catch (e) {
-                    console.warn('⚠️ Não foi possível coletar análises avançadas:', e.message);
-                }
+            // Garantir que Charts estejam visíveis
+            element.querySelectorAll('canvas').forEach(c => {
+                c.style.maxWidth = '100%';
+                c.style.height = 'auto';
+            });
+
+            const canvas = await html2canvas(element, {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff',
+                windowWidth: 800
+            });
+
+            const imgData = canvas.toDataURL('image/jpeg', 0.85);
+            const imgWidth = contentWidth;
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+            // Verificar se precisa de nova página
+            if (yOffset + imgHeight > pageHeight - margin) {
+                pdf.addPage();
+                yOffset = margin;
             }
 
-            // Coletar imagens dos gráficos
-            if (typeof AdvancedAnalytics.getChartsImages === 'function') {
-                try {
-                    chart_images = AdvancedAnalytics.getChartsImages();
-                    console.log('✅ Imagens dos gráficos coletadas para PDF');
-                } catch (e) {
-                    console.warn('⚠️ Não foi possível coletar imagens dos gráficos:', e.message);
-                }
+            // Título da seção
+            if (title) {
+                pdf.setFontSize(14);
+                pdf.setTextColor(46, 125, 50); // Verde floresta
+                pdf.text(title, margin, yOffset);
+                yOffset += 8;
             }
+
+            pdf.addImage(imgData, 'JPEG', margin, yOffset, imgWidth, imgHeight);
+            yOffset += imgHeight + 10;
         }
 
-        // Preparar dados para enviar ao backend
-        const pdfData = {
-            parcela: appState.parcelaNome,
-            especies: appState.especies || {},
-            analytics: {
-                diversity: analises_avancadas.diversity?.shannon || 0,
-                richness: analises_avancadas.diversity?.richness || 0,
-                eveness: analises_avancadas.diversity?.evenness || 0,
-                simpson: analises_avancadas.diversity?.simpson || 0
-            },
-            analises_avancadas: analises_avancadas,
-            chart_images: chart_images,
-            analysisResults: appState.analysisResults || [] // Já deve incluir area_shapes se foram carregados/salvos
-        };
+        // ============================
+        // 1. CAPA
+        // ============================
+        pdf.setFillColor(46, 125, 50);
+        pdf.rect(0, 0, pageWidth, 80, 'F');
 
-        console.log('📦 Enviando dados para gerar PDF:', pdfData);
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFontSize(28);
+        pdf.text('RELATÓRIO DE ANÁLISE', pageWidth / 2, 35, { align: 'center' });
+        pdf.setFontSize(20);
+        pdf.text('AMBIENTAL', pageWidth / 2, 50, { align: 'center' });
 
-        // Enviar para backend
-        const response = await fetch('/export_pdf', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(pdfData)
+        pdf.setFontSize(12);
+        pdf.text(`Parcela: ${appState.parcelaNome}`, pageWidth / 2, 70, { align: 'center' });
+
+        // Métricas Chave
+        yOffset = 100;
+        pdf.setTextColor(66, 66, 66);
+        pdf.setFontSize(12);
+
+        const metricas = [
+            `📊 Subparcelas: ${appState.analysisResults?.length || 0}`,
+            `🌿 Espécies: ${Object.keys(appState.especies || {}).length}`,
+            `📅 Gerado em: ${new Date().toLocaleDateString('pt-BR')}`
+        ];
+        metricas.forEach(m => {
+            pdf.text(m, margin, yOffset);
+            yOffset += 8;
         });
 
-        if (!response.ok) {
-            throw new Error(`Erro HTTP ${response.status}: ${await response.text()}`);
+        // Índices de diversidade
+        if (typeof AdvancedAnalytics !== 'undefined' && AdvancedAnalytics.data) {
+            const shannon = AdvancedAnalytics.calculateShannonDiversity?.() || 0;
+            const evenness = AdvancedAnalytics.calculateEveness?.() || 0;
+            yOffset += 10;
+            pdf.setFontSize(14);
+            pdf.setTextColor(46, 125, 50);
+            pdf.text('Índices Ecológicos', margin, yOffset);
+            yOffset += 8;
+            pdf.setFontSize(11);
+            pdf.setTextColor(66, 66, 66);
+            pdf.text(`Shannon (H'): ${shannon.toFixed(3)}`, margin, yOffset);
+            yOffset += 6;
+            pdf.text(`Equitabilidade (J'): ${evenness.toFixed(3)}`, margin, yOffset);
         }
 
-        // Download do arquivo
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${appState.parcelaNome}_relatorio_profissional.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+        pdf.addPage();
+        yOffset = margin;
 
-        showNotification('✅ PDF profissional exportado com sucesso!', 'success');
+        // ============================
+        // 2. DASHBOARD ANALYTICS (HTML REAL)
+        // ============================
+        const analyticsSection = document.getElementById('advanced-analytics-section');
+        if (analyticsSection) {
+            // Ativar TODAS as abas temporariamente para captura
+            const allTabContents = analyticsSection.querySelectorAll('.analytics-tab-content');
+            const originalStates = [];
+
+            allTabContents.forEach(content => {
+                originalStates.push(content.style.display);
+                content.style.display = 'block'; // Mostrar todas
+                content.classList.add('active');
+            });
+
+            // Capturar cada seção individualmente para melhor qualidade
+            const sections = analyticsSection.querySelectorAll('.analytics-section, .analytics-grid, .analytics-card');
+
+            for (const section of sections) {
+                if (section.offsetHeight > 50) { // Só processar seções com conteúdo
+                    const sectionTitle = section.querySelector('h3')?.textContent || null;
+                    await addImageToPdf(section, sectionTitle);
+                }
+            }
+
+            // Restaurar estado original
+            allTabContents.forEach((content, i) => {
+                content.style.display = originalStates[i];
+                if (originalStates[i] !== 'block') {
+                    content.classList.remove('active');
+                }
+            });
+        }
+
+        // ============================
+        // 3. SUBPARCELAS (Detalhes)
+        // ============================
+        pdf.addPage();
+        yOffset = margin;
+        pdf.setFontSize(18);
+        pdf.setTextColor(46, 125, 50);
+        pdf.text('Detalhamento por Subparcela', margin, yOffset);
+        yOffset += 15;
+
+        for (const result of appState.analysisResults || []) {
+            // Verificar espaço
+            if (yOffset > pageHeight - 60) {
+                pdf.addPage();
+                yOffset = margin;
+            }
+
+            // Título da subparcela
+            pdf.setFontSize(14);
+            pdf.setTextColor(46, 125, 50);
+            pdf.text(`Subparcela ${result.subparcela}`, margin, yOffset);
+            yOffset += 8;
+
+            // Tabela de espécies
+            const especies = result.especies || [];
+            if (especies.length > 0) {
+                pdf.setFontSize(9);
+                pdf.setTextColor(66, 66, 66);
+
+                // Header
+                pdf.setFont(undefined, 'bold');
+                pdf.text('Espécie', margin, yOffset);
+                pdf.text('Cobertura', margin + 60, yOffset);
+                pdf.text('Altura', margin + 90, yOffset);
+                pdf.text('Forma Vida', margin + 115, yOffset);
+                yOffset += 5;
+
+                // Linha
+                pdf.setDrawColor(200, 200, 200);
+                pdf.line(margin, yOffset, pageWidth - margin, yOffset);
+                yOffset += 4;
+
+                pdf.setFont(undefined, 'normal');
+                especies.forEach(esp => {
+                    if (yOffset > pageHeight - 20) {
+                        pdf.addPage();
+                        yOffset = margin;
+                    }
+                    const apelido = (esp.apelido || 'N/A').substring(0, 25);
+                    pdf.text(apelido, margin, yOffset);
+                    pdf.text(`${parseFloat(esp.cobertura || 0).toFixed(1)}%`, margin + 60, yOffset);
+                    pdf.text(`${parseFloat(esp.altura || 0).toFixed(0)}cm`, margin + 90, yOffset);
+                    pdf.text(esp.forma_vida || '-', margin + 115, yOffset);
+                    yOffset += 5;
+                });
+            }
+
+            yOffset += 10;
+        }
+
+        // ============================
+        // 4. CATÁLOGO DE ESPÉCIES
+        // ============================
+        pdf.addPage();
+        yOffset = margin;
+        pdf.setFontSize(18);
+        pdf.setTextColor(46, 125, 50);
+        pdf.text('Catálogo de Espécies', margin, yOffset);
+        yOffset += 12;
+
+        pdf.setFontSize(10);
+        pdf.setTextColor(66, 66, 66);
+
+        Object.entries(appState.especies || {}).forEach(([key, esp]) => {
+            if (yOffset > pageHeight - 25) {
+                pdf.addPage();
+                yOffset = margin;
+            }
+
+            pdf.setFont(undefined, 'bold');
+            pdf.text(esp.apelido_usuario || key, margin, yOffset);
+            yOffset += 5;
+
+            pdf.setFont(undefined, 'italic');
+            const nomeCi = `${esp.genero || ''} ${esp.especie || ''}`.trim() || 'Não identificada';
+            pdf.text(nomeCi, margin, yOffset);
+            yOffset += 5;
+
+            pdf.setFont(undefined, 'normal');
+            pdf.text(`Família: ${esp.familia || '-'} | Ocorrências: ${esp.ocorrencias || 0}`, margin, yOffset);
+            yOffset += 8;
+        });
+
+        // ============================
+        // DOWNLOAD
+        // ============================
+        pdf.save(`${appState.parcelaNome}_relatorio_completo.pdf`);
+        showNotification('✅ PDF exportado com sucesso!', 'success');
 
     } catch (error) {
         console.error('Erro ao exportar PDF:', error);

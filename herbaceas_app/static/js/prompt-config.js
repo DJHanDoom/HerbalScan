@@ -35,7 +35,9 @@ const PromptConfig = {
                         custom: true,
                         filename: t.filename,
                         created_at: t.created_at,
-                        params: t.params
+                        params: t.params,
+                        // Extrair analysis_mode dos params para exibir badge de drone
+                        analysis_mode: t.params?.analysis_mode || 'herbaceous'
                     });
                 });
             }

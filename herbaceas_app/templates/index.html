@@ -158,7 +158,14 @@
 
         <!-- Seção 5: Análises Avançadas -->
         <section class="card" id="analytics-section" style="display: none;">
-            <h2>5. Análises Avançadas</h2>
+            <div
+                style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <h2 style="margin: 0;">5. Análises Avançadas</h2>
+                <button id="refresh-analytics-btn" class="btn btn-info" onclick="appState.refreshUI()"
+                    style="flex-shrink: 0;">
+                    🔄 Atualizar Análises
+                </button>
+            </div>
             <div id="advanced-analytics-section">
                 <!-- Análises ecológicas e fitossociológicas serão carregadas aqui -->
             </div>

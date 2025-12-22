@@ -4,6 +4,20 @@
 // Baseado na análise em ANALISE_METODOS_CANVAS.md
 // Usa SVG overlay com viewBox para sincronização automática
 // ============================================================
+//
+// 📏 SISTEMA DE COORDENADAS:
+// - IA retorna coordenadas em PORCENTAGEM (0-100) relativas à imagem
+//   x: 0.00 (esquerda) → 100.00 (direita)
+//   y: 0.00 (topo) → 100.00 (fundo)
+//
+// - Este módulo CONVERTE para PIXELS ABSOLUTOS usando:
+//   pixelX = (percentX / 100) * image.naturalWidth
+//   pixelY = (percentY / 100) * image.naturalHeight
+//
+// - O SVG viewBox é definido como "0 0 {naturalWidth} {naturalHeight}"
+//   para que coordenadas em pixels correspondam diretamente à imagem
+//
+// ============================================================
 
 const SVGCoverageDrawer = {
     // Estado
@@ -1008,20 +1022,34 @@ const SVGCoverageDrawer = {
         const imgHeight = this.image?.naturalHeight || 100;
 
         // Helper para converter percentual para pixel se necessário
-        const convertPointsIfNeeded = (points) => {
+        // SISTEMA DE COORDENADAS:
+        // - IA retorna: 0-100 (porcentagem da imagem)
+        // - SVG usa: 0-naturalWidth/Height (pixels da imagem original)
+        const convertPointsIfNeeded = (points, sourceName = 'unknown') => {
             if (!points || points.length === 0) return points;
 
             const maxX = Math.max(...points.map(p => p.x));
             const maxY = Math.max(...points.map(p => p.y));
+            const minX = Math.min(...points.map(p => p.x));
+            const minY = Math.min(...points.map(p => p.y));
+
+            console.log(`  📏 [${sourceName}] Analisando ${points.length} pontos:`);
+            console.log(`     Range X: ${minX.toFixed(2)} - ${maxX.toFixed(2)}`);
+            console.log(`     Range Y: ${minY.toFixed(2)} - ${maxY.toFixed(2)}`);
+            console.log(`     Imagem: ${imgWidth}x${imgHeight}px`);
 
             // Se coordenadas estão em 0-100, escalar para dimensões da imagem
             if (maxX <= 100 && maxY <= 100 && (imgWidth > 100 || imgHeight > 100)) {
-                console.log('  🔄 Convertendo coordenadas de % para px');
-                return points.map(p => ({
+                console.log(`  🔄 [${sourceName}] Convertendo % → px (fator: ${imgWidth / 100}x, ${imgHeight / 100}x)`);
+                const converted = points.map(p => ({
                     x: (p.x / 100) * imgWidth,
                     y: (p.y / 100) * imgHeight
                 }));
+                console.log(`     Primeiro ponto: (${points[0].x.toFixed(2)}%, ${points[0].y.toFixed(2)}%) → (${converted[0].x.toFixed(0)}px, ${converted[0].y.toFixed(0)}px)`);
+                return converted;
             }
+
+            console.log(`  ✅ [${sourceName}] Coordenadas já estão em pixels`);
             return points;
         };
 
@@ -1029,7 +1057,7 @@ const SVGCoverageDrawer = {
         if (this.currentSubparcela.area_shape) {
             let points = this.currentSubparcela.area_shape.points;
             if (points) {
-                points = convertPointsIfNeeded(points);
+                points = convertPointsIfNeeded(points, 'area_shape');
                 this.subparcelaPolygon = { points: points };
                 console.log('  ✅ Área da subparcela carregada');
             }
@@ -1040,8 +1068,8 @@ const SVGCoverageDrawer = {
             this.currentSubparcela.especies.forEach((esp, index) => {
                 if (esp.area_shapes && Array.isArray(esp.area_shapes)) {
                     // Deep copy e conversão para cada polígono
-                    const processedShapes = esp.area_shapes.map(shape => ({
-                        points: convertPointsIfNeeded([...shape.points])
+                    const processedShapes = esp.area_shapes.map((shape, shapeIdx) => ({
+                        points: convertPointsIfNeeded([...shape.points], `especie_${index}_shape_${shapeIdx}`)
                     }));
 
                     this.speciesPolygons[index] = processedShapes;
@@ -1095,39 +1123,78 @@ const SVGCoverageDrawer = {
         const polygons = this.speciesPolygons[speciesIndex];
         if (!polygons || polygons.length === 0) return 0;
 
-        // Usar Monte Carlo para calcular união
-        const samples = 10000;
-        let insideCount = 0;
+        // Calculate total area using deterministic Shoelace formula
+        // Sum the area of all polygons for this species
+        let totalArea = 0;
 
-        // Bounding box
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
         polygons.forEach(polyData => {
-            polyData.points.forEach(p => {
-                minX = Math.min(minX, p.x);
-                maxX = Math.max(maxX, p.x);
-                minY = Math.min(minY, p.y);
-                maxY = Math.max(maxY, p.y);
-            });
+            if (polyData.points && polyData.points.length >= 3) {
+                totalArea += this.calculatePolygonArea(polyData.points);
+            }
         });
 
-        // Amostrar pontos
-        for (let i = 0; i < samples; i++) {
-            const point = {
-                x: minX + Math.random() * (maxX - minX),
-                y: minY + Math.random() * (maxY - minY)
-            };
+        return totalArea;
+    },
 
-            // Está dentro de pelo menos um polígono?
-            for (let polyData of polygons) {
-                if (this.pointInPolygon(point, polyData.points)) {
-                    insideCount++;
-                    break;
+    // Sutherland-Hodgman polygon clipping algorithm
+    clipPolygon(subjectPolygon, clipPolygon) {
+        if (!subjectPolygon || subjectPolygon.length < 3) return [];
+        if (!clipPolygon || clipPolygon.length < 3) return [];
+
+        let outputList = [...subjectPolygon];
+
+        for (let i = 0; i < clipPolygon.length; i++) {
+            if (outputList.length === 0) return [];
+
+            const inputList = [...outputList];
+            outputList = [];
+
+            const edgeStart = clipPolygon[i];
+            const edgeEnd = clipPolygon[(i + 1) % clipPolygon.length];
+
+            for (let j = 0; j < inputList.length; j++) {
+                const current = inputList[j];
+                const previous = inputList[(j + inputList.length - 1) % inputList.length];
+
+                const currentInside = this.isPointOnLeft(current, edgeStart, edgeEnd);
+                const previousInside = this.isPointOnLeft(previous, edgeStart, edgeEnd);
+
+                if (currentInside) {
+                    if (!previousInside) {
+                        const intersection = this.lineIntersection(previous, current, edgeStart, edgeEnd);
+                        if (intersection) outputList.push(intersection);
+                    }
+                    outputList.push(current);
+                } else if (previousInside) {
+                    const intersection = this.lineIntersection(previous, current, edgeStart, edgeEnd);
+                    if (intersection) outputList.push(intersection);
                 }
             }
         }
 
-        const boundingBoxArea = (maxX - minX) * (maxY - minY);
-        return boundingBoxArea * (insideCount / samples);
+        return outputList;
+    },
+
+    // Check if point is on left side of directed edge (inside the clip polygon)
+    isPointOnLeft(point, edgeStart, edgeEnd) {
+        return ((edgeEnd.x - edgeStart.x) * (point.y - edgeStart.y) -
+            (edgeEnd.y - edgeStart.y) * (point.x - edgeStart.x)) >= 0;
+    },
+
+    // Find intersection of two line segments
+    lineIntersection(p1, p2, p3, p4) {
+        const x1 = p1.x, y1 = p1.y, x2 = p2.x, y2 = p2.y;
+        const x3 = p3.x, y3 = p3.y, x4 = p4.x, y4 = p4.y;
+
+        const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+        if (Math.abs(denom) < 1e-10) return null;
+
+        const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+
+        return {
+            x: x1 + t * (x2 - x1),
+            y: y1 + t * (y2 - y1)
+        };
     },
 
     calculateCoveragePercentage(speciesIndex) {
@@ -1142,48 +1209,23 @@ const SVGCoverageDrawer = {
         const polygons = this.speciesPolygons[speciesIndex];
         if (!polygons || polygons.length === 0) return 0;
 
-        // Calcular interseção com área total usando Monte Carlo
-        const samples = 10000;
-        let insideCount = 0;
-
         const totalPolygon = this.subparcelaPolygon.points;
 
-        // Bounding box
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        // Calculate total species coverage using deterministic polygon clipping
+        // For each species polygon, clip it to the total area and sum the areas
+        let totalSpeciesArea = 0;
+
         polygons.forEach(polyData => {
-            polyData.points.forEach(p => {
-                minX = Math.min(minX, p.x);
-                maxX = Math.max(maxX, p.x);
-                minY = Math.min(minY, p.y);
-                maxY = Math.max(maxY, p.y);
-            });
+            // Clip species polygon to the total area polygon
+            const clippedPolygon = this.clipPolygon(polyData.points, totalPolygon);
+
+            if (clippedPolygon && clippedPolygon.length >= 3) {
+                const clippedArea = this.calculatePolygonArea(clippedPolygon);
+                totalSpeciesArea += clippedArea;
+            }
         });
 
-        for (let i = 0; i < samples; i++) {
-            const point = {
-                x: minX + Math.random() * (maxX - minX),
-                y: minY + Math.random() * (maxY - minY)
-            };
-
-            // Está dentro de pelo menos um polígono da espécie?
-            let inSpecies = false;
-            for (let polyData of polygons) {
-                if (this.pointInPolygon(point, polyData.points)) {
-                    inSpecies = true;
-                    break;
-                }
-            }
-
-            // E dentro da área total?
-            if (inSpecies && this.pointInPolygon(point, totalPolygon)) {
-                insideCount++;
-            }
-        }
-
-        const boundingBoxArea = (maxX - minX) * (maxY - minY);
-        const intersectionArea = boundingBoxArea * (insideCount / samples);
-
-        const percentage = (intersectionArea / totalArea) * 100;
+        const percentage = (totalSpeciesArea / totalArea) * 100;
         return Math.min(100, Math.max(0, percentage));
     },
 
@@ -1537,19 +1579,7 @@ const SVGCoverageDrawer = {
         console.log(`🔄 Recálculo concluído: ${updatedCount} espécies atualizadas`);
     },
 
-    calculatePolygonArea(vertices) {
-        let total = 0;
-        for (let i = 0, l = vertices.length; i < l; i++) {
-            const addX = vertices[i].x;
-            const addY = vertices[i == vertices.length - 1 ? 0 : i + 1].y;
-            const subX = vertices[i == vertices.length - 1 ? 0 : i + 1].x;
-            const subY = vertices[i].y;
 
-            total += (addX * addY * 0.5);
-            total -= (subX * subY * 0.5);
-        }
-        return Math.abs(total);
-    },
 
     destroy() {
         if (this.svg) {

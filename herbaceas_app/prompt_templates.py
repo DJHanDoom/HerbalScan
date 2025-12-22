@@ -798,38 +798,51 @@ Para cada morfotipo CLARAMENTE visível, forneça:
 7. **forma_vida**: "Erva", "Arbusto", "Subarbusto", "Plântula", "Liana", "Trepadeira", ou "-" (para solo/serapilheira)
 """
 
-    # Instruções de coordenadas (condicional)
+    # Instruções de coordenadas (condicional) - ALTA PRECISÃO
     if params.get('detect_coordinates', False):
         prompt += """
-8. **areas** - COORDENADAS DE LOCALIZAÇÃO (array de polígonos):
-   🎯 **IMPORTANTE: Tente sempre identificar onde cada espécie está localizada na imagem**
+8. **areas** - COORDENADAS DE LOCALIZAÇÃO (array de polígonos) - ALTA PRECISÃO:
+   🎯 **IMPORTANTE: Identifique PRECISAMENTE onde cada espécie está localizada na imagem**
 
-   Para cada espécie, forneça as áreas onde ela ocorre usando coordenadas em **porcentagem (0-100)**:
-   - x: 0 (esquerda) a 100 (direita)
-   - y: 0 (topo) a 100 (fundo)
+   📏 **SISTEMA DE COORDENADAS (CRÍTICO):**
+   - Coordenadas em **PORCENTAGEM (0-100)** relativas à imagem
+   - x: 0.00 (borda esquerda) → 100.00 (borda direita)
+   - y: 0.00 (borda superior/topo) → 100.00 (borda inferior/fundo)
+   - Use **2 casas decimais** para máxima precisão (ex: 45.75, 23.18)
+   
+   ⚠️ **REGRA FUNDAMENTAL**: Os polígonos devem ABRAÇAR O CONTORNO REAL de cada espécie,
+      NÃO formas geométricas genéricas centralizadas aproximadamente sobre o alvo.
 
-   **Formato:** array de polígonos, onde cada polígono é uma lista de pontos [x, y]
-   - Mínimo 3-4 pontos para formar um polígono fechado
-   - Para áreas simples, use 4 pontos (retângulo/quadrilátero)
-   - Para áreas irregulares, use 5+ pontos seguindo o contorno
-   - Você pode fornecer MÚLTIPLOS polígonos se a espécie ocorre em áreas separadas
+   **Requisitos de polígonos:**
+   ❌ **PROIBIDO:** Retângulos, quadrados ou hexágonos regulares de 4-8 pontos
+   ✅ **OBRIGATÓRIO:** Mínimo **12-16 pontos** para contornos suaves e precisos
+   
+   🎯 **TÉCNICA DE PRECISÃO:**
+   - Observe onde a espécie/touceira realmente começa e termina
+   - Trace mentalmente o perímetro antes de definir coordenadas
+   - Comece pelo ponto mais ao norte e siga sentido horário
+   - Adicione pontos extras em curvas acentuadas
+   - Se a espécie ocorre em áreas separadas, use MÚLTIPLOS polígonos
+   
+   📏 **EXEMPLOS - BOM vs RUIM:**
+   
+   ❌ RUIM (quadrado genérico de 4 pontos):
+   [[10, 15], [30, 15], [30, 40], [10, 40]]
+   
+   ✅ BOM (contorno real com 12+ pontos e 2 decimais):
+   [[12.25, 18.50], [16.80, 15.75], [22.15, 14.20], [27.60, 15.90],
+    [31.45, 19.35], [33.10, 25.70], [32.85, 32.40], [29.20, 38.15],
+    [23.75, 41.80], [17.30, 42.25], [11.55, 39.60], [8.45, 32.15]]
 
-   **Quando fornecer coordenadas:**
-   ✅ SEMPRE tente quando a espécie tem uma região distinta e visível
+   **Quando fornecer coordenadas (SEMPRE quando possível):**
+   ✅ Espécie tem uma região distinta e visível
    ✅ Use múltiplos polígonos para espécies em áreas descontínuas
-   ✅ Aproximações são aceitáveis - não precisa ser pixel-perfect
-   ✅ Para espécies dominantes, marque as principais manchas/agregações
+   ✅ Para touceiras, siga o contorno circular/irregular real
+   ✅ Para espécies dominantes, marque TODAS as manchas/agregações
 
    **Quando deixar vazio []:**
-   ❌ Espécie muito dispersa/uniforme por toda imagem (ex: gramínea homogênea)
-   ❌ Impossível determinar limites claros da área
-   ❌ Solo Exposto ou Serapilheira (geralmente dispersos)
-
-   **Exemplos de boas coordenadas:**
-   - Touceira de gramínea no canto: [[10, 15], [30, 15], [30, 40], [10, 40]]
-   - Plântula isolada: [[45, 60], [52, 60], [52, 70], [45, 70]]
-   - Área irregular de leguminosa: [[20, 50], [35, 48], [40, 60], [30, 68], [18, 65]]
-   - Espécie em 2 manchas: [[[5,10],[15,10],[15,25],[5,25]], [[70,80],[85,80],[85,95],[70,95]]]
+   ❌ APENAS se espécie muito dispersa/uniforme por toda imagem
+   ❌ Impossível determinar limites claros de forma alguma
 """
     else:
         prompt += """
@@ -840,25 +853,28 @@ Para cada morfotipo CLARAMENTE visível, forneça:
     if params.get('include_polygon_json', False):
         prompt += """
 
-📐 **FORMATO DE POLÍGONOS (OBRIGATÓRIO quando include_polygon_json=True):**
+📐 **FORMATO DE POLÍGONOS (OBRIGATÓRIO quando include_polygon_json=True) - ALTA PRECISÃO:**
+
+📏 **SISTEMA DE COORDENADAS USADO:**
+- Coordenadas em PORCENTAGEM (0-100) relativas à imagem
+- x: 0.00 (esquerda) → 100.00 (direita)
+- y: 0.00 (topo) → 100.00 (fundo)
+- Use **2 CASAS DECIMAIS** para precisão (ex: 45.75, 23.18)
 
 Além do array de espécies, você DEVE incluir dois campos adicionais no JSON:
 
 1. **area_shape** - Polígono representando a área total da subparcela (1x1m):
-   - Coordenadas em porcentagem (0-100) relativas à imagem
-   - Geralmente um quadrilátero representando os limites visíveis do quadrado
    - Se não conseguir identificar os limites, use: {"points": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}]}
 
 2. **species_shapes** - Objeto mapeando índice de espécie → array de polígonos:
    - Chave = índice da espécie no array (0, 1, 2...)
    - Valor = array de polígonos onde a espécie ocorre
-   - Cada polígono: {"points": [{"x": X, "y": Y}, ...]}
-   - Use [] se a espécie estiver muito dispersa/uniforme
-
-   **Coordenadas:**
-   - x: 0 (esquerda) a 100 (direita)
-   - y: 0 (topo) a 100 (fundo)
-   - Mínimo 3-4 pontos por polígono
+   - Cada polígono: {"points": [{"x": X.XX, "y": Y.YY}, ...]}
+   
+   ⚠️ **REQUISITOS DE PRECISÃO:**
+   - Mínimo **12-16 pontos** por polígono (contornos suaves)
+   - Coordenadas com **2 casas decimais** (ex: 45.75, 23.18)
+   - Siga o **contorno real** da espécie, NÃO use formas genéricas
    - Múltiplos polígonos se espécie em áreas não-contíguas
 
 """
@@ -945,38 +961,40 @@ EXEMPLOS DE RESPOSTA (JSON válido, sem ```json):
         prompt += ''',
   "area_shape": {
     "points": [
-      {"x": 5, "y": 3},
-      {"x": 95, "y": 5},
-      {"x": 97, "y": 96},
-      {"x": 3, "y": 94}
+      {"x": 2.50, "y": 1.75},
+      {"x": 97.25, "y": 2.10},
+      {"x": 98.80, "y": 97.45},
+      {"x": 1.90, "y": 96.80}
     ]
   },
   "species_shapes": {
     "0": [
       {
         "points": [
-          {"x": 10, "y": 15},
-          {"x": 45, "y": 15},
-          {"x": 45, "y": 50},
-          {"x": 10, "y": 50}
+          {"x": 12.25, "y": 16.50}, {"x": 18.40, "y": 14.75}, {"x": 25.15, "y": 13.20},
+          {"x": 32.60, "y": 14.90}, {"x": 38.45, "y": 18.35}, {"x": 42.10, "y": 24.70},
+          {"x": 43.85, "y": 32.40}, {"x": 42.20, "y": 40.15}, {"x": 37.75, "y": 46.80},
+          {"x": 30.30, "y": 49.25}, {"x": 22.55, "y": 48.60}, {"x": 15.80, "y": 43.90},
+          {"x": 11.45, "y": 36.15}, {"x": 10.20, "y": 27.80}
         ]
       },
       {
         "points": [
-          {"x": 55, "y": 20},
-          {"x": 85, "y": 20},
-          {"x": 85, "y": 60},
-          {"x": 55, "y": 60}
+          {"x": 55.75, "y": 21.25}, {"x": 62.30, "y": 18.90}, {"x": 69.85, "y": 19.45},
+          {"x": 76.40, "y": 23.10}, {"x": 81.15, "y": 29.75}, {"x": 83.50, "y": 38.20},
+          {"x": 82.85, "y": 47.65}, {"x": 78.20, "y": 55.30}, {"x": 70.75, "y": 59.85},
+          {"x": 62.30, "y": 59.20}, {"x": 55.55, "y": 54.45}, {"x": 51.80, "y": 46.70},
+          {"x": 51.45, "y": 37.25}, {"x": 52.90, "y": 28.80}
         ]
       }
     ],
     "1": [
       {
         "points": [
-          {"x": 20, "y": 65},
-          {"x": 40, "y": 68},
-          {"x": 38, "y": 88},
-          {"x": 18, "y": 85}
+          {"x": 18.25, "y": 65.50}, {"x": 24.80, "y": 63.75}, {"x": 31.15, "y": 64.20},
+          {"x": 36.60, "y": 67.90}, {"x": 39.45, "y": 74.35}, {"x": 38.85, "y": 81.40},
+          {"x": 34.20, "y": 87.15}, {"x": 27.75, "y": 89.80}, {"x": 20.30, "y": 88.25},
+          {"x": 14.55, "y": 83.60}, {"x": 12.80, "y": 76.90}, {"x": 14.25, "y": 69.80}
         ]
       }
     ]
@@ -1045,6 +1063,13 @@ REGRAS FINAIS:
 - Nível de detalhe nas observações: {params['detail_level'].upper().replace('_', ' ')}
 - Coordenadas de localização: {'FORNEÇA SEMPRE QUE POSSÍVEL (campo areas)' if params.get('detect_coordinates', False) else 'NÃO NECESSÁRIO'}
 - **PRIORIZE PRECISÃO**: Na dúvida entre agrupar ou separar morfotipos, SEPARE!
+
+📐 **PRECISÃO DE POLÍGONOS (OBRIGATÓRIO):**
+- Cada polígono DEVE ter **mínimo 12-16 pontos** (contornos suaves)
+- Coordenadas DEVEM ter **2 casas decimais** (ex: 45.75, 23.18)
+- Polígonos DEVEM seguir o **contorno real** da vegetação
+- ❌ PROIBIDO usar quadrados, retângulos ou formas geométricas simples
+- Sistema: x=0-100 (esquerda→direita), y=0-100 (topo→fundo)
 
 Retorne APENAS JSON válido sem marcadores markdown."""
 
@@ -1146,20 +1171,60 @@ Analise esta imagem aérea/drone de uma área de paisagem para identificar e map
    - Adicione o campo "contagem" (número inteiro) no JSON para cada entidade
 """
 
-    # Instruções de Geometria (CRÍTICO)
+    # Instruções de Geometria (CRÍTICO) - PRECISÃO MÁXIMA
     prompt += """
-📐 **INSTRUÇÕES DE GEOMETRIA E FORMAS (CRÍTICO):**
+📐 **INSTRUÇÕES DE GEOMETRIA E FORMAS (CRÍTICO - PRECISÃO MÁXIMA):**
 
-1. **Polígonos de Entidades ("areas"):**
-   - ❌ **PROIBIDO** usar retângulos simples ou quadrados de 4 pontos (exceto para casas/estruturas).
-   - ✅ **OBRIGATÓRIO** usar polígonos irregulares e detalhados (Mínimo 8-10 pontos).
-   - 🎯 Siga o contorno exato da vegetação/entidade. Não faça caixas delimitadoras.
-   - Se a entidade for fragmentada, use múltiplos polígonos.
+⚠️ **REGRA FUNDAMENTAL**: Os polígonos devem ABRAÇAR O CONTORNO REAL de cada copa/vegetação, 
+   NÃO formas geométricas genéricas centralizadas aproximadamente sobre o alvo.
+
+1. **Polígonos de Entidades ("areas") - ALTA PRECISÃO:**
+   
+   ❌ **ABSOLUTAMENTE PROIBIDO:**
+   - Retângulos, quadrados ou hexágonos regulares de 4-8 pontos
+   - Polígonos "centrados" genericamente sobre a área
+   - Formas simétricas que não seguem o contorno real
+   - Coordenadas arredondadas para inteiros (use 2 casas decimais!)
+   
+   ✅ **OBRIGATÓRIO:**
+   - Mínimo **12-16 pontos** por polígono para contornos suaves e precisos
+   - Coordenadas com **2 casas decimais** (ex: 45.75, 23.18) para máxima precisão
+   - Seguir o **contorno exato** da copa/vegetação como se desenhasse à mão
+   - Identificar o **centro de massa real** e desenhar a partir das bordas visíveis
+   - Para copas circulares: use 12+ pontos formando um círculo irregular
+   - Para copas irregulares: use 16+ pontos seguindo cada reentrância
+   
+   🎯 **TÉCNICA DE PRECISÃO:**
+   - Observe onde a COPA/VEGETAÇÃO realmente começa e termina
+   - Trace mentalmente o perímetro antes de definir coordenadas
+   - Comece pelo ponto mais ao norte e siga sentido horário
+   - Adicione pontos extras em curvas acentuadas
+   - Se a entidade for fragmentada, use MÚLTIPLOS polígonos separados
+
+   📏 **EXEMPLOS DE POLÍGONOS - BOM vs RUIM:**
+   
+   ❌ RUIM (octógono genérico centralizado - NÃO FAÇA ISSO):
+   [{"x":40,"y":20},{"x":50,"y":18},{"x":60,"y":20},{"x":62,"y":30},
+    {"x":60,"y":40},{"x":50,"y":42},{"x":40,"y":40},{"x":38,"y":30}]
+   
+   ✅ BOM (contorno real da copa com 14 pontos e 2 decimais):
+   [{"x":38.25,"y":21.50},{"x":42.80,"y":18.75},{"x":48.15,"y":17.20},{"x":54.60,"y":18.90},
+    {"x":59.45,"y":22.35},{"x":62.10,"y":28.70},{"x":61.85,"y":35.40},{"x":58.20,"y":41.15},
+    {"x":52.75,"y":44.80},{"x":46.30,"y":45.25},{"x":40.55,"y":42.60},{"x":36.80,"y":36.90},
+    {"x":35.45,"y":29.15},{"x":36.20,"y":23.80}]
 
 2. **Polígono de Área Total ("area_shape"):**
    - ❌ NÃO desenhe um quadrado pequeno num canto.
    - ✅ **OBRIGATÓRIO**: Assuma que a análise cobre TODA a imagem.
    - Use sempre: {"points": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}]}
+
+3. **VERIFICAÇÃO DE QUALIDADE:**
+   Antes de retornar, verifique cada polígono:
+   - [ ] Tem pelo menos 12 pontos?
+   - [ ] Coordenadas têm 2 casas decimais?
+   - [ ] Segue o contorno real visível na imagem?
+   - [ ] Não é uma forma geométrica regular/simétrica?
+   - [ ] Está posicionado EXATAMENTE sobre a entidade?
 """
 
 
@@ -1222,7 +1287,7 @@ Retorne um objeto JSON com o array "entidades" contendo todos os elementos detec
     # Construir o JSON de exemplo
     json_example = "{\n  \"entidades\": [\n    {\n"
     json_example += "\n".join(json_fields) + "\n"
-    json_example += '      "areas": [[{"x":45,"y":20}, {"x":55,"y":18}, {"x":60,"y":40}, {"x":40,"y":38}]],\n'
+    json_example += '      "areas": [[{"x":42.25,"y":18.50}, {"x":48.80,"y":16.75}, {"x":55.15,"y":17.20}, {"x":60.60,"y":20.90}, {"x":64.45,"y":27.35}, {"x":65.85,"y":35.40}, {"x":63.20,"y":43.15}, {"x":57.75,"y":49.80}, {"x":50.30,"y":52.25}, {"x":42.55,"y":50.60}, {"x":36.80,"y":44.90}, {"x":35.45,"y":36.15}, {"x":37.20,"y":27.80}, {"x":40.25,"y":22.30}]],\n'
     
     if specific_fields:
         json_example += "\n" + "\n".join(specific_fields) + "\n"
@@ -1260,10 +1325,15 @@ Exemplo de estrutura esperada:
   - ✅ Inclua TODOS os polígonos na lista "areas" dessa única entrada
   - Exemplo correto: Uma entrada "Ipe", numero_individuos=5, areas=[5 polígonos]
 - Use "area_shape": {{"points":[{{"x":0,"y":0}},{{"x":100,"y":0}},{{"x":100,"y":100}},{{"x":0,"y":100}}]}}
-- Limite as coordenadas a 1 casa decimal (ex: 55.5) ou inteiros
 - Mantenha o JSON compacto e válido
 - NÃO deixe campos obrigatórios vazios
-- Retorne APENAS JSON válido sem marcadores markdown
+
+📐 **PRECISÃO DE POLÍGONOS (OBRIGATÓRIO):**
+- Cada polígono DEVE ter **mínimo 12-16 pontos** (contornos suaves e precisos)
+- Coordenadas DEVEM ter **2 casas decimais** (ex: 45.75, 23.18)
+- Polígonos DEVEM seguir o **contorno real** da copa/vegetação
+- ❌ PROIBIDO usar quadrados, retângulos ou hexágonos regulares
+- Sistema de coordenadas: x=0-100 (esquerda→direita), y=0-100 (topo→fundo)
 
 Retorne APENAS JSON válido sem marcadores markdown."""
 

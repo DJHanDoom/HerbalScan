@@ -22,7 +22,7 @@ function openEditPanel(title, contentHTML, onSave) {
     const newSaveBtn = saveBtn.cloneNode(true);
     newSaveBtn.id = 'edit-panel-save'; // Garantir que o ID seja mantido
     saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
-    
+
     console.log('🔄 Botão clonado, ID:', newSaveBtn.id, 'Parent:', newSaveBtn.parentNode.className);
 
     // Configurar callback de salvamento
@@ -35,9 +35,9 @@ function openEditPanel(title, contentHTML, onSave) {
             console.error('❌ Nenhum callback onSave definido!');
         }
     };
-    
+
     console.log('✅ Event listener anexado ao botão Salvar (onclick)');
-    
+
     // Teste adicional: verificar se o botão está realmente no DOM e clicável
     setTimeout(() => {
         const btnTest = document.getElementById('edit-panel-save');
@@ -173,26 +173,18 @@ function editSpecies(apelidoOriginal) {
             const result = await response.json();
 
             if (result.success) {
-                // Atualizar appState.especies
-                appState.especies[apelidoOriginal] = result.especie;
-                
-                // 🔧 FIX: Propagar TODAS as alterações (incluindo apelido_usuario e link_fotos) para subparcelas
-                appState.analysisResults.forEach(subparcela => {
-                    subparcela.especies.forEach(esp => {
-                        if (esp.apelido === apelidoOriginal) {
-                            // Atualizar apelido exibido
-                            esp.apelido = apelidoUsuario;
-                            // Atualizar dados taxonômicos
-                            esp.genero = genero;
-                            esp.especie = especieNome;
-                            esp.familia = familia;
-                            esp.link_fotos = linkFotos;
-                        }
-                    });
+                // Usar novo método unificado de atualização
+                appState.updateSpecies(apelidoOriginal, {
+                    apelido_usuario: apelidoUsuario,
+                    genero,
+                    especie: especieNome,
+                    familia,
+                    link_fotos: linkFotos
                 });
-                
-                displaySpeciesTable();  // Atualiza tabela 3 (gerenciamento)
-                displaySubparcelas();   // Atualiza tabela de subparcelas na home
+
+                // Atualizar UI completa (incluindo analytics)
+                appState.refreshUI();
+
                 closeEditPanel();
                 showAlert('success', 'Espécie atualizada em todas as subparcelas!');
             } else {
@@ -422,7 +414,7 @@ function addEspecieToSubparcelaPanel(subparcela) {
 
     openEditPanel('Adicionar Espécie', formHTML, async () => {
         console.log('🚀 Callback de salvamento executado!');
-        
+
         const apelido = document.getElementById('new-apelido').value.trim();
         const cobertura = parseFloat(document.getElementById('new-cobertura').value);
         const altura = parseFloat(document.getElementById('new-altura').value);
@@ -473,16 +465,16 @@ function addEspecieToSubparcelaPanel(subparcela) {
 
             if (result.success) {
                 console.log('✅ Espécie adicionada com sucesso');
-                
+
                 // Fechar painel ANTES de atualizar dados
                 closeEditPanel();
-                
+
                 // Mostrar mensagem de sucesso
                 showAlert('success', result.message);
-                
+
                 // Atualizar dados em background
                 await refreshData();
-                
+
                 console.log('🔄 Dados atualizados');
             } else {
                 console.error('❌ Erro na resposta:', result.error);
