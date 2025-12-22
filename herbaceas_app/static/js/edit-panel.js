@@ -246,6 +246,13 @@ function editSubparcelaEspeciePanel(subparcela, apelido) {
                     </div>
 
                     <div class="especie-edit-field">
+                        <label>Nº Indivíduos</label>
+                        <input type="number" id="edit-numero-individuos" value="${especies.find(e => e.apelido === apelido).numero_individuos || 1}"
+                               min="1" step="1">
+                        <small style="color: #718096; margin-top: 4px;">Contagem</small>
+                    </div>
+
+                    <div class="especie-edit-field">
                         <label>Cobertura (%) *</label>
                         <input type="number" id="edit-cobertura" value="${especie.cobertura}"
                                min="0" max="100" step="0.1" required>
@@ -299,6 +306,7 @@ function editSubparcelaEspeciePanel(subparcela, apelido) {
         const genero = document.getElementById('edit-genero').value.trim();
         const especie_nome = document.getElementById('edit-especie').value.trim();
         const observacoes = document.getElementById('edit-observacoes').value.trim();
+        const numeroIndividuos = parseInt(document.getElementById('edit-numero-individuos').value) || 1;
         const cobertura = parseFloat(document.getElementById('edit-cobertura').value);
         const altura = parseFloat(document.getElementById('edit-altura').value);
         const formaVida = document.getElementById('edit-forma-vida').value;
@@ -318,6 +326,7 @@ function editSubparcelaEspeciePanel(subparcela, apelido) {
                     genero,
                     especie: especie_nome,
                     observacoes,
+                    numero_individuos: numeroIndividuos,
                     cobertura,
                     altura,
                     forma_vida: formaVida,

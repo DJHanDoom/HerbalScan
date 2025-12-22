@@ -82,6 +82,7 @@ const appState = {
                     let totalCobertura = 0;
                     let totalAltura = 0;
                     let count = 0;
+                    let totalIndividuos = 0;
 
                     // Percorrer todas as subparcelas para coletar dados recalculados
                     this.analysisResults.forEach(result => {
@@ -90,7 +91,9 @@ const appState = {
                                 if (e.apelido === apelido) {
                                     totalCobertura += parseFloat(e.cobertura) || 0;
                                     totalAltura += parseFloat(e.altura) || 0;
-                                    count++;
+                                    count++; // Número de subparcelas (frequência)
+                                    // Somar indivíduos (se não definido, assume 1 pela presença)
+                                    totalIndividuos += parseInt(e.numero_individuos) || 1;
                                 }
                             });
                         }
@@ -100,7 +103,8 @@ const appState = {
                         ...esp,
                         cobertura: totalCobertura,
                         altura_media: count > 0 ? totalAltura / count : 0,
-                        ocorrencias: count
+                        ocorrencias: totalIndividuos, // Usado para Densidade e Abundância
+                        num_subplots: count // Usado para Frequência (se necessário adaptar)
                     };
                 });
 
@@ -1489,82 +1493,110 @@ function displaySummary() {
 function displaySubparcelas() {
     elements.subparcelasGrid.innerHTML = '';
 
+    // Calcular estatísticas globais para comparação
+    let maxRichness = 0;
+    appState.analysisResults.forEach(r => {
+        if (r.especies && r.especies.length > maxRichness) maxRichness = r.especies.length;
+    });
+
     appState.analysisResults.forEach(result => {
         const card = document.createElement('div');
         card.className = 'subparcela-card';
         card.setAttribute('data-subparcela', result.subparcela);
 
-        // Verificar se há erros
+        // Métricas da Subparcela
+        const richness = result.especies ? result.especies.length : 0;
+        const totalCoverage = result.especies ? result.especies.reduce((acc, e) => acc + (parseFloat(e.cobertura) || 0), 0) : 0;
+
+        // Barra de riqueza relativa (visual)
+        const richnessPct = maxRichness > 0 ? (richness / maxRichness) * 100 : 0;
+
+        // Verificar erros
         const hasError = result.especies.some(esp =>
-            esp.apelido.includes('Erro') ||
-            esp.apelido.includes('não disponível') ||
-            esp.apelido.includes('inválida')
+            esp.apelido.includes('Erro') || esp.apelido.includes('não disponível') || esp.apelido.includes('inválida')
         );
 
         const especiesHTML = result.especies.map((esp, index) => {
-            const isError = esp.apelido.includes('Erro') ||
-                esp.apelido.includes('não disponível') ||
-                esp.apelido.includes('inválida');
-
+            const isError = esp.apelido.includes('Erro') || esp.apelido.includes('não disponível') || esp.apelido.includes('inválida');
             if (isError) {
                 return `
-                    <div class="especie-item" data-species-index="${index}" style="background: #fed7d7; border-left-color: #f56565;">
+                    <div class="especie-item error-item" data-species-index="${index}">
                         <div class="especie-info">
-                            <div class="especie-nome" style="color: #c53030;">⚠️ ${esp.apelido}</div>
-                            <div class="especie-dados" style="color: #742a2a;">
-                                ${esp.erro || 'Erro desconhecido'}
-                            </div>
+                            <div class="especie-nome">⚠️ ${esp.apelido}</div>
+                            <div class="especie-dados">${esp.erro || 'Erro desconhecido'}</div>
                         </div>
                         <div class="especie-actions">
-                            <button class="btn btn-small btn-warning" onclick="retryAnalyze(${result.subparcela})" title="Tentar novamente">
-                                🔄
-                            </button>
+                            <button class="btn btn-small btn-warning" onclick="retryAnalyze(${result.subparcela})" title="Tentar novamente">🔄</button>
                         </div>
                     </div>
                 `;
             }
-
             return `
                 <div class="especie-item" data-species-index="${index}">
                     <div class="especie-info">
-                        <div class="especie-nome">
-                            ${getDisplayName(esp.apelido)}
-                            ${esp.link_fotos ? `<a href="${esp.link_fotos}" target="_blank" class="btn btn-small btn-info" style="margin-left: 8px; padding: 2px 8px; font-size: 0.85rem;" title="Ver fotos de referência">🔗 Fotos</a>` : ''}
+                        <div class="especie-nome-row">
+                            <span class="especie-nome-text">${getDisplayName(esp.apelido)}</span>
+                            <span class="especie-badge-coverage">${parseFloat(esp.cobertura).toFixed(1)}%</span>
                         </div>
-                        <div class="especie-dados">
-                            ${getDisplayTaxonomy(esp.apelido)}<br>
-                            Cobertura: <span class="species-coverage">${esp.cobertura}</span>% | Altura: ${esp.altura > 100 ? (esp.altura / 100).toFixed(2) + 'm' : esp.altura + 'cm'} | ${esp.forma_vida}
+                        <div class="especie-dados-row">
+                            <span>📏 ${esp.altura > 100 ? (esp.altura / 100).toFixed(2) + 'm' : esp.altura + 'cm'}</span>
+                            <span>🌱 ${esp.forma_vida}</span>
+                        </div>
+                        <div class="especie-taxo-row">
+                            ${getDisplayTaxonomy(esp.apelido)}
                         </div>
                     </div>
+                    ${esp.link_fotos ? `<a href="${esp.link_fotos}" target="_blank" class="btn-icon-small" title="Fotos">🔗</a>` : ''}
                 </div>
             `;
         }).join('');
 
-        const errorBanner = hasError ? `
-            <div style="background: #fff3cd; padding: 12px; margin-bottom: 10px; border-radius: 6px; border-left: 4px solid #ed8936;">
-                <p style="margin: 0; font-size: 0.9rem; color: #7c2d12;">
-                    <strong>⚠️ Erro na análise!</strong><br>
-                    Tente trocar o modelo de IA ou adicione espécies manualmente.
-                </p>
+        const metricsHTML = `
+            <div class="subparcela-metrics">
+                <div class="metric-item" title="Riqueza de Espécies">
+                    <span class="metric-label">Riqueza</span>
+                    <span class="metric-value">${richness}</span>
+                </div>
+                <div class="metric-item" title="Cobertura Vegetal Total">
+                    <span class="metric-label">Cobertura</span>
+                    <span class="metric-value">${totalCoverage.toFixed(1)}%</span>
+                </div>
+                <div class="metric-bar-container" title="Riqueza relativa nesta amostra">
+                    <div class="metric-bar-fill" style="width: ${richnessPct}%"></div>
+                </div>
             </div>
-        ` : '';
+        `;
 
         card.innerHTML = `
             <div class="subparcela-header">
-                <span>Subparcela ${result.subparcela || result.subparcela_id}</span>
+                <span class="subparcela-title">Subparcela ${result.subparcela || result.subparcela_id}</span>
                 <div class="subparcela-header-actions">
-                    <button class="btn btn-xs btn-glass" onclick="openImageViewer(${result.subparcela || result.subparcela_id}, '${result.image || result.filename}')" title="Ver e Editar">
-                        🖼️ Ver e Editar
+                    <button class="btn btn-xs btn-glass" onclick="openImageViewer(${result.subparcela || result.subparcela_id}, '${result.image || result.filename}')">
+                        🖼️ Detalhar
                     </button>
-                    <button class="btn btn-xs btn-glass-orange" onclick="reanalyzeSubparcela(event, ${result.subparcela || result.subparcela_id})" title="Reanalisar com IA">
-                        🔄 Reanalisar
+                    <button class="btn btn-xs btn-glass-orange" onclick="reanalyzeSubparcela(event, ${result.subparcela || result.subparcela_id})">
+                        🔄
                     </button>
                 </div>
             </div>
-            <img src="${result.image_path || '/static/uploads/' + appState.parcelaNome + '/' + (result.image || result.filename)}" class="subparcela-image" alt="Subparcela ${result.subparcela}" onclick="openImageViewer(${result.subparcela}, '${result.image || result.filename}')" style="cursor: pointer;">
-            <div class="subparcela-content">
-                ${errorBanner}
-                ${especiesHTML}
+            
+            <div class="subparcela-body">
+                <div class="subparcela-image-col">
+                    <div class="image-wrapper">
+                        <img src="${result.image_path || '/static/uploads/' + appState.parcelaNome + '/' + (result.image || result.filename)}" 
+                             class="subparcela-image" 
+                             alt="Subparcela ${result.subparcela}" 
+                             onclick="openImageViewer(${result.subparcela}, '${result.image || result.filename}')">
+                        <div class="image-overlay-hint">🔍 Clique para editar</div>
+                    </div>
+                    ${metricsHTML}
+                </div>
+                <div class="subparcela-list-col">
+                    ${hasError ? `<div class="warning-banner">⚠️ Erro na análise desta subparcela</div>` : ''}
+                    <div class="especies-scroll-list">
+                        ${especiesHTML}
+                    </div>
+                </div>
             </div>
         `;
 
@@ -4808,8 +4840,8 @@ async function exportToPDF() {
 
     try {
         btn.disabled = true;
-        btn.textContent = '🔄 Gerando PDF WebView...';
-        showNotification('📄 Renderizando relatório...', 'info');
+        btn.textContent = '🔄 Renderizando PDF Detalhado...';
+        showNotification('📄 Gerando relatório completo com imagens e análises...', 'info');
 
         const { jsPDF } = window.jspdf;
         const pdf = new jsPDF('p', 'mm', 'a4');
@@ -4818,232 +4850,374 @@ async function exportToPDF() {
         const margin = 10;
         const contentWidth = pageWidth - (2 * margin);
         let yOffset = margin;
+        let pageCount = 1;
 
-        // --- HELPER: Adicionar imagem ao PDF com paginação automática ---
-        async function addImageToPdf(element, title = null) {
-            if (!element) return;
-
-            // Garantir que Charts estejam visíveis
-            element.querySelectorAll('canvas').forEach(c => {
-                c.style.maxWidth = '100%';
-                c.style.height = 'auto';
-            });
-
-            const canvas = await html2canvas(element, {
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                backgroundColor: '#ffffff',
-                windowWidth: 800
-            });
-
-            const imgData = canvas.toDataURL('image/jpeg', 0.85);
-            const imgWidth = contentWidth;
-            const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-            // Verificar se precisa de nova página
-            if (yOffset + imgHeight > pageHeight - margin) {
+        // Helper para nova página
+        function checkPageBreak(heightNeeded) {
+            if (yOffset + heightNeeded > pageHeight - margin) {
                 pdf.addPage();
+                pageCount++;
                 yOffset = margin;
+                return true;
             }
-
-            // Título da seção
-            if (title) {
-                pdf.setFontSize(14);
-                pdf.setTextColor(46, 125, 50); // Verde floresta
-                pdf.text(title, margin, yOffset);
-                yOffset += 8;
-            }
-
-            pdf.addImage(imgData, 'JPEG', margin, yOffset, imgWidth, imgHeight);
-            yOffset += imgHeight + 10;
+            return false;
         }
 
-        // ============================
-        // 1. CAPA
-        // ============================
+        // Helper para cabeçalho de página
+        function addPageHeader(title) {
+            pdf.setFillColor(245, 245, 245);
+            pdf.rect(0, 0, pageWidth, 20, 'F');
+            pdf.setFontSize(10);
+            pdf.setTextColor(100, 100, 100);
+            pdf.text(title, margin, 12);
+            pdf.text(`Pág. ${pageCount}`, pageWidth - margin - 15, 12);
+            yOffset = 25;
+        }
+
+        // --- 1. CAPA (Melhorada) ---
+        // Fundo Verde
         pdf.setFillColor(46, 125, 50);
-        pdf.rect(0, 0, pageWidth, 80, 'F');
+        pdf.rect(0, 0, pageWidth, pageHeight, 'F');
 
-        pdf.setTextColor(255, 255, 255);
-        pdf.setFontSize(28);
-        pdf.text('RELATÓRIO DE ANÁLISE', pageWidth / 2, 35, { align: 'center' });
-        pdf.setFontSize(20);
-        pdf.text('AMBIENTAL', pageWidth / 2, 50, { align: 'center' });
-
-        pdf.setFontSize(12);
-        pdf.text(`Parcela: ${appState.parcelaNome}`, pageWidth / 2, 70, { align: 'center' });
-
-        // Métricas Chave
-        yOffset = 100;
-        pdf.setTextColor(66, 66, 66);
-        pdf.setFontSize(12);
-
-        const metricas = [
-            `📊 Subparcelas: ${appState.analysisResults?.length || 0}`,
-            `🌿 Espécies: ${Object.keys(appState.especies || {}).length}`,
-            `📅 Gerado em: ${new Date().toLocaleDateString('pt-BR')}`
-        ];
-        metricas.forEach(m => {
-            pdf.text(m, margin, yOffset);
-            yOffset += 8;
-        });
-
-        // Índices de diversidade
-        if (typeof AdvancedAnalytics !== 'undefined' && AdvancedAnalytics.data) {
-            const shannon = AdvancedAnalytics.calculateShannonDiversity?.() || 0;
-            const evenness = AdvancedAnalytics.calculateEveness?.() || 0;
-            yOffset += 10;
-            pdf.setFontSize(14);
-            pdf.setTextColor(46, 125, 50);
-            pdf.text('Índices Ecológicos', margin, yOffset);
-            yOffset += 8;
-            pdf.setFontSize(11);
-            pdf.setTextColor(66, 66, 66);
-            pdf.text(`Shannon (H'): ${shannon.toFixed(3)}`, margin, yOffset);
-            yOffset += 6;
-            pdf.text(`Equitabilidade (J'): ${evenness.toFixed(3)}`, margin, yOffset);
+        // Pattern sutil (simulado com linhas)
+        pdf.setDrawColor(255, 255, 255);
+        pdf.setLineWidth(0.1);
+        for (let i = 0; i < pageHeight; i += 50) {
+            pdf.line(0, i, pageWidth, i + pageWidth);
         }
 
-        pdf.addPage();
-        yOffset = margin;
+        // Caixa Branca Central
+        pdf.setFillColor(255, 255, 255);
+        const boxMargin = 30;
+        pdf.rect(boxMargin, 80, pageWidth - (2 * boxMargin), 140, 'F');
 
-        // ============================
-        // 2. DASHBOARD ANALYTICS (HTML REAL)
-        // ============================
+        // Logo e Títulos
+        pdf.setTextColor(46, 125, 50);
+        pdf.setFontSize(40);
+        pdf.setFont(undefined, 'bold');
+        pdf.text('RELATÓRIO', pageWidth / 2, 110, { align: 'center' });
+        pdf.setFontSize(24);
+        pdf.setFont(undefined, 'normal');
+        pdf.text('DE ANÁLISE AMBIENTAL', pageWidth / 2, 125, { align: 'center' });
+
+        pdf.setLineWidth(1);
+        pdf.setDrawColor(46, 125, 50);
+        pdf.line(pageWidth / 2 - 40, 135, pageWidth / 2 + 40, 135);
+
+        // Informações do Projeto
+        pdf.setTextColor(60, 60, 60);
+        pdf.setFontSize(16);
+        pdf.text(appState.parcelaNome, pageWidth / 2, 150, { align: 'center' });
+
+        pdf.setFontSize(12);
+        pdf.setTextColor(100, 100, 100);
+        const dateStr = new Date().toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' });
+        pdf.text(dateStr, pageWidth / 2, 160, { align: 'center' });
+
+        // Métricas de Capa
+        const totalSpecies = Object.keys(appState.especies || {}).length;
+        const totalSubs = appState.analysisResults?.length || 0;
+        let globalCover = 0;
+        if (typeof AdvancedAnalytics !== 'undefined') {
+            globalCover = AdvancedAnalytics.calculateTotalCoverage?.() || 0;
+        }
+
+        pdf.setFontSize(11);
+        pdf.setTextColor(46, 125, 50);
+        pdf.text(`${totalSubs} Subparcelas analisadas`, pageWidth / 2, 190, { align: 'center' });
+        pdf.text(`${totalSpecies} Espécies identificadas`, pageWidth / 2, 197, { align: 'center' });
+        pdf.text(`${globalCover.toFixed(1)}% Cobertura média`, pageWidth / 2, 204, { align: 'center' });
+
+        // Rodapé Capa
+        pdf.setFontSize(10);
+        pdf.setTextColor(255, 255, 255);
+        pdf.text('Gerado por HerbalScan AI', pageWidth / 2, pageHeight - 15, { align: 'center' });
+
+
+        // --- 2. DASHBOARD DE ANÁLISES (HTML Rendering) ---
+        pdf.addPage();
+        pageCount++;
+        addPageHeader('Dashboard Ecológico');
+
         const analyticsSection = document.getElementById('advanced-analytics-section');
         if (analyticsSection) {
-            // Ativar TODAS as abas temporariamente para captura
-            const allTabContents = analyticsSection.querySelectorAll('.analytics-tab-content');
-            const originalStates = [];
-
-            allTabContents.forEach(content => {
-                originalStates.push(content.style.display);
-                content.style.display = 'block'; // Mostrar todas
-                content.classList.add('active');
+            // Mostrar todas as abas temporariamente
+            const originalStyles = [];
+            const tabs = analyticsSection.querySelectorAll('.analytics-tab-content');
+            tabs.forEach(t => {
+                originalStyles.push({ el: t, display: t.style.display, opacity: t.style.opacity });
+                t.style.display = 'block';
+                t.style.opacity = '1';
+                t.style.position = 'relative'; // Evitar overlap
             });
 
-            // Capturar cada seção individualmente para melhor qualidade
-            const sections = analyticsSection.querySelectorAll('.analytics-section, .analytics-grid, .analytics-card');
+            // Capturar container inteiro de uma vez para layout consistente
+            // Ou capturar por seções para evitar quebras ruins
+            const sections = analyticsSection.querySelectorAll('.analytics-section, .analytics-card');
 
             for (const section of sections) {
-                if (section.offsetHeight > 50) { // Só processar seções com conteúdo
-                    const sectionTitle = section.querySelector('h3')?.textContent || null;
-                    await addImageToPdf(section, sectionTitle);
-                }
+                if (section.offsetHeight < 10) continue; // Skip empty
+
+                // Preparar elemento para captura (remover sombras/backgrounds escuros se necessário)
+                // Usar html2canvas
+                const canvas = await html2canvas(section, {
+                    scale: 1.5, // 1.5x para boa qualidade/tamanho
+                    useCORS: true,
+                    backgroundColor: '#ffffff'
+                });
+
+                const imgData = canvas.toDataURL('image/jpeg', 0.85);
+                const imgWidth = contentWidth;
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+                checkPageBreak(imgHeight + 10);
+                pdf.addImage(imgData, 'JPEG', margin, yOffset, imgWidth, imgHeight);
+                yOffset += imgHeight + 8;
             }
 
-            // Restaurar estado original
-            allTabContents.forEach((content, i) => {
-                content.style.display = originalStates[i];
-                if (originalStates[i] !== 'block') {
-                    content.classList.remove('active');
-                }
+            // Restaurar abas
+            originalStyles.forEach(s => {
+                s.el.style.display = s.display;
+                s.el.style.opacity = s.opacity;
             });
         }
 
-        // ============================
-        // 3. SUBPARCELAS (Detalhes)
-        // ============================
+        // --- 3. DETALHAMENTO DE SUBPARCELAS (Com Renderização Visual) ---
         pdf.addPage();
-        yOffset = margin;
-        pdf.setFontSize(18);
-        pdf.setTextColor(46, 125, 50);
-        pdf.text('Detalhamento por Subparcela', margin, yOffset);
-        yOffset += 15;
+        pageCount++;
+        addPageHeader('Detalhamento Visual das Subparcelas');
 
-        for (const result of appState.analysisResults || []) {
-            // Verificar espaço
-            if (yOffset > pageHeight - 60) {
-                pdf.addPage();
-                yOffset = margin;
+        // Container off-screen para renderizar imagem + SVG
+        const offscreenContainer = document.createElement('div');
+        offscreenContainer.style.position = 'absolute';
+        offscreenContainer.style.left = '-9999px';
+        offscreenContainer.style.width = '800px'; // Largura fixa alta qualidade
+        offscreenContainer.style.backgroundColor = '#fff';
+        document.body.appendChild(offscreenContainer);
+
+        for (const sub of appState.analysisResults || []) {
+            checkPageBreak(120); // Altura estimada do bloco
+
+            // Título
+            pdf.setFontSize(14);
+            pdf.setTextColor(33, 33, 33);
+            pdf.setFont(undefined, 'bold');
+            pdf.text(`Subparcela ${sub.subparcela}`, margin, yOffset + 5);
+            yOffset += 10;
+
+            // --- A. Renderizar Imagem com Polígonos ---
+            // Limpar container
+            offscreenContainer.innerHTML = '';
+
+            // Criar elementos DOM simulação
+            const wrapper = document.createElement('div');
+            wrapper.style.position = 'relative';
+            wrapper.style.width = '100%';
+
+            const imgEl = document.createElement('img');
+            imgEl.src = sub.image_path || `/static/uploads/${appState.parcelaNome}/${sub.image || sub.filename}`;
+            imgEl.style.width = '100%';
+            imgEl.style.display = 'block';
+
+            wrapper.appendChild(imgEl);
+            offscreenContainer.appendChild(wrapper);
+
+            // Aguardar imagem carregar
+            await new Promise((resolve) => {
+                if (imgEl.complete) resolve();
+                else imgEl.onload = resolve;
+                imgEl.onerror = resolve; // Continue mesmo se falhar
+            });
+
+            // Adicionar SVG manuamente (simulado ou via SVGCoverageDrawer se adaptável)
+            // Aqui vamos desenhar um SVG simples baseado nos dados
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', `0 0 ${imgEl.naturalWidth} ${imgEl.naturalHeight}`);
+            svg.style.position = 'absolute';
+            svg.style.top = '0';
+            svg.style.left = '0';
+            svg.style.width = '100%';
+            svg.style.height = '100%';
+
+            // Polígono 100% (Subparcela)
+            if (sub.area_shape?.points) {
+                const pts = sub.area_shape.points.map(p => `${p.x},${p.y}`).join(' ');
+                const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                poly.setAttribute('points', pts);
+                poly.setAttribute('fill', 'none');
+                poly.setAttribute('stroke', '#667eea');
+                poly.setAttribute('stroke-width', '5');
+                svg.appendChild(poly);
             }
 
-            // Título da subparcela
-            pdf.setFontSize(14);
-            pdf.setTextColor(46, 125, 50);
-            pdf.text(`Subparcela ${result.subparcela}`, margin, yOffset);
-            yOffset += 8;
-
-            // Tabela de espécies
-            const especies = result.especies || [];
-            if (especies.length > 0) {
-                pdf.setFontSize(9);
-                pdf.setTextColor(66, 66, 66);
-
-                // Header
-                pdf.setFont(undefined, 'bold');
-                pdf.text('Espécie', margin, yOffset);
-                pdf.text('Cobertura', margin + 60, yOffset);
-                pdf.text('Altura', margin + 90, yOffset);
-                pdf.text('Forma Vida', margin + 115, yOffset);
-                yOffset += 5;
-
-                // Linha
-                pdf.setDrawColor(200, 200, 200);
-                pdf.line(margin, yOffset, pageWidth - margin, yOffset);
-                yOffset += 4;
-
-                pdf.setFont(undefined, 'normal');
-                especies.forEach(esp => {
-                    if (yOffset > pageHeight - 20) {
-                        pdf.addPage();
-                        yOffset = margin;
-                    }
-                    const apelido = (esp.apelido || 'N/A').substring(0, 25);
-                    pdf.text(apelido, margin, yOffset);
-                    pdf.text(`${parseFloat(esp.cobertura || 0).toFixed(1)}%`, margin + 60, yOffset);
-                    pdf.text(`${parseFloat(esp.altura || 0).toFixed(0)}cm`, margin + 90, yOffset);
-                    pdf.text(esp.forma_vida || '-', margin + 115, yOffset);
-                    yOffset += 5;
+            // Polígonos de Espécies
+            if (sub.especies) {
+                sub.especies.forEach((esp, idx) => {
+                    const color = ['#48bb78', '#ed8936', '#f6e05e', '#ec4899', '#3b82f6'][idx % 5];
+                    (esp.area_shapes || []).forEach(shape => {
+                        if (shape.points) {
+                            const pts = shape.points.map(p => `${p.x},${p.y}`).join(' ');
+                            const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                            poly.setAttribute('points', pts);
+                            poly.setAttribute('fill', color);
+                            poly.setAttribute('fill-opacity', '0.3');
+                            poly.setAttribute('stroke', color);
+                            poly.setAttribute('stroke-width', '3');
+                            svg.appendChild(poly);
+                        }
+                    });
                 });
             }
+            wrapper.appendChild(svg);
 
-            yOffset += 10;
-        }
+            // Capturar Imagem Composta
+            const subCanvas = await html2canvas(wrapper, {
+                scale: 1, backgroundColor: null
+            });
+            const subImgData = subCanvas.toDataURL('image/jpeg', 0.85);
 
-        // ============================
-        // 4. CATÁLOGO DE ESPÉCIES
-        // ============================
-        pdf.addPage();
-        yOffset = margin;
-        pdf.setFontSize(18);
-        pdf.setTextColor(46, 125, 50);
-        pdf.text('Catálogo de Espécies', margin, yOffset);
-        yOffset += 12;
+            // Layout no PDF: Imagem Esquerda (50%), Dados Direita (50%)
+            const imgDisplayWidth = 90;
+            const imgDisplayHeight = (subCanvas.height * imgDisplayWidth) / subCanvas.width;
 
-        pdf.setFontSize(10);
-        pdf.setTextColor(66, 66, 66);
-
-        Object.entries(appState.especies || {}).forEach(([key, esp]) => {
-            if (yOffset > pageHeight - 25) {
-                pdf.addPage();
-                yOffset = margin;
+            // Verificar quebra de novo com altura real da imagem
+            if (checkPageBreak(imgDisplayHeight)) {
+                // Se quebrou página, reimprimir título
+                pdf.setFontSize(14); pdf.setFont(undefined, 'bold');
+                pdf.text(`Subparcela ${sub.subparcela} (cont.)`, margin, yOffset + 5);
+                yOffset += 10;
             }
 
+            pdf.addImage(subImgData, 'JPEG', margin, yOffset, imgDisplayWidth, imgDisplayHeight);
+
+            // --- B. Dados Estatísticos ao Lado (EXPANDIDO) ---
+            const textX = margin + imgDisplayWidth + 5;
+            let textY = yOffset;
+
+            // Riqueza e Cobertura Local
+            const richness = sub.especies ? sub.especies.length : 0;
+            const localCover = sub.especies ? sub.especies.reduce((acc, e) => acc + (parseFloat(e.cobertura) || 0), 0) : 0;
+
+            pdf.setFontSize(10);
+            pdf.setTextColor(46, 125, 50);
+            pdf.text('Métricas Locais Detalhadas:', textX, textY + 4);
+            textY += 10;
+
+            pdf.setFontSize(9);
+            pdf.setTextColor(60, 60, 60);
+            pdf.text(`• Riqueza de Espécies: ${richness}`, textX + 5, textY);
+            textY += 6;
+            pdf.text(`• Cobertura Vegetal Total: ${localCover.toFixed(1)}%`, textX + 5, textY);
+            textY += 6;
+
+            // Dados adicionais se existirem
+            if (sub.status) {
+                pdf.text(`• Status: ${sub.status}`, textX + 5, textY);
+                textY += 6;
+            }
+            if (sub.timestamp) {
+                pdf.text(`• Analisado em: ${new Date(sub.timestamp).toLocaleString()}`, textX + 5, textY);
+                textY += 6;
+            }
+            if (sub.notas) {
+                pdf.text(`• Notas: ${sub.notas}`, textX + 5, textY);
+                textY += 6;
+            }
+
+            textY += 4;
+            // Lista de Espécies (Compacta mas completa)
+            pdf.setFontSize(10);
+            pdf.setTextColor(46, 125, 50);
+            pdf.text('Composição Florística:', textX, textY + 4);
+            textY += 10;
+
+            pdf.setFontSize(8);
+            pdf.setTextColor(0, 0, 0);
+
+            (sub.especies || []).forEach(esp => {
+                const nome = (esp.apelido || 'N/A').substring(0, 25);
+                const cob = parseFloat(esp.cobertura || 0).toFixed(1);
+                const alt = parseFloat(esp.altura || 0).toFixed(0);
+                const fv = esp.forma_vida || '-';
+
+                pdf.setFont(undefined, 'bold');
+                pdf.text(`${nome}`, textX + 5, textY);
+                pdf.setFont(undefined, 'normal');
+                pdf.text(`Cob: ${cob}% | Alt: ${alt}cm | FV: ${fv}`, textX + 5, textY + 4);
+
+                textY += 9;
+
+                // Se lista for muito longa, parar
+                if (textY > yOffset + imgDisplayHeight) return;
+            });
+
+            yOffset += Math.max(imgDisplayHeight, textY - yOffset) + 15;
+        }
+
+        // Limpar offscreen
+        document.body.removeChild(offscreenContainer);
+
+        // --- 4. CATÁLOGO DE ESPÉCIES DETALHADO ---
+        pdf.addPage();
+        pageCount++;
+        addPageHeader('Catálogo de Espécies Detalhado');
+
+        const especieKeys = Object.keys(appState.especies || {});
+
+        for (const key of especieKeys) {
+            const esp = appState.especies[key];
+            if (checkPageBreak(60)) addPageHeader('Catálogo de Espécies Detalhado (cont.)');
+
+            // Box da Espécie
+            pdf.setDrawColor(230, 230, 230);
+            pdf.setFillColor(250, 250, 250);
+            pdf.rect(margin, yOffset, contentWidth, 55, 'FD');
+
+            // Foto Thumbnail (se houver - lógica simplificada de path)
+            // Aqui precisaria capturar a URL real ou base64 do objeto especies
+            // Assumiremos sem foto por enquanto ou placeholder
+
+            // Dados Texto
+            const leftPad = margin + 5;
+            let currentY = yOffset + 8;
+
+            // Nome Principal
+            pdf.setFontSize(12);
+            pdf.setTextColor(33, 33, 33);
             pdf.setFont(undefined, 'bold');
-            pdf.text(esp.apelido_usuario || key, margin, yOffset);
-            yOffset += 5;
+            pdf.text(esp.apelido_usuario || key, leftPad, currentY);
 
+            // Nome Científico
+            currentY += 6;
+            pdf.setFontSize(10);
+            pdf.setTextColor(100, 100, 100);
             pdf.setFont(undefined, 'italic');
-            const nomeCi = `${esp.genero || ''} ${esp.especie || ''}`.trim() || 'Não identificada';
-            pdf.text(nomeCi, margin, yOffset);
-            yOffset += 5;
+            const sciName = `${esp.genero || ''} ${esp.especie || ''}`.trim() || 'Espécie não identificada';
+            pdf.text(sciName, leftPad, currentY);
 
+            // Família
+            currentY += 6;
             pdf.setFont(undefined, 'normal');
-            pdf.text(`Família: ${esp.familia || '-'} | Ocorrências: ${esp.ocorrencias || 0}`, margin, yOffset);
-            yOffset += 8;
-        });
+            pdf.text(`Família: ${esp.familia || 'Não informada'}`, leftPad, currentY);
 
-        // ============================
-        // DOWNLOAD
-        // ============================
-        pdf.save(`${appState.parcelaNome}_relatorio_completo.pdf`);
-        showNotification('✅ PDF exportado com sucesso!', 'success');
+            // Descrição (Simulação de texto rico)
+            currentY += 8;
+            pdf.setFontSize(9);
+            pdf.setTextColor(60, 60, 60);
+            const desc = esp.observacoes || descricoes_ia[sciName] || "Sem descrição disponível.";
+            const splitDesc = pdf.splitTextToSize(desc, contentWidth - 10);
+            pdf.text(splitDesc, leftPad, currentY);
+
+            yOffset += 65; // Espaço fixo por card
+        }
+
+        // --- FINALIZAR ---
+        pdf.save(`${appState.parcelaNome}_relatorio_completo_v2.pdf`);
+        showNotification('✅ Relatório Detalhado gerado com sucesso!', 'success');
 
     } catch (error) {
-        console.error('Erro ao exportar PDF:', error);
-        showNotification('❌ Erro ao exportar PDF: ' + error.message, 'error');
+        console.error('Erro PDF Detalhado:', error);
+        showNotification('❌ Erro: ' + error.message, 'error');
     } finally {
         btn.disabled = false;
         btn.textContent = originalText;

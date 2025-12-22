@@ -354,9 +354,9 @@ PROMPT_TEMPLATES = {
             "detect_coordinates": True,
             "include_polygon_json": True,
             "include_eco_traits": True,
+            "include_eco_traits": True,
             # Landscape-specific params
-            "include_trees": True,
-            "include_seedlings": True,
+            "life_forms": ["trees", "saplings", "shrubs", "grasses", "palms", "bamboo", "herbs", "crops"],
             "include_erosion": True,
             "include_anthropic": True,
             "include_fauna": True,
@@ -1095,8 +1095,15 @@ Analise esta imagem aérea/drone de uma área de paisagem para identificar e map
 
 """
     
+    # Determine active life forms
+    life_forms = params.get('life_forms', [])
+    # Backward compatibility fallback
+    if not life_forms:
+        if params.get('include_trees', True): life_forms.append('trees')
+        if params.get('include_seedlings', True): life_forms.append('saplings')
+
     # Categorias de entidades ativadas
-    if params.get('include_trees', True):
+    if 'trees' in life_forms:
         prompt += """
 🌳 **ÁRVORES ADULTAS**
    - Identifique cada árvore ou agrupamento visível
@@ -1106,7 +1113,7 @@ Analise esta imagem aérea/drone de uma área de paisagem para identificar e map
    - Use apelidos descritivos: "Árvore Copa Ampla", "Agrupamento de Pioneiras", etc.
 """
 
-    if params.get('include_seedlings', True):
+    if 'saplings' in life_forms:
         prompt += """
 🌱 **MUDAS DE REFLORESTAMENTO**
    - Identifique linhas ou agrupamentos de mudas plantadas
@@ -1114,6 +1121,85 @@ Analise esta imagem aérea/drone de uma área de paisagem para identificar e map
    - Qualidade do plantio: espaçamento, alinhamento, coroamento
    - Estime: altura média (cm), quantidade aproximada
    - Use apelidos: "Linha de Mudas Nativas", "Área de Replantio", etc.
+"""
+
+    if 'shrubs' in life_forms:
+         prompt += """
+🌿 **ARBUSTOS**
+   - Identifique vegetação lenhosa de porte médio (<5m)
+   - Diferencie de árvores pelo porte e ramificação desde a base
+   - Estime área de cobertura e altura média
+   - Use apelidos: "Arbusto Denso", "Macega", "Vegetação Arbustiva"
+"""
+
+    if 'grasses' in life_forms:
+         prompt += """
+🌾 **GRAMÍNEAS (CAPIM)**
+   - Identifique manchas ou áreas de gramíneas (nativas ou exóticas)
+   - Diferencie: "Touceiras" (isoladas) vs "Pastagem/Gramado" (contínuo)
+   - Estime altura da vegetação (baixa/média/alta)
+   - Identifique espécies invasoras comuns (Brachiaria, Melinis) se distintiva
+   - Use apelidos: "Touceira de Capim", "Mancha de Brachiaria"
+"""
+
+    if 'palms' in life_forms:
+         prompt += """
+🌴 **PALMEIRAS**
+   - Identifique Arecaceae (coqueiros, jerivás, macaúbas, tucuns)
+   - Note a arquitetura da copa em roseta típica
+   - Estime altura e diâmetro da copa
+   - Use apelidos: "Palmeira Isolada", "Jerivá", "Indaiá"
+"""
+
+    if 'bamboo' in life_forms:
+         prompt += """
+🎍 **BAMBUZAL**
+   - Identifique moitas ou maciços de bambu/taquara
+   - Caracterize pela textura fina e arqueada dos colmos/folhas
+   - Estime área ocupada pela moita
+   - Use apelidos: "Moita de Bambu", "Taquaral"
+"""
+
+    if 'herbs' in life_forms:
+         prompt += """
+🍀 **ERVAS (Vegetação Rasteira)**
+   - Identifique cobertura herbácea não-graminóide
+   - Plantas de folha larga, rasteiras, flores do campo
+   - Estime cobertura do solo
+   - Use apelidos: "Tapete Herbáceo", "Ervas de Folha Larga"
+"""
+
+    if 'crops' in life_forms:
+         prompt += """
+🌽 **CULTIVO AGRÍCOLA**
+   - Identifique áreas de plantio agrícola (milho, soja, horta, pomar)
+   - Note padrões de linhas, uniformidade e monocultura
+   - Identifique a cultura se possível
+   - Use apelidos: "Lavoura de Milho", "Canteiro de Horta"
+"""
+
+    # Exclusion instructions
+    all_life_forms_map = {
+        "trees": "Árvores Adultas",
+        "saplings": "Mudas de Reflorestamento",
+        "shrubs": "Arbustos",
+        "grasses": "Gramíneas/Capim",
+        "palms": "Palmeiras",
+        "bamboo": "Bambuzal",
+        "herbs": "Ervas/Vegetação Rasteira",
+        "crops": "Cultivo Agrícola"
+    }
+    
+    exclusions = []
+    for key, label in all_life_forms_map.items():
+        if key not in life_forms:
+            exclusions.append(label)
+            
+    if exclusions:
+        prompt += f"""
+⛔ **ITENS IGNORADOS - NÃO INCLUA NA ANÁLISE:**
+   - {', '.join(exclusions)}
+   - Concentre-se apenas nas categorias ativadas.
 """
 
     if params.get('include_erosion', True):
@@ -1253,7 +1339,7 @@ Retorne um objeto JSON com o array "entidades" contendo todos os elementos detec
     # Campos específicos dinâmicos
     specific_fields = []
     
-    if params.get('include_trees', True):
+    if 'trees' in life_forms:
         specific_fields.append('      // Para arvore:')
         specific_fields.append('      "diametro_copa_m": 8.5,')
         specific_fields.append('      "area_copa_estimada_m2": 56.7,')
@@ -1261,7 +1347,7 @@ Retorne um objeto JSON com o array "entidades" contendo todos os elementos detec
         specific_fields.append('      "dap_estimado_cm": 35,')
         specific_fields.append('      "vigor": "bom",')
         
-    if params.get('include_seedlings', True):
+    if 'saplings' in life_forms:
         specific_fields.append('      // Para muda:')
         specific_fields.append('      "sobrevivencia": "viva",')
         specific_fields.append('      "vigor": "bom",')

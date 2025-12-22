@@ -187,21 +187,41 @@ const PromptConfig = {
                         <!-- Landscape Mode Parameters -->
                         <div class="param-group landscape-mode-group" style="display: none;">
                             <h4>🛰️ Entidades de Paisagem (Drone)</h4>
-                            <div class="param-item checkbox-group">
-                                <input type="checkbox" id="param-include-trees" checked>
-                                <label for="param-include-trees">🌳 Detectar árvores adultas</label>
-                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
-                                    Estimar copa (m), altura (m) e DAP (cm)
-                                </small>
-                            </div>
                             
-                            <div class="param-item checkbox-group">
-                                <input type="checkbox" id="param-include-seedlings" checked>
-                                <label for="param-include-seedlings">🌱 Detectar mudas de reflorestamento</label>
-                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 2px;">
-                                    Sobrevivência, vigor, qualidade do plantio
+                            <div class="param-item">
+                                <label style="margin-bottom: 8px; display: block;">🌿 Formas de Vida Vegetal</label>
+                                <div class="life-forms-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid #4a5568;">
+                                    <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+                                        <input type="checkbox" class="life-form-check" value="trees" checked> 🌳 Árvores
+                                    </label>
+                                    <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+                                        <input type="checkbox" class="life-form-check" value="saplings" checked> 🌱 Mudas
+                                    </label>
+                                    <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+                                        <input type="checkbox" class="life-form-check" value="shrubs" checked> 🌿 Arbustos
+                                    </label>
+                                    <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+                                        <input type="checkbox" class="life-form-check" value="grasses" checked> 🌾 Gramíneas
+                                    </label>
+                                    <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+                                        <input type="checkbox" class="life-form-check" value="palms" checked> 🌴 Palmeiras
+                                    </label>
+                                    <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+                                        <input type="checkbox" class="life-form-check" value="bamboo" checked> 🎍 Bambuzal
+                                    </label>
+                                    <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+                                        <input type="checkbox" class="life-form-check" value="herbs" checked> 🍀 Ervas
+                                    </label>
+                                    <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+                                        <input type="checkbox" class="life-form-check" value="crops" checked> 🌽 Cultivo
+                                    </label>
+                                </div>
+                                <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 4px;">
+                                    Selecione quais tipos de vegetação incluir na análise
                                 </small>
                             </div>
+
+
                             
                             <div class="param-item checkbox-group">
                                 <input type="checkbox" id="param-include-erosion" checked>
@@ -339,7 +359,15 @@ const PromptConfig = {
                 document.getElementById('param-include-polygon-json').checked = saved.params.include_polygon_json;
             if (saved.params.include_eco_traits !== undefined)
                 document.getElementById('param-include-eco-traits').checked = saved.params.include_eco_traits;
+
+            // Carregar life forms salvos
+            if (saved.params.life_forms) {
+                document.querySelectorAll('.life-form-check').forEach(cb => {
+                    cb.checked = saved.params.life_forms.includes(cb.value);
+                });
+            }
         }
+
     },
 
     renderTemplates() {
@@ -490,8 +518,6 @@ const PromptConfig = {
         setInputValue('param-include-eco-traits', params.include_eco_traits === true, 'checkbox');
 
         // Aplicar parâmetros paisagem/drone
-        setInputValue('param-include-trees', params.include_trees !== false, 'checkbox');
-        setInputValue('param-include-seedlings', params.include_seedlings !== false, 'checkbox');
         setInputValue('param-include-erosion', params.include_erosion !== false, 'checkbox');
         setInputValue('param-include-anthropic', params.include_anthropic !== false, 'checkbox');
         setInputValue('param-include-fauna', params.include_fauna !== false, 'checkbox');
@@ -499,6 +525,13 @@ const PromptConfig = {
         setInputValue('param-estimate-crown', params.estimate_crown !== false, 'checkbox');
         setInputValue('param-include-water', params.include_water === true, 'checkbox');
         setInputValue('param-count-individuals', params.count_individuals === true, 'checkbox');
+
+        // Aplicar formas de vida vegetal (multi-select)
+        const lifeForms = params.life_forms || ['trees', 'saplings', 'shrubs', 'grasses', 'palms', 'bamboo', 'herbs', 'crops'];
+        document.querySelectorAll('.life-form-check').forEach(cb => {
+            cb.checked = lifeForms.includes(cb.value);
+        });
+
 
         console.log('✅ Todos os parâmetros aplicados');
 
@@ -532,11 +565,21 @@ const PromptConfig = {
             'param-focus-functional', 'param-focus-succession', 'param-focus-carbon',
             'param-include-polygon-json', 'param-include-eco-traits',
             // Landscape mode params
-            'param-include-trees', 'param-include-seedlings', 'param-include-erosion',
+            'param-include-erosion',
             'param-include-anthropic', 'param-include-fauna',
             'param-estimate-dbh', 'param-estimate-crown',
             'param-include-water', 'param-count-individuals'
         ];
+
+        // Event listener separado para os checkboxes de life-form
+        document.querySelectorAll('.life-form-check').forEach(cb => {
+            cb.addEventListener('change', () => {
+                this.manualEdit = false;
+                this.updatePreview();
+                this.saveCurrentConfig();
+            });
+        });
+
 
         inputs.forEach(id => {
             const el = document.getElementById(id);
@@ -586,15 +629,16 @@ const PromptConfig = {
             include_polygon_json: getChecked('param-include-polygon-json'),
             include_eco_traits: getChecked('param-include-eco-traits'),
             // Landscape params
-            include_trees: getChecked('param-include-trees'),
-            include_seedlings: getChecked('param-include-seedlings'),
             include_erosion: getChecked('param-include-erosion'),
             include_anthropic: getChecked('param-include-anthropic'),
             include_fauna: getChecked('param-include-fauna'),
             estimate_dbh: getChecked('param-estimate-dbh'),
             estimate_crown: getChecked('param-estimate-crown'),
             include_water: getChecked('param-include-water'),
-            count_individuals: getChecked('param-count-individuals')
+            count_individuals: getChecked('param-count-individuals'),
+
+            // Coletar life_forms
+            life_forms: Array.from(document.querySelectorAll('.life-form-check:checked')).map(cb => cb.value)
         };
 
         // Add analysis_mode if in landscape mode

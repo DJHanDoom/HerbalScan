@@ -44,9 +44,11 @@ const SpeciesDetailsModal = {
         }
 
         // Coletar dados de todas as ocorrências
+        // Coletar dados de todas as ocorrências
         const ocorrencias = [];
         let totalCobertura = 0;
         let totalAltura = 0;
+        let totalIndividuos = 0;
         let formasVida = {};
         let subparcelasPresenca = new Set();
 
@@ -61,11 +63,13 @@ const SpeciesDetailsModal = {
                         observacoes: esp.observacoes || '',
                         familia: esp.familia || '',
                         genero: esp.genero || '',
-                        especie: esp.especie || ''
+                        especie: esp.especie || '',
+                        numero_individuos: esp.numero_individuos || 1
                     });
 
                     totalCobertura += (esp.cobertura || 0);
                     totalAltura += (esp.altura || 0);
+                    totalIndividuos += (parseInt(esp.numero_individuos) || 1);
                     subparcelasPresenca.add(result.subparcela);
 
                     const forma = esp.forma_vida || '-';
@@ -76,7 +80,8 @@ const SpeciesDetailsModal = {
 
         this.currentSpeciesData = {
             ...especieUnificada,
-            ocorrencias: ocorrencias,
+            ocorrencias: ocorrencias.length, // Número de subparcelas (Frequência)
+            totalIndividuos: totalIndividuos, // Total acumulado de indivíduos (Abundância)
             totalOcorrencias: ocorrencias.length,
             coberturaMedia: ocorrencias.length > 0 ? totalCobertura / ocorrencias.length : 0,
             alturaMedia: ocorrencias.length > 0 ? totalAltura / ocorrencias.length : 0,
@@ -201,10 +206,17 @@ const SpeciesDetailsModal = {
             <!-- Cards de estatísticas -->
             <div class="stats-grid">
                 <div class="stat-card">
+                    <div class="stat-icon">🔢</div>
+                    <div class="stat-content">
+                        <div class="stat-value">${data.totalIndividuos || data.totalOcorrencias}</div>
+                        <div class="stat-label">Total Indivíduos</div>
+                    </div>
+                </div>
+                <div class="stat-card">
                     <div class="stat-icon">📊</div>
                     <div class="stat-content">
                         <div class="stat-value">${data.totalOcorrencias}</div>
-                        <div class="stat-label">Ocorrências</div>
+                        <div class="stat-label">Ocorrências (freq)</div>
                     </div>
                 </div>
                 <div class="stat-card">
@@ -290,6 +302,7 @@ const SpeciesDetailsModal = {
                         <thead>
                             <tr>
                                 <th>Subparcela</th>
+                                <th>Nº Indiv.</th>
                                 <th>Cobertura (%)</th>
                                 <th>Altura (cm)</th>
                                 <th>Forma de Vida</th>
@@ -300,6 +313,7 @@ const SpeciesDetailsModal = {
                             ${data.ocorrencias.map(occ => `
                                 <tr>
                                     <td><strong>${occ.subparcela}</strong></td>
+                                    <td>${occ.numero_individuos || 1}</td>
                                     <td>${occ.cobertura.toFixed(1)}%</td>
                                     <td>${occ.altura.toFixed(1)} cm</td>
                                     <td>${occ.forma_vida}</td>
