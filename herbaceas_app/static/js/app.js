@@ -1295,6 +1295,84 @@ async function analyzeImages() {
     }
 }
 
+// Camada 6: agregacao isolada para poder reexecutar sem refazer toda displayResults
+function aggregateSpeciesForAnalytics() {
+    const especiesWithData = {};
+    if (!appState.especies) return especiesWithData;
+
+    Object.keys(appState.especies).forEach(apelido => {
+        const esp = appState.especies[apelido];
+        let totalCobertura = 0;
+        let totalAltura = 0;
+        let count = 0;
+
+        (appState.analysisResults || []).forEach(result => {
+            if (result.especies) {
+                result.especies.forEach(e => {
+                    if (e.apelido === apelido) {
+                        totalCobertura += parseFloat(e.cobertura) || 0;
+                        totalAltura += parseFloat(e.altura) || 0;
+                        count++;
+                    }
+                });
+            }
+        });
+
+        especiesWithData[apelido] = {
+            ...esp,
+            cobertura: totalCobertura,
+            altura_media: count > 0 ? totalAltura / count : 0,
+            ocorrencias: count
+        };
+    });
+
+    return especiesWithData;
+}
+
+// Camada 6: refresh completo de tudo que depende dos dados das subparcelas.
+// Usado por notifySubparcelaUpdated() apos edicoes, e por displayResults() na carga inicial.
+let _refreshDebounceTimer = null;
+function refreshAllAnalytics(immediate = false) {
+    if (_refreshDebounceTimer) clearTimeout(_refreshDebounceTimer);
+    const run = () => {
+        _refreshDebounceTimer = null;
+        try {
+            // 1. Recompor o mapa de especies unificadas (caso especie nova tenha sido
+            //    adicionada ou removida em alguma subparcela)
+            if (typeof recalcularEspeciesUnificadas === 'function') {
+                recalcularEspeciesUnificadas();
+            }
+            // 2. Recompor tabela de especies, resumo e subparcelas
+            if (typeof displaySpeciesTable === 'function') displaySpeciesTable();
+            if (typeof displaySummary === 'function') displaySummary();
+            if (typeof displaySubparcelas === 'function') displaySubparcelas();
+
+            // 3. Reinicializar AdvancedAnalytics (fitossociologia, monitoramento,
+            //    comparativas, acumuladas) com dados frescos
+            if (typeof AdvancedAnalytics !== 'undefined') {
+                const especiesWithData = aggregateSpeciesForAnalytics();
+                AdvancedAnalytics.initialize({
+                    especies: especiesWithData,
+                    analysisResults: appState.analysisResults,
+                    subparcelas: (appState.uploadedFiles || []).map(f => f.name)
+                });
+            }
+            console.log('🔁 refreshAllAnalytics concluido');
+        } catch (e) {
+            console.error('Erro em refreshAllAnalytics:', e);
+        }
+    };
+    if (immediate) run();
+    else _refreshDebounceTimer = setTimeout(run, 250);  // debounce para edicoes rapidas
+}
+
+// API publica para outros modulos (drawer, viewer modal) avisarem que uma
+// subparcela mudou. Aceita id apenas para log; o refresh e global.
+window.notifySubparcelaUpdated = function (subparcelaId) {
+    console.log(`📣 notifySubparcelaUpdated(${subparcelaId}) -> refresh agendado`);
+    refreshAllAnalytics(false);
+};
+
 function displayResults() {
     // Exibir tabela de espécies
     displaySpeciesTable();
@@ -1321,40 +1399,10 @@ function displayResults() {
         elements.addImagesBtn.style.display = 'inline-block';
     }
 
-    // Renderizar análises avançadas
+    // Renderizar análises avançadas (Camada 6: usa o refresh unificado)
     if (typeof AdvancedAnalytics !== 'undefined') {
-        // Agregar dados de cobertura e altura de todas as subparcelas
-        const especiesWithData = {};
-
-        Object.keys(appState.especies).forEach(apelido => {
-            const esp = appState.especies[apelido];
-            let totalCobertura = 0;
-            let totalAltura = 0;
-            let count = 0;
-
-            // Percorrer todas as subparcelas para coletar dados
-            appState.analysisResults.forEach(result => {
-                if (result.especies) {
-                    result.especies.forEach(e => {
-                        if (e.apelido === apelido) {
-                            totalCobertura += parseFloat(e.cobertura) || 0;
-                            totalAltura += parseFloat(e.altura) || 0;
-                            count++;
-                        }
-                    });
-                }
-            });
-
-            especiesWithData[apelido] = {
-                ...esp,
-                cobertura: totalCobertura,
-                altura_media: count > 0 ? totalAltura / count : 0,
-                ocorrencias: count
-            };
-        });
-
+        const especiesWithData = aggregateSpeciesForAnalytics();
         console.log('📊 Dados agregados para analytics:', especiesWithData);
-
         AdvancedAnalytics.initialize({
             especies: especiesWithData,
             analysisResults: appState.analysisResults,
@@ -4398,6 +4446,11 @@ async function saveManualSpecies() {
             console.warn('   ⚠️ displaySpeciesTable() não está definida');
         }
 
+        // Camada 6: notificar todas as analises agregadas (fitossociologia, monitoramento, etc)
+        if (typeof window.notifySubparcelaUpdated === 'function') {
+            window.notifySubparcelaUpdated(result.subparcela);
+        }
+
         // 9. Limpar formulário
         console.log('🧹 Limpando formulário...');
         apelidoEl.value = '';
@@ -4459,6 +4512,11 @@ async function deleteSpeciesInViewer(especieIndex) {
             // Atualizar visualização principal
             displaySubparcelas();
             displaySpeciesTable();
+
+            // Camada 6: notificar analises agregadas
+            if (typeof window.notifySubparcelaUpdated === 'function') {
+                window.notifySubparcelaUpdated(result.subparcela);
+            }
 
             showAlert('success', 'Espécie removida!');
         } else {

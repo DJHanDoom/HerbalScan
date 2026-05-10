@@ -1271,6 +1271,12 @@ const SVGCoverageDrawer = {
             console.log(`📤 Propagando cobertura: subparcela=${subparcelaId}, espécie=${speciesIndex}, cobertura=${percentage.toFixed(1)}%`);
             window.updateSpeciesCoverageInTables(subparcelaId, speciesIndex, percentage);
         }
+
+        // Camada 6: notificar analises agregadas (fitossociologia, monitoramento, etc)
+        if (typeof window.notifySubparcelaUpdated === 'function') {
+            const subparcelaId = this.currentSubparcela.id || this.currentSubparcela.subparcela;
+            window.notifySubparcelaUpdated(subparcelaId);
+        }
     },
 
     async persistCoveragePercentage(speciesIndex, percentage) {

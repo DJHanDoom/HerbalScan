@@ -337,6 +337,10 @@ function editSubparcelaEspeciePanel(subparcela, apelido) {
 
             if (result.success) {
                 await refreshData();
+                // Camada 6: garantir refresh das analises agregadas (fitossociologia, monitoramento, etc)
+                if (typeof window.notifySubparcelaUpdated === 'function') {
+                    window.notifySubparcelaUpdated(subparcela);
+                }
                 closeEditPanel();
                 showAlert('success', 'Espécie atualizada!');
             } else {
