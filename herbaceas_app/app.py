@@ -4349,7 +4349,11 @@ def save_apikey_config():
 
 @app.route('/api/parcela/<parcela_nome>/images', methods=['GET'])
 def get_parcela_images(parcela_nome):
-    """Retorna lista de imagens de uma parcela para modo manual"""
+    """Retorna lista de imagens de uma parcela para modo manual.
+
+    Retorna URLs servidas via /static/uploads/... (NUNCA filesystem path,
+    o browser nao consegue carregar caminhos absolutos do Windows).
+    """
     if parcela_nome not in analysis_data['parcelas']:
         return jsonify({'error': 'Parcela não encontrada'}), 404
 
@@ -4368,17 +4372,30 @@ def get_parcela_images(parcela_nome):
             img_path = str(img_info)
 
         if img_path and os.path.exists(img_path):
+            filename = os.path.basename(img_path)
+            # Camada 2: gerar URL HTTP em vez de filesystem path.
+            # Tenta derivar URL relativa a UPLOAD_FOLDER; cai no padrao
+            # /static/uploads/<parcela>/<filename> se nao conseguir.
+            try:
+                upload_root = app.config.get('UPLOAD_FOLDER', '')
+                rel = os.path.relpath(img_path, upload_root)
+                image_url = '/static/uploads/' + rel.replace(os.sep, '/')
+            except Exception:
+                image_url = f'/static/uploads/{parcela_nome}/{filename}'
+
             images_list.append({
                 'subparcela': idx,
-                'path': img_path,
-                'filename': os.path.basename(img_path)
+                'path': image_url,        # URL servivel (corrige bug do modo manual)
+                'image_path': image_url,  # alias compativel com displayResults
+                'filename': filename
             })
 
             # CRITICAL FIX: Criar subparcela vazia no backend se não existir
             if idx not in parcela['subparcelas']:
                 parcela['subparcelas'][idx] = {
                     'nome': f'Subparcela {idx}',
-                    'image': os.path.basename(img_path),
+                    'image': filename,
+                    'image_path': image_url,
                     'especies': [],
                     'manual_mode': True
                 }

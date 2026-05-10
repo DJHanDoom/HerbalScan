@@ -2788,6 +2788,8 @@ let currentViewerIndex = 0;
 let viewerZoom = 1;
 let viewerTranslateX = 0;
 let viewerTranslateY = 0;
+let viewerRotation = 0;          // Camada 2: graus, multiplos de 90 (-270..270)
+let viewerAllHidden = false;     // Camada 2: toggle global de visibilidade dos poligonos
 let viewerIsDragging = false;
 let viewerDragStart = { x: 0, y: 0 };
 
@@ -2928,14 +2930,22 @@ function createViewerModal() {
                     </div>
                     
                     <div class="viewer-image-container" id="viewer-img-container">
-                        <img id="viewer-image" src="" alt="Subparcela">
+                        <!-- Camada 2: canvas-stage hospeda <img> + <svg> sob a MESMA matriz CSS.
+                             Zoom/pan/rotacao aplicados aqui ancoram os poligonos automaticamente. -->
+                        <div id="canvas-stage" style="position: relative; width: 100%; height: 100%; transform-origin: center center; will-change: transform; transition: transform 0.15s ease; display: flex; align-items: center; justify-content: center;">
+                            <img id="viewer-image" src="" alt="Subparcela" style="transition: none; transform: none;">
+                            <!-- SVG overlay e injetado aqui por SVGCoverageDrawer.createSVG -->
+                        </div>
                     </div>
-                    
+
                     <div class="viewer-zoom-controls">
                         <button class="viewer-zoom-btn" onclick="zoomViewer(-0.2)" title="Diminuir zoom">−</button>
                         <span id="viewer-zoom-level">100%</span>
                         <button class="viewer-zoom-btn" onclick="zoomViewer(0.2)" title="Aumentar zoom">+</button>
-                        <button class="viewer-zoom-btn" onclick="resetViewerZoom()" title="Resetar zoom">⟲</button>
+                        <button class="viewer-zoom-btn" onclick="rotateViewer(-90)" title="Girar 90° anti-horário (Q)">↺</button>
+                        <button class="viewer-zoom-btn" onclick="rotateViewer(90)" title="Girar 90° horário (E)">↻</button>
+                        <button class="viewer-zoom-btn" onclick="toggleAllSpeciesVisibility()" id="viewer-visibility-toggle" title="Ocultar/Mostrar todos os polígonos (V)">👁</button>
+                        <button class="viewer-zoom-btn" onclick="resetViewerZoom()" title="Resetar zoom e rotação">⟲</button>
                     </div>
                 </div>
                 
@@ -3148,6 +3158,12 @@ function loadViewerSpecies() {
         <div class="viewer-species-item" id="viewer-species-${index}">
             <div class="viewer-species-view" id="viewer-species-view-${index}">
                 <div class="viewer-species-name">
+                    <button class="species-visibility-toggle"
+                            data-species="${index}"
+                            data-hidden="false"
+                            onclick="event.stopPropagation(); toggleSpeciesVisibility(${index})"
+                            title="Ocultar este morfotipo"
+                            style="background: none; border: none; cursor: pointer; font-size: 1rem; padding: 2px 6px; margin-right: 4px;">👁</button>
                     🌿 ${esp.apelido}
                     ${esp.link_fotos ? `<a href="${esp.link_fotos}" target="_blank" class="viewer-photo-link" title="Ver fotos de referência">🔗 Ver Fotos</a>` : ''}
                 </div>
@@ -3917,22 +3933,94 @@ function zoomViewer(delta) {
     applyViewerZoom();
 }
 
+function rotateViewer(deltaDegrees) {
+    // Camada 2: rotacao em multiplos de 90 graus.
+    viewerRotation = ((viewerRotation + deltaDegrees) % 360 + 360) % 360;
+    applyViewerZoom();
+}
+
 function resetViewerZoom() {
     viewerZoom = 1;
     viewerTranslateX = 0;
     viewerTranslateY = 0;
+    viewerRotation = 0;
     applyViewerZoom();
 }
 
 function applyViewerZoom() {
+    // Camada 2: a transform e aplicada ao wrapper #canvas-stage que contem
+    // <img> E o <svg> de poligonos. Resultado: poligonos ficam ancorados
+    // a regiao da imagem em qualquer zoom/pan/rotacao.
+    const stage = viewerModal.querySelector('#canvas-stage');
     const img = viewerModal.querySelector('#viewer-image');
-    img.style.transform = `scale(${viewerZoom}) translate(${viewerTranslateX}px, ${viewerTranslateY}px)`;
+    const transformStr = `translate(${viewerTranslateX}px, ${viewerTranslateY}px) rotate(${viewerRotation}deg) scale(${viewerZoom})`;
+
+    if (stage) {
+        stage.style.transform = transformStr;
+    } else if (img) {
+        // Fallback (modal antigo sem canvas-stage)
+        img.style.transform = transformStr;
+    }
 
     const zoomDisplay = viewerModal.querySelector('#viewer-zoom-level');
-    zoomDisplay.textContent = `${Math.round(viewerZoom * 100)}%`;
+    if (zoomDisplay) {
+        zoomDisplay.textContent = `${Math.round(viewerZoom * 100)}%`;
+    }
 
-    // Mudar cursor baseado no zoom
-    img.style.cursor = viewerZoom > 1 ? 'grab' : 'default';
+    // Manter o estado tambem no SVGCoverageDrawer (Camada 5 vai usar para hit-testing
+    // mais robusto; o getScreenCTM ja resolve o caso atual).
+    if (window.SVGCoverageDrawer && window.SVGCoverageDrawer.viewportTransform) {
+        window.SVGCoverageDrawer.viewportTransform.zoom = viewerZoom;
+        window.SVGCoverageDrawer.viewportTransform.panX = viewerTranslateX;
+        window.SVGCoverageDrawer.viewportTransform.panY = viewerTranslateY;
+        window.SVGCoverageDrawer.viewportTransform.rotation = viewerRotation;
+    }
+
+    // Cursor: grab quando ha zoom (permite pan)
+    if (img) {
+        img.style.cursor = viewerZoom > 1 ? 'grab' : 'default';
+    }
+}
+
+function toggleAllSpeciesVisibility() {
+    viewerAllHidden = !viewerAllHidden;
+    const drawer = window.SVGCoverageDrawer;
+    if (drawer && drawer.svg) {
+        // Esconder/mostrar grupo de especies
+        const speciesGroup = drawer.svg.querySelector('#species-group');
+        if (speciesGroup) {
+            speciesGroup.style.display = viewerAllHidden ? 'none' : '';
+        }
+    }
+
+    // Atualizar icones de visibilidade individuais (sincronizar UI)
+    document.querySelectorAll('.species-visibility-toggle').forEach(btn => {
+        btn.dataset.hidden = viewerAllHidden ? 'true' : 'false';
+        btn.textContent = viewerAllHidden ? '🚫' : '👁';
+    });
+
+    const btn = document.getElementById('viewer-visibility-toggle');
+    if (btn) btn.textContent = viewerAllHidden ? '🚫' : '👁';
+}
+
+function toggleSpeciesVisibility(speciesIndex) {
+    // Toggle por morfotipo individual (Camada 2)
+    const drawer = window.SVGCoverageDrawer;
+    if (!drawer) return;
+
+    drawer.hiddenSpecies[speciesIndex] = !drawer.hiddenSpecies[speciesIndex];
+    if (typeof drawer.renderSpecies === 'function') {
+        drawer.renderSpecies();
+    }
+
+    // Atualizar icone do botao
+    const btn = document.querySelector(`.species-visibility-toggle[data-species="${speciesIndex}"]`);
+    if (btn) {
+        const hidden = !!drawer.hiddenSpecies[speciesIndex];
+        btn.dataset.hidden = hidden ? 'true' : 'false';
+        btn.textContent = hidden ? '🚫' : '👁';
+        btn.title = hidden ? 'Mostrar este morfotipo' : 'Ocultar este morfotipo';
+    }
 }
 
 function startViewerDrag(e) {
@@ -3988,6 +4076,19 @@ function handleViewerKeyboard(e) {
             break;
         case '0':
             resetViewerZoom();
+            break;
+        // Camada 2: rotacao 90 graus e toggle global de visibilidade
+        case 'q':
+        case 'Q':
+            rotateViewer(-90);
+            break;
+        case 'e':
+        case 'E':
+            rotateViewer(90);
+            break;
+        case 'v':
+        case 'V':
+            toggleAllSpeciesVisibility();
             break;
     }
 }

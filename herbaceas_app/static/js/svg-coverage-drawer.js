@@ -63,7 +63,13 @@ const SVGCoverageDrawer = {
 
         this.image = imageElement;
         this.currentSubparcela = subparcelaData;
-        this.imageContainer = document.getElementById('viewer-img-container');
+        // Camada 2: SVG vai dentro de #canvas-stage para herdar a transform
+        // de zoom/pan/rotacao aplicada ao wrapper. Cai para viewer-img-container
+        // se canvas-stage nao existir (compatibilidade).
+        this.imageContainer = document.getElementById('canvas-stage')
+            || document.getElementById('viewer-img-container');
+        // Resetar visibilidade ao reabrir (estado e por subparcela)
+        this.hiddenSpecies = {};
 
         if (!this.imageContainer) {
             console.error('❌ Container não encontrado');
@@ -224,7 +230,10 @@ const SVGCoverageDrawer = {
             this.toolbar.appendChild(button);
         });
 
-        this.imageContainer.appendChild(this.toolbar);
+        // Toolbar deve ficar FORA do canvas-stage (que rotaciona/escala),
+        // senao gira junto com a imagem. Anexar ao container externo.
+        const toolbarHost = document.getElementById('viewer-img-container') || this.imageContainer;
+        toolbarHost.appendChild(this.toolbar);
         console.log('🔧 Toolbar criada (vertical colorida)');
     },
 
@@ -689,6 +698,11 @@ const SVGCoverageDrawer = {
         speciesGroup.innerHTML = '';
 
         Object.keys(this.speciesPolygons).forEach(speciesIndex => {
+            // Camada 2: respeitar toggle de visibilidade por morfotipo
+            if (this.hiddenSpecies && this.hiddenSpecies[speciesIndex]) {
+                return;
+            }
+
             const polygons = this.speciesPolygons[speciesIndex];
             const color = this.colors.species[speciesIndex % this.colors.species.length];
             const speciesName = this.currentSubparcela?.especies[speciesIndex]?.apelido || `Espécie ${parseInt(speciesIndex) + 1}`;
