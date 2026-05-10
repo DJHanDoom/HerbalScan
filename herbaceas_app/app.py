@@ -3530,6 +3530,81 @@ def update_species_area():
         return jsonify({'error': str(e)}), 500
 
 
+# ============================================================
+# Camada 3: Recalculo unificado de cobertura via Shapely
+# ============================================================
+@app.route('/api/recalculate-coverage', methods=['POST'])
+def recalculate_coverage_endpoint():
+    """Recalcula cobertura de todas as especies de uma subparcela usando
+    o modulo polygon_utils (Shapely).
+
+    Body:
+      parcela: nome da parcela
+      subparcela: id da subparcela
+      mode: 'estratos' (default) | 'exclusivo'
+
+    Retorna lista de {indice, apelido, cobertura} ordenada como em especies[].
+    """
+    try:
+        from polygon_utils import calculate_all_coverages, SHAPELY_OK
+    except ImportError:
+        return jsonify({'error': 'polygon_utils indisponivel'}), 500
+
+    if not SHAPELY_OK:
+        return jsonify({'error': 'shapely nao instalado (pip install shapely)'}), 500
+
+    data = request.json or {}
+    parcela_nome = data.get('parcela')
+    subparcela_id = data.get('subparcela')
+    mode = data.get('mode', 'estratos')
+
+    if mode not in ('estratos', 'exclusivo'):
+        return jsonify({'error': "mode deve ser 'estratos' ou 'exclusivo'"}), 400
+
+    if not parcela_nome or subparcela_id is None:
+        return jsonify({'error': 'Dados insuficientes (parcela/subparcela)'}), 400
+
+    if parcela_nome not in analysis_data['parcelas']:
+        return jsonify({'error': 'Parcela não encontrada'}), 404
+
+    parcela_data = analysis_data['parcelas'][parcela_nome]
+    sub_key = subparcela_id if subparcela_id in parcela_data.get('subparcelas', {}) else str(subparcela_id)
+    if sub_key not in parcela_data.get('subparcelas', {}):
+        return jsonify({'error': 'Subparcela não encontrada'}), 404
+
+    subparcela_data = parcela_data['subparcelas'][sub_key]
+    species_list = subparcela_data.get('especies', []) or []
+    parcela_area_shape = subparcela_data.get('area_shape')
+
+    coverages = calculate_all_coverages(
+        species_list,
+        parcela_area_shape=parcela_area_shape,
+        mode=mode,
+    )
+
+    # Persistir as novas coberturas no backend (estado canonico) e devolver
+    # info detalhada para o frontend atualizar os cards.
+    out = []
+    for idx, esp in enumerate(species_list):
+        cov_entry = next((c for c in coverages if c['apelido'] == esp.get('apelido')), None)
+        cov = cov_entry['cobertura'] if cov_entry else 0.0
+        esp['cobertura'] = cov
+        out.append({
+            'indice': idx,
+            'apelido': esp.get('apelido'),
+            'cobertura': cov,
+        })
+
+    # Disparar recalculo das analises agregadas (Camada 6 vai amplificar isso)
+    try:
+        recalculate_analysis_data_global(analysis_data)
+    except Exception as e:
+        print(f"Aviso: falha ao recalcular agregados: {e}")
+
+    print(f"✓ Cobertura recalculada ({mode}) para subparcela {sub_key}: {len(out)} especies")
+    return jsonify({'success': True, 'mode': mode, 'coverages': out})
+
+
 @app.route('/api/parcela/<parcela>/subparcela/<int:subparcela>/add-species-ai', methods=['POST'])
 def add_species_with_ai(parcela, subparcela):
     """Analisa imagem com IA para detectar espécies adicionais"""

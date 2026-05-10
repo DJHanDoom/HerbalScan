@@ -2954,6 +2954,15 @@ function createViewerModal() {
                     <div class="viewer-edit-header">
                         <div class="viewer-edit-title">Espécies Detectadas</div>
                         <button class="viewer-add-species-btn" onclick="toggleAddSpeciesForm()">+ Adicionar Espécie</button>
+                        <!-- Camada 3: toggle do modo de calculo de cobertura -->
+                        <div style="display: inline-flex; gap: 4px; margin-left: 10px; background: #2d3748; border-radius: 6px; padding: 3px;">
+                            <button class="coverage-mode-btn" data-mode="estratos" onclick="setCoverageMode('estratos')"
+                                    title="Estratos: poligonos da mesma especie sao unidos. Especies podem somar >100% (estratos verticais)."
+                                    style="background: none; border: none; padding: 4px 10px; color: #cbd5e0; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">Estratos</button>
+                            <button class="coverage-mode-btn" data-mode="exclusivo" onclick="setCoverageMode('exclusivo')"
+                                    title="Exclusivo: cada pixel atribuido a uma unica especie (ordem = prioridade). Soma <=100%."
+                                    style="background: none; border: none; padding: 4px 10px; color: #cbd5e0; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">Exclusivo</button>
+                        </div>
                         <button class="btn btn-sm btn-info" onclick="recalculateCoverageWrapper()" title="Recalcular % com base nos desenhos" style="margin-left: 10px; background-color: #17a2b8; border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer;">
                             🔄 Recalcular
                         </button>
@@ -3117,6 +3126,15 @@ function updateViewerContent() {
 
     const result = appState.analysisResults[currentViewerIndex];
     const total = appState.analysisResults.length;
+
+    // Camada 3: refletir modo de cobertura atual no toggle
+    viewerModal.querySelectorAll('.coverage-mode-btn').forEach(btn => {
+        const isActive = btn.dataset.mode === coverageMode;
+        btn.classList.toggle('active', isActive);
+        btn.style.background = isActive ? '#4a5568' : 'none';
+        btn.style.color = isActive ? '#ffffff' : '#cbd5e0';
+        btn.style.fontWeight = isActive ? '600' : 'normal';
+    });
 
     // Atualizar imagem
     const img = viewerModal.querySelector('#viewer-image');
@@ -5111,16 +5129,91 @@ window.updateSpeciesCoverageInTables = function (subparcelaId, speciesIndex, per
     console.log('💾 Dados já persistidos automaticamente no backend');
 };
 
-// Wrapper para recalcular cobertura
-function recalculateCoverageWrapper() {
-    console.log('🔄 Iniciando recálculo de cobertura...');
+// Camada 3: modo de calculo de cobertura (estratos | exclusivo)
+let coverageMode = localStorage.getItem('herbalScan_coverageMode') || 'estratos';
 
-    if (typeof SVGCoverageDrawer !== 'undefined' && SVGCoverageDrawer.svg) {
-        SVGCoverageDrawer.calculateCoverage();
-    } else {
-        console.error('❌ SVGCoverageDrawer não disponível ou não inicializado');
+function setCoverageMode(mode) {
+    if (mode !== 'estratos' && mode !== 'exclusivo') return;
+    coverageMode = mode;
+    localStorage.setItem('herbalScan_coverageMode', mode);
+    // Atualizar UI do toggle
+    document.querySelectorAll('.coverage-mode-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    // Recalcular imediatamente
+    recalculateCoverageWrapper();
+}
+
+// Wrapper para recalcular cobertura — Camada 3: chama backend com Shapely
+async function recalculateCoverageWrapper() {
+    console.log(`🔄 Recalculando cobertura (modo: ${coverageMode})...`);
+
+    const result = appState.analysisResults?.[currentViewerIndex];
+    if (!result) {
+        console.error('❌ Nenhuma subparcela ativa');
+        return;
+    }
+
+    const subparcelaId = result.subparcela_id || result.subparcela;
+    const parcelaNome = appState.parcelaNome;
+
+    if (!parcelaNome || subparcelaId === undefined) {
         if (typeof showAlert === 'function') {
-            showAlert('error', 'Editor de polígonos não está ativo');
+            showAlert('error', 'Parcela/subparcela nao identificada');
+        }
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/recalculate-coverage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                parcela: parcelaNome,
+                subparcela: subparcelaId,
+                mode: coverageMode,
+            }),
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            console.error('❌ Backend rejeitou recalculo:', response.status, err);
+            // Fallback para o calculo JS antigo se backend falhar (ex: shapely faltando)
+            if (typeof SVGCoverageDrawer !== 'undefined' && SVGCoverageDrawer.svg && SVGCoverageDrawer.calculateCoverage) {
+                console.warn('Fallback: usando calculo JS local');
+                SVGCoverageDrawer.calculateCoverage();
+            }
+            return;
+        }
+
+        const data = await response.json();
+        console.log(`✅ Cobertura recalculada (${data.mode}):`, data.coverages);
+
+        // Atualizar in-memory
+        if (Array.isArray(data.coverages) && result.especies) {
+            data.coverages.forEach((c) => {
+                const esp = result.especies.find(e => e.apelido === c.apelido);
+                if (esp) esp.cobertura = c.cobertura;
+            });
+        }
+
+        // Atualizar UI do viewer (cards de especie)
+        if (typeof loadViewerSpecies === 'function') {
+            loadViewerSpecies();
+        }
+
+        // Camada 6: notificar analises agregadas para se atualizarem
+        if (typeof window.notifySubparcelaUpdated === 'function') {
+            window.notifySubparcelaUpdated(subparcelaId);
+        }
+
+        if (typeof showAlert === 'function') {
+            showAlert('success', `Cobertura recalculada (modo ${data.mode}): ${data.coverages.length} especies`);
+        }
+    } catch (error) {
+        console.error('❌ Erro no recalculo:', error);
+        if (typeof showAlert === 'function') {
+            showAlert('error', 'Erro ao recalcular cobertura: ' + error.message);
         }
     }
 }
