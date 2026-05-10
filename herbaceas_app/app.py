@@ -632,14 +632,25 @@ def validate_and_filter_results(analysis_result, template_config=None):
                 'numero_individuos': 0,
                 'areas': [], # Lista de listas de pontos (polígonos)
                 'area_total_pixels': 0.0,
+                # Campo temporario: maior estimativa textual da IA usada como
+                # fallback quando nao ha poligono valido (Camada 1, substitui
+                # o antigo fallback fixo de 5%).
+                '_ai_cobertura_max': 0.0,
                 # Campos extras
                 'altura': esp.get('altura', 0),
                 'forma_vida': esp.get('forma_vida', 'Erva'),
                 'diametro_copa_m': esp.get('diametro_copa_m'),
                 'dap_estimado_cm': esp.get('dap_estimado_cm'),
             }
-        
+
         target = especies_map[apelido_norm]
+        # Acumular maior estimativa textual de cobertura entre as ocorrencias
+        try:
+            ai_est = float(esp.get('cobertura', 0) or 0)
+            if ai_est > target['_ai_cobertura_max']:
+                target['_ai_cobertura_max'] = ai_est
+        except (TypeError, ValueError):
+            pass
         
         # 1. Somar Indivíduos
         try:
@@ -685,14 +696,17 @@ def validate_and_filter_results(analysis_result, template_config=None):
             # Cap em 100%
             calculated_coverage = min(100.0, calculated_coverage)
         else:
-            # Fallback se não tiver poligonos desenhados
-            calculated_coverage = 5.0 
+            # Sem poligono = sem cobertura geometrica calculavel.
+            # Camada 1: removido fallback arbitrario de 5%; usar estimativa
+            # textual da IA (se houver) para nao mascarar registros realmente vazios.
+            calculated_coverage = max(0.0, min(100.0, data.get('_ai_cobertura_max', 0.0)))
 
         # Arredondar
         data['cobertura'] = round(calculated_coverage, 2)
-        
+
         # Limpar campos temporários
         del data['area_total_pixels']
+        data.pop('_ai_cobertura_max', None)
         
         data['indice'] = index_counter
         index_counter += 1
@@ -3369,46 +3383,148 @@ def update_species_coverage():
         return jsonify({'error': str(e)}), 500
 
 
+# ============================================================
+# Camada 1: Validacao canonica de poligonos (espaco 0..100)
+# Aplica-se a TODOS os formatos de analise (herbacea, drone/paisagem, etc).
+# ============================================================
+def validate_polygon_pct(points, name='polygon'):
+    """Valida e sanitiza um poligono em coordenadas 0..100.
+
+    Retorna (ok: bool, error: str|None, sanitized: list|None).
+    Regras:
+      - Lista nao vazia com >=3 pontos
+      - Cada ponto tem x,y numericos finitos
+      - Coords clipadas a [0..100] (com tolerancia de 0.5)
+      - Remove pontos duplicados consecutivos
+    """
+    if not isinstance(points, list) or len(points) < 3:
+        return False, f'{name}: polígono precisa de pelo menos 3 pontos', None
+
+    sanitized = []
+    for i, p in enumerate(points):
+        if not isinstance(p, dict) or 'x' not in p or 'y' not in p:
+            return False, f'{name}: ponto {i} mal formado (esperado {{x,y}})', None
+        try:
+            x = float(p['x'])
+            y = float(p['y'])
+        except (TypeError, ValueError):
+            return False, f'{name}: ponto {i} com coords nao numericas', None
+        # Aceitar pequenas extrapolacoes (IA as vezes retorna 100.3) clipando em 0..100
+        if x < -0.5 or x > 100.5 or y < -0.5 or y > 100.5:
+            return False, f'{name}: ponto {i} fora de [0..100] (x={x}, y={y})', None
+        x = max(0.0, min(100.0, x))
+        y = max(0.0, min(100.0, y))
+        # Dedup consecutivo
+        if sanitized:
+            prev = sanitized[-1]
+            if abs(prev['x'] - x) < 1e-4 and abs(prev['y'] - y) < 1e-4:
+                continue
+        sanitized.append({'x': round(x, 4), 'y': round(y, 4)})
+
+    if len(sanitized) < 3:
+        return False, f'{name}: apos sanitizacao restou menos de 3 pontos', None
+
+    return True, None, sanitized
+
+
+def validate_area_shapes(area_shapes):
+    """Valida lista de poligonos (formato area_shapes). Retorna (ok, error, sanitized_list)."""
+    if not isinstance(area_shapes, list):
+        return False, 'area_shapes deve ser uma lista', None
+    sanitized = []
+    for idx, shape in enumerate(area_shapes):
+        if not isinstance(shape, dict):
+            return False, f'shape {idx}: formato invalido', None
+        pts = shape.get('points', [])
+        ok, err, clean_pts = validate_polygon_pct(pts, name=f'shape[{idx}]')
+        if not ok:
+            return False, err, None
+        sanitized.append({
+            'type': shape.get('type', 'polygon'),
+            'points': clean_pts
+        })
+    return True, None, sanitized
+
+
+@app.route('/api/subparcela/area', methods=['POST'])
+def update_subparcela_area():
+    """Atualiza poligono da area total (100%) de uma subparcela.
+
+    Aceita coordenadas em 0..100 (formato canonico). Aplica-se a todos os
+    formatos de analise (herbacea, drone, etc).
+    """
+    data = request.json or {}
+    parcela_nome = data.get('parcela')
+    subparcela_id = data.get('subparcela')
+    area_shape = data.get('area_shape') or {}
+
+    if not parcela_nome or subparcela_id is None:
+        return jsonify({'error': 'Dados insuficientes (parcela/subparcela)'}), 400
+
+    points = area_shape.get('points', []) if isinstance(area_shape, dict) else []
+    ok, err, clean_pts = validate_polygon_pct(points, name='area_shape')
+    if not ok:
+        return jsonify({'error': err}), 400
+
+    try:
+        if parcela_nome not in analysis_data['parcelas']:
+            return jsonify({'error': 'Parcela não encontrada'}), 404
+        parcela_data = analysis_data['parcelas'][parcela_nome]
+
+        # subparcela_id pode chegar como int ou string
+        sub_key = subparcela_id if subparcela_id in parcela_data.get('subparcelas', {}) else str(subparcela_id)
+        if sub_key not in parcela_data.get('subparcelas', {}):
+            return jsonify({'error': 'Subparcela não encontrada'}), 404
+
+        subparcela_data = parcela_data['subparcelas'][sub_key]
+        subparcela_data['area_shape'] = {'type': 'polygon', 'points': clean_pts}
+        print(f"✓ area_shape da subparcela {sub_key} atualizada ({len(clean_pts)} pts)")
+        recalculate_analysis_data_global(analysis_data)
+        return jsonify({'success': True, 'points': clean_pts})
+    except Exception as e:
+        print(f"ERRO ao atualizar area_shape: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/species/area', methods=['POST'])
 def update_species_area():
-    """Atualiza áreas/polígonos desenhados de uma espécie"""
-    data = request.json
-    
+    """Atualiza áreas/polígonos desenhados de uma espécie (coords 0..100)."""
+    data = request.json or {}
+
     parcela_nome = data.get('parcela')
     subparcela_id = data.get('subparcela')
     especie_nome = data.get('especie')
     area_shapes = data.get('area_shapes', [])
-    
-    if not parcela_nome or not subparcela_id or not especie_nome:
+
+    if not parcela_nome or subparcela_id is None or not especie_nome:
         return jsonify({'error': 'Dados insuficientes'}), 400
-    
+
+    # Validacao canonica 0..100 (Camada 1)
+    ok, err, clean_shapes = validate_area_shapes(area_shapes)
+    if not ok:
+        return jsonify({'error': err}), 400
+
     try:
         if parcela_nome not in analysis_data['parcelas']:
             return jsonify({'error': 'Parcela não encontrada'}), 404
-            
+
         parcela_data = analysis_data['parcelas'][parcela_nome]
-        
-        if subparcela_id not in parcela_data.get('subparcelas', {}):
+        sub_key = subparcela_id if subparcela_id in parcela_data.get('subparcelas', {}) else str(subparcela_id)
+        if sub_key not in parcela_data.get('subparcelas', {}):
             return jsonify({'error': 'Subparcela não encontrada'}), 404
-        
-        subparcela_data = parcela_data['subparcelas'][subparcela_id]
-        
+
+        subparcela_data = parcela_data['subparcelas'][sub_key]
+
         # Atualizar área da espécie
         for esp in subparcela_data.get('especies', []):
             if esp.get('apelido') == especie_nome or esp.get('especie') == especie_nome:
-                esp['area_shapes'] = area_shapes
-                print(f"✓ Áreas da espécie {especie_nome} atualizadas: {len(area_shapes)} polígonos")
-                
-                # Recalcular estatísticas globais (embora area_shape não afete cobertura direta, 
-                # é boa prática garantir consistência se algo dependesse disso no futuro ou se cobertura fosse derivada da área)
-                # OBS: A cobertura numérica é atualizada via /api/species/coverage, então aqui é opcional, 
-                # mas mal não faz.
+                esp['area_shapes'] = clean_shapes
+                print(f"✓ Áreas da espécie {especie_nome} atualizadas: {len(clean_shapes)} polígonos (0..100)")
                 recalculate_analysis_data_global(analysis_data)
-                
-                return jsonify({'success': True})
-        
+                return jsonify({'success': True, 'area_shapes': clean_shapes})
+
         return jsonify({'error': 'Espécie não encontrada'}), 404
-        
+
     except Exception as e:
         print(f"ERRO ao atualizar área: {str(e)}")
         return jsonify({'error': str(e)}), 500

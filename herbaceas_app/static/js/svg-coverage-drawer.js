@@ -14,8 +14,14 @@ const SVGCoverageDrawer = {
     toolbar: null,
 
     // Dados
-    subparcelaPolygon: null,  // { points: [{x,y}, ...] }
-    speciesPolygons: {},       // { speciesIndex: [{ points: [{x,y}, ...] }, ...] }
+    // Convencao Camada 1: pontos em this.subparcelaPolygon.points e
+    // this.speciesPolygons[idx][i].points sao SEMPRE em pixels do SVG (espaco da
+    // imagem natural). A conversao para/de 0..100 (formato canonico do
+    // backend e da IA) acontece apenas em loadSavedData() e nas funcoes
+    // persistSubparcelaArea / persistSpeciesArea.
+    subparcelaPolygon: null,  // { points: [{x,y}, ...] }  -- em pixels
+    speciesPolygons: {},       // { speciesIndex: [{ points: [{x,y}, ...] }, ...] }  -- em pixels
+    hiddenSpecies: {},         // { speciesIndex: true } -- visibilidade por morfotipo (Camada 2)
 
     // Modo de desenho
     drawMode: null,            // 'subparcela' ou 'species'
@@ -28,6 +34,10 @@ const SVGCoverageDrawer = {
     currentPath: null,
     polygonPoints: [],
     currentPreviewShape: null,  // Para preview de círculo/elipse
+
+    // Estado de viewport (Camada 2 vai ligar nos controles de UI)
+    // Os polygons nao mudam quando isto muda; somente a transform aplicada ao <g> de renderizacao.
+    viewportTransform: { zoom: 1, panX: 0, panY: 0, rotation: 0 },
 
     // Configurações visuais
     fillEnabled: false,
@@ -942,10 +952,12 @@ const SVGCoverageDrawer = {
     // ========================================
 
     async persistSubparcelaArea(points) {
+        // pontos chegam em pixels; converter para 0..100 antes de enviar
+        const pointsPct = this._pxToPct(points);
         const data = {
             parcela: window.appState?.parcelaNome,
             subparcela: this.currentSubparcela.subparcela,
-            area_shape: { type: 'polygon', points }
+            area_shape: { type: 'polygon', points: pointsPct }
         };
 
         try {
@@ -956,8 +968,11 @@ const SVGCoverageDrawer = {
             });
 
             if (response.ok) {
-                console.log('✅ Área da subparcela salva');
-                this.currentSubparcela.area_shape = { type: 'polygon', points };
+                console.log('✅ Área da subparcela salva (0..100)');
+                this.currentSubparcela.area_shape = { type: 'polygon', points: pointsPct };
+            } else {
+                const err = await response.json().catch(() => ({}));
+                console.error('❌ Backend rejeitou area_shape:', response.status, err);
             }
         } catch (error) {
             console.error('❌ Erro ao salvar:', error);
@@ -973,14 +988,17 @@ const SVGCoverageDrawer = {
         const especie = this.currentSubparcela.especies[speciesIndex];
         const subparcelaId = this.currentSubparcela.subparcela_id || this.currentSubparcela.id || this.currentSubparcela.subparcela;
 
+        // pontos chegam em pixels; converter para 0..100 antes de enviar
         const data = {
             parcela: window.appState?.parcelaNome,
             subparcela: subparcelaId,
             especie: especie.apelido || especie.especie,
-            area_shapes: polygons.map(p => ({ type: 'polygon', points: p.points }))
+            area_shapes: polygons
+                .filter(p => p && p.points && p.points.length >= 3)
+                .map(p => ({ type: 'polygon', points: this._pxToPct(p.points) }))
         };
 
-        console.log('📤 Enviando para backend:', data);
+        console.log('📤 Enviando para backend (0..100):', data);
 
         try {
             const response = await fetch('/api/species/area', {
@@ -1001,36 +1019,48 @@ const SVGCoverageDrawer = {
         }
     },
 
+    // ========================================
+    // CONVERSAO DE COORDENADAS (Camada 1)
+    // Formato canonico (backend/IA/storage): 0..100 normalizado
+    // Formato interno (frontend, render, edicao): pixels do SVG
+    // ========================================
+
+    _imageDims() {
+        const w = this.image?.naturalWidth;
+        const h = this.image?.naturalHeight;
+        if (!w || !h) {
+            console.warn('⚠️ Imagem sem dimensoes naturais; usando 100x100');
+            return { w: 100, h: 100 };
+        }
+        return { w, h };
+    },
+
+    _pctToPx(points) {
+        if (!points || points.length === 0) return points;
+        const { w, h } = this._imageDims();
+        return points.map(p => ({
+            x: (Number(p.x) / 100) * w,
+            y: (Number(p.y) / 100) * h
+        }));
+    },
+
+    _pxToPct(points) {
+        if (!points || points.length === 0) return points;
+        const { w, h } = this._imageDims();
+        return points.map(p => ({
+            x: +((Number(p.x) / w) * 100).toFixed(4),
+            y: +((Number(p.y) / h) * 100).toFixed(4)
+        }));
+    },
+
     loadSavedData() {
-        console.log('💾 Carregando dados salvos...');
+        console.log('💾 Carregando dados salvos (formato canonico 0..100 -> px)...');
 
-        const imgWidth = this.image?.naturalWidth || 100;
-        const imgHeight = this.image?.naturalHeight || 100;
-
-        // Helper para converter percentual para pixel se necessário
-        const convertPointsIfNeeded = (points) => {
-            if (!points || points.length === 0) return points;
-
-            const maxX = Math.max(...points.map(p => p.x));
-            const maxY = Math.max(...points.map(p => p.y));
-
-            // Se coordenadas estão em 0-100, escalar para dimensões da imagem
-            if (maxX <= 100 && maxY <= 100 && (imgWidth > 100 || imgHeight > 100)) {
-                console.log('  🔄 Convertendo coordenadas de % para px');
-                return points.map(p => ({
-                    x: (p.x / 100) * imgWidth,
-                    y: (p.y / 100) * imgHeight
-                }));
-            }
-            return points;
-        };
-
-        // Carregar área da subparcela
+        // Carregar área da subparcela (sempre interpretado como 0..100)
         if (this.currentSubparcela.area_shape) {
-            let points = this.currentSubparcela.area_shape.points;
-            if (points) {
-                points = convertPointsIfNeeded(points);
-                this.subparcelaPolygon = { points: points };
+            const points = this.currentSubparcela.area_shape.points;
+            if (points && points.length) {
+                this.subparcelaPolygon = { points: this._pctToPx(points) };
                 console.log('  ✅ Área da subparcela carregada');
             }
         }
@@ -1039,13 +1069,14 @@ const SVGCoverageDrawer = {
         if (this.currentSubparcela.especies) {
             this.currentSubparcela.especies.forEach((esp, index) => {
                 if (esp.area_shapes && Array.isArray(esp.area_shapes)) {
-                    // Deep copy e conversão para cada polígono
-                    const processedShapes = esp.area_shapes.map(shape => ({
-                        points: convertPointsIfNeeded([...shape.points])
-                    }));
+                    const processedShapes = esp.area_shapes
+                        .filter(shape => shape && shape.points && shape.points.length >= 3)
+                        .map(shape => ({ points: this._pctToPx(shape.points) }));
 
-                    this.speciesPolygons[index] = processedShapes;
-                    console.log(`  ✅ Áreas da espécie ${index} "${esp.apelido}" carregadas`);
+                    if (processedShapes.length) {
+                        this.speciesPolygons[index] = processedShapes;
+                        console.log(`  ✅ Áreas da espécie ${index} "${esp.apelido}" carregadas (${processedShapes.length} pol)`);
+                    }
                 }
             });
         }
