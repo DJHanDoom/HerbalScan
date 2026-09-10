@@ -6,6 +6,20 @@ python-dotenv==1.1.1
 anthropic==0.72.0
 openai==1.109.1
 google-generativeai==0.8.5
+# BUGFIX: google-generativeai importa incondicionalmente, no proprio
+# __init__.py, uma cadeia interna que chega ate google.auth.aio.transport.
+# aiohttp - um submodulo do google-auth (nao usado pelo nosso codigo, que so
+# faz chamadas sincronas) que faz "import aiohttp" sem guarda nenhuma. Sem
+# aiohttp como dependencia REAL e explicita aqui, ele nunca era instalado de
+# verdade (nem pip install, nem bundle do instalador Windows) - um usuario
+# relatou o .exe instalado morrendo na inicializacao com "AttributeError:
+# module 'aiohttp' has no attribute 'ClientResponse'" (google-auth==2.45.0).
+# Instalando aiohttp explicitamente (junto com o upgrade natural do
+# google-auth que isso trouxe) o import de google.generativeai passou a
+# funcionar de forma limpa e reprodutivel - ver HerbalScan.spec (collect_all)
+# para garantir que o instalador tambem empacota isso por completo.
+aiohttp>=3.14,<4
+google-auth>=2.58,<3
 requests==2.32.5
 Pillow>=10.0.0
 

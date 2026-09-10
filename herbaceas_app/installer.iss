@@ -3,7 +3,7 @@
 ; Download: https://jrsoftware.org/isdl.php
 
 #define MyAppName "HerbalScan"
-#define MyAppVersion "3.1.0"
+#define MyAppVersion "3.1.1"
 #define MyAppPublisher "HerbalScan Team"
 #define MyAppURL "https://github.com/DJHanDoom/HerbalScan"
 #define MyAppExeName "HerbalScan.exe"

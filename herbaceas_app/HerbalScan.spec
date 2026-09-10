@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 
@@ -17,12 +18,47 @@ added_files = [
 if Path('custom_templates').exists():
     added_files.append(('custom_templates', 'custom_templates'))
 
+# BUGFIX: "AttributeError: module 'aiohttp' has no attribute 'ClientResponse'"
+# ao abrir o .exe instalado numa maquina diferente (nunca aconteceu nos
+# nossos testes, so em instalacao limpa de terceiro - herbalscan_error.log).
+# google.generativeai importa, no proprio __init__.py, uma cadeia ate
+# google.auth.aio.transport.aiohttp - e essa cadeia (aiohttp, google.auth,
+# google.api_core, generativelanguage_v1beta, grpc, proto-plus) e formada
+# por pacotes com imports dinamicos/C-extensions que a analise ESTATICA do
+# PyInstaller frequentemente coleta PELA METADE (alguns .py chegam, outros
+# nao) sem lancar erro nenhum durante o build - o pacote so aparenta estar
+# quebrado em runtime, numa maquina sem cache de import "vazando" de uma
+# instalacao Python do sistema pra mascarar o problema (o que explica
+# funcionar em algumas maquinas e nao em outras). collect_all() força a
+# coleta COMPLETA (.py + binarios compilados + dados) de cada pacote,
+# em vez de confiar so na analise estatica de import.
+_full_collect_packages = [
+    'aiohttp',
+    'google.generativeai',
+    'google.auth',
+    'google.api_core',
+    'google.ai.generativelanguage_v1beta',
+    'grpc',
+    'proto',
+    'google.protobuf',
+]
+_collected_binaries = []
+_collected_hiddenimports = []
+for _pkg in _full_collect_packages:
+    try:
+        _pkg_datas, _pkg_binaries, _pkg_hiddenimports = collect_all(_pkg)
+        added_files += _pkg_datas
+        _collected_binaries += _pkg_binaries
+        _collected_hiddenimports += _pkg_hiddenimports
+    except Exception as _e:
+        print(f"[HerbalScan.spec] Aviso: collect_all falhou para {_pkg}: {_e}")
+
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[],
+    binaries=_collected_binaries,
     datas=added_files,
-    hiddenimports=[
+    hiddenimports=_collected_hiddenimports + [
         'anthropic',
         'openai',
         'google.generativeai',

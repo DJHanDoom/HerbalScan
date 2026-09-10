@@ -9,6 +9,30 @@ import shutil
 import math
 import copy
 
+# BUGFIX: um usuário conseguiu instalar e abrir o .exe, mas ele morria logo
+# na inicialização com "AttributeError: module 'aiohttp' has no attribute
+# 'ClientResponse'" dentro de google\auth\aio\transport\aiohttp.py - um
+# submódulo interno do google-auth que também se chama "aiohttp.py". Isso
+# nunca reproduziu nos nossos testes (mesmo executável, outra máquina) -
+# assinatura clássica de PYTHONPATH ou site-packages do sistema "vazando"
+# pra dentro do processo congelado (variável de ambiente sobrevive à
+# inicialização do bootloader do PyInstaller e é adicionada a sys.path ANTES
+# do nosso código rodar). Se o usuário tiver algum Python instalado com um
+# pacote "aiohttp" incompleto/incompatível nesse path, o import de dentro do
+# bundle pode resolver pra lá em vez do que foi empacotado (ou nem bundle
+# nenhum, ver import mais abaixo). Isolamos o app congelado do ambiente do
+# sistema removendo de sys.path qualquer diretório que não seja o próprio
+# bundle (sys._MEIPASS) - só roda em modo congelado; em dev mode (python
+# app.py direto) sys.path fica como está.
+if getattr(sys, 'frozen', False):
+    _bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    _bundle_dir_norm = os.path.normcase(os.path.normpath(_bundle_dir))
+    sys.path = [
+        p for p in sys.path
+        if os.path.normcase(os.path.normpath(p)).startswith(_bundle_dir_norm)
+    ]
+    os.environ.pop('PYTHONPATH', None)
+
 # Forçar UTF-8 em stdout/stderr no Windows, sempre (dev mode E executável
 # congelado). O bug histórico daqui era só aplicar isso quando `sys.frozen`
 # estava setado, então rodando via `python app.py` direto o console ficava
