@@ -6148,15 +6148,17 @@ def export_complete_analysis():
                 return None
 
             # Coletar todas as imagens das subparcelas
+            # OTIMIZAÇÃO: print() por imagem foi removido daqui - cada
+            # chamada é uma linha de log separada, e no Cloud Run/produção
+            # cada print() tem overhead de rede até o Cloud Logging. Com uma
+            # analise de 10-20 fotos isso sozinho já somava um atraso
+            # perceptível; um resumo no final é suficiente pra debug.
             for subparcela_id, subparcela in parcela_data.get('subparcelas', {}).items():
                 img_url = subparcela.get('image_path')
                 if img_url:
                     img_path = url_to_filepath(img_url)
                     if img_path and os.path.exists(img_path):
                         image_paths.add(img_path)
-                        print(f"   ✓ Imagem encontrada para subparcela {subparcela_id}: {img_path}")
-                    else:
-                        print(f"   ✗ Imagem não encontrada: {img_url} -> {img_path}")
 
             # Adicionar imagens da parcela (se houver)
             for img in parcela_data.get('images', []):
@@ -6170,20 +6172,21 @@ def export_complete_analysis():
                     if img_path and os.path.exists(img_path):
                         image_paths.add(img_path)
 
-            print(f"\n📦 Total de imagens a copiar: {len(image_paths)}")
-
-            # Copiar imagens para o ZIP
+            # Copiar imagens para o ZIP.
+            # OTIMIZAÇÃO: ZIP_STORED (sem compressão) para as imagens - jpg/
+            # png já são formatos comprimidos, então recomprimir com DEFLATE
+            # praticamente não reduz o tamanho final mas gasta CPU à toa
+            # (o maior custo de tempo num export com fotos grandes). JSON e
+            # README continuam DEFLATE (texto comprime bem e é pequeno).
             for img_path in image_paths:
                 try:
-                    # Manter estrutura de pastas relativa
                     filename = os.path.basename(img_path)
-                    zip_file.write(img_path, f'images/{filename}')
+                    zip_file.write(img_path, f'images/{filename}', compress_type=zipfile.ZIP_STORED)
                     images_copied += 1
-                    print(f"   ✓ Copiada: {filename}")
                 except Exception as e:
                     print(f"   ✗ Erro ao adicionar imagem {img_path}: {e}")
 
-            print(f"✅ {images_copied} imagens copiadas para o ZIP")
+            print(f"✅ Export {parcela_name}: {images_copied}/{len(image_paths)} imagens copiadas para o ZIP")
             
             # 3. Adicionar README com instruções
             readme = f"""# Análise Exportada: {parcela_name}
@@ -6235,70 +6238,62 @@ Pode ser compartilhado com outros usuários da plataforma.
 
 @app.route('/api/analysis/import-complete', methods=['POST'])
 def import_complete_analysis():
-    """Importa análise completa de arquivo ZIP"""
+    """Importa análise completa de arquivo ZIP.
+
+    OTIMIZAÇÃO: versão anterior extraía o ZIP inteiro pra um diretório
+    temporário compartilhado (todo mundo usava o MESMO 'temp_import', risco
+    de colisão entre importações concorrentes), depois caminhava o disco
+    duas vezes (os.walk) só pra achar o JSON, caminhava de novo pra achar as
+    imagens, e por fim COPIAVA cada imagem de novo pro destino final - ou
+    seja, cada imagem era escrita em disco DUAS vezes (extração + cópia) e
+    lida do disco mais uma. Também imprimia uma linha de log por arquivo
+    (extração, cópia, atualização de URL...), e no Cloud Run cada print()
+    tem custo de rede até o Cloud Logging - com 10-20 fotos isso sozinho já
+    era um atraso perceptível.
+    Agora: o JSON é achado direto na lista em memória do ZIP (sem tocar
+    disco), e cada imagem é lida do ZIP e gravada UMA ÚNICA VEZ, direto no
+    destino final - sem diretório temporário, sem cópia duplicada, sem
+    log por arquivo.
+    """
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'Nenhum arquivo enviado'}), 400
-        
+
         zip_file = request.files['file']
-        
+
         if not zip_file.filename.endswith('.zip'):
             return jsonify({'error': 'Arquivo deve ser um ZIP'}), 400
-        
-        # Criar diretório temporário
-        temp_dir = os.path.join(os.path.dirname(__file__), 'temp_import')
-        os.makedirs(temp_dir, exist_ok=True)
-        
+
         try:
-            # Extrair ZIP
-            with zipfile.ZipFile(zip_file, 'r') as zip_ref:
-                # Listar conteúdo do ZIP para debug
-                print("📦 Conteúdo do ZIP:")
-                for name in zip_ref.namelist():
-                    print(f"   - {name}")
+            zip_ref = zipfile.ZipFile(zip_file, 'r')
+        except zipfile.BadZipFile:
+            return jsonify({'error': 'Arquivo ZIP inválido ou corrompido'}), 400
 
-                zip_ref.extractall(temp_dir)
+        with zip_ref:
+            namelist = zip_ref.namelist()
 
-            # Listar arquivos extraídos para debug
-            print(f"\n📁 Arquivos em {temp_dir}:")
-            for root, dirs, files in os.walk(temp_dir):
-                for file in files:
-                    rel_path = os.path.relpath(os.path.join(root, file), temp_dir)
-                    print(f"   - {rel_path}")
-
-            # Procurar arquivo JSON - pode ser {parcela}_dados.json ou analysis_data.json
-            json_path = None
-            json_patterns = ['*_dados.json', 'analysis_data.json']
-            
-            for pattern in json_patterns:
-                for root, dirs, files in os.walk(temp_dir):
-                    for file in files:
-                        if file.endswith('_dados.json') or file == 'analysis_data.json':
-                            json_path = os.path.join(root, file)
-                            print(f"✓ JSON encontrado: {json_path}")
-                            break
-                    if json_path:
-                        break
-                if json_path:
-                    break
-            
-            if not json_path:
+            # Procurar arquivo JSON (nome exato ou terminando em _dados.json)
+            # direto na lista de entradas do ZIP - sem extrair nada.
+            json_name = next(
+                (n for n in namelist
+                 if os.path.basename(n) == 'analysis_data.json' or os.path.basename(n).endswith('_dados.json')),
+                None
+            )
+            if not json_name:
                 return jsonify({'error': 'Arquivo JSON de dados não encontrado no ZIP. Procurado: *_dados.json ou analysis_data.json'}), 400
-            
-            with open(json_path, 'r', encoding='utf-8') as f:
-                imported_data = json.load(f)
-            
+
+            imported_data = json.loads(zip_ref.read(json_name).decode('utf-8'))
+
             # Validar estrutura do JSON
             if 'parcela' not in imported_data:
                 return jsonify({'error': 'JSON inválido: campo "parcela" não encontrado'}), 400
-            
+
             # Aceitar tanto formato novo (subparcelas) quanto legado (analysisResults)
             if 'subparcelas' not in imported_data and 'analysisResults' not in imported_data:
                 return jsonify({'error': 'JSON inválido: nem "subparcelas" nem "analysisResults" encontrado'}), 400
-            
+
             # Converter formato legado para novo se necessário
             if 'analysisResults' in imported_data and 'subparcelas' not in imported_data:
-                print("🔄 Convertendo formato legado (analysisResults) para novo (subparcelas)")
                 subparcelas_dict = {}
                 for idx, result in enumerate(imported_data['analysisResults'], 1):
                     subparcela_id = f"sub_{idx}"
@@ -6310,89 +6305,56 @@ def import_complete_analysis():
                         'area_descoberta': result.get('area_descoberta', 0)
                     }
                 imported_data['subparcelas'] = subparcelas_dict
-                
+
                 # Converter especies para especies_unificadas se necessário
                 if 'especies' in imported_data and 'especies_unificadas' not in imported_data:
                     imported_data['especies_unificadas'] = imported_data['especies']
-            
+
             parcela_name = imported_data['parcela']
-            print(f"✓ Parcela: {parcela_name}")
-            print(f"✓ Subparcelas no JSON: {len(imported_data.get('subparcelas', {}))}")
-            
-            # Criar diretório de uploads para esta parcela
+
+            # Diretório de uploads para esta parcela
             upload_dir = os.path.join(app.config['UPLOAD_FOLDER'], parcela_name)
             os.makedirs(upload_dir, exist_ok=True)
-            
-            # Copiar imagens para local permanente
-            # Procurar QUALQUER diretório com imagens (subparcelas, images, especies, etc)
-            image_mapping = {}  # filename -> new_path
-            images_found = False
 
-            # Buscar recursivamente por todos os arquivos de imagem
-            print(f"🔍 Procurando imagens em {temp_dir}...")
-            for root, dirs, files in os.walk(temp_dir):
-                for filename in files:
-                    # Verificar se é arquivo de imagem
-                    if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.bmp')):
-                        src = os.path.join(root, filename)
-                        dst = os.path.join(upload_dir, filename)
+            # Extrair imagens DIRETO pro destino final (sem passar por um
+            # diretório temporário intermediário) - qualquer entrada do ZIP
+            # que pareça uma imagem, não importa em que pasta esteja dentro
+            # do ZIP (images/, subparcelas/, etc.), vira um arquivo achatado
+            # (só o basename) em upload_dir.
+            image_mapping = {}  # filename -> URL relativa
+            image_exts = ('.jpg', '.jpeg', '.png', '.gif', '.bmp')
+            for name in namelist:
+                filename = os.path.basename(name)
+                if not filename or not filename.lower().endswith(image_exts):
+                    continue
+                dst = os.path.join(upload_dir, filename)
+                try:
+                    with zip_ref.open(name) as src, open(dst, 'wb') as out:
+                        shutil.copyfileobj(src, out, length=1024 * 1024)
+                    image_mapping[filename] = f'/static/uploads/{parcela_name}/{filename}'
+                except Exception as copy_error:
+                    print(f"   ✗ Erro ao extrair imagem {filename}: {copy_error}")
 
-                        try:
-                            shutil.copy2(src, dst)
-                            # Verificar se o arquivo foi realmente copiado
-                            if os.path.exists(dst):
-                                file_size = os.path.getsize(dst)
-                                # Salvar URL relativa no mapping
-                                rel_url = f'/static/uploads/{parcela_name}/{filename}'
-                                image_mapping[filename] = rel_url
-                                print(f"   ✓ {filename} ({file_size} bytes) -> {rel_url}")
-                                images_found = True
-                            else:
-                                print(f"   ✗ Falha ao copiar {filename}")
-                        except Exception as copy_error:
-                            print(f"   ✗ Erro ao copiar {filename}: {copy_error}")
-
-            if images_found:
-                print(f"✓ {len(image_mapping)} imagens copiadas para {upload_dir}")
-                # Verificar se o diretório está acessível via web
-                rel_check = upload_dir.replace(app.config['UPLOAD_FOLDER'], '/static/uploads')
-                print(f"   Caminho web: {rel_check}")
-            else:
-                print(f"⚠️ Nenhuma imagem encontrada no ZIP")
-            
             # Atualizar paths das imagens nas subparcelas com URLs válidas
-            print(f"\n🔗 Atualizando URLs das imagens...")
             for subparcela_id, subparcela in imported_data['subparcelas'].items():
                 old_path = subparcela.get('image_path', '')
                 if old_path:
                     filename = os.path.basename(old_path)
-                    print(f"   Subparcela {subparcela_id}: {filename}")
 
                     if filename in image_mapping:
-                        # Usar URL do mapping (já é relativa)
                         subparcela['image_path'] = image_mapping[filename]
-                        print(f"   ✓ URL atualizada: {image_mapping[filename]}")
                     else:
-                        print(f"   ⚠️ Imagem não encontrada no mapping: {filename}")
-                        # Tentar encontrar qualquer imagem com nome similar
+                        # Tentar encontrar qualquer imagem com nome similar (case-insensitive)
                         found = False
-                        for mapped_filename in image_mapping.keys():
+                        for mapped_filename, rel_url in image_mapping.items():
                             if mapped_filename.lower() == filename.lower():
-                                rel_url = f'/static/uploads/{parcela_name}/{mapped_filename}'
                                 subparcela['image_path'] = rel_url
-                                print(f"   ✓ URL atualizada (case-insensitive): {rel_url}")
                                 found = True
                                 break
-
-                        # Se não encontrou, remover image_path inválido
-                        if not found:
-                            if 'image_path' in subparcela:
-                                del subparcela['image_path']
-                            print(f"   ✗ Imagem não encontrada, image_path removido")
-                else:
-                    # Sem image_path, garantir que não existe
-                    if 'image_path' in subparcela:
-                        del subparcela['image_path']
+                        if not found and 'image_path' in subparcela:
+                            del subparcela['image_path']
+                elif 'image_path' in subparcela:
+                    del subparcela['image_path']
             
             # Reconstruir lista de images com estrutura correta
             images_list = []
@@ -6440,13 +6402,9 @@ def import_complete_analysis():
             # Restaurar espécies unificadas (já vem no formato correto, sem nível extra de aninhamento)
             analysis_data['especies_unificadas'][parcela_name] = imported_data.get('especies_unificadas', {})
             
-            print(f"✓ Análise importada: {parcela_name}")
-            print(f"✓ Subparcelas: {len(imported_data['subparcelas'])}")
-            print(f"✓ Espécies: {len(imported_data.get('especies_unificadas', {}))}")
-            
-            # Limpar diretório temporário
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            
+            print(f"✓ Análise importada: {parcela_name} ({len(imported_data['subparcelas'])} subparcelas, "
+                  f"{len(imported_data.get('especies_unificadas', {}))} espécies, {len(image_mapping)} imagens)")
+
             # Preparar dados de resposta completos para restaurar a interface
             #
             # BUGFIX (raiz do "subparcela não encontrada" ao editar um
@@ -6463,7 +6421,6 @@ def import_complete_analysis():
             # garante essa igualdade por construção, não por coincidência de
             # formato.
             analysis_results = []
-            print(f"\n📤 Preparando resposta para frontend...")
             for subparcela_id, subparcela_data in sorted(imported_data['subparcelas'].items(), key=lambda kv: str(kv[0])):
                 result_data = {
                     'subparcela': subparcela_id,
@@ -6480,7 +6437,6 @@ def import_complete_analysis():
                     'species_shapes': subparcela_data.get('species_shapes'),
                 }
                 analysis_results.append(result_data)
-                print(f"   {result_data['subparcela']}: {result_data['image_path']}")
 
             subparcelas_list = [
                 {'name': f"Subparcela {i+1}", 'path': r['image_path']}
@@ -6497,20 +6453,12 @@ def import_complete_analysis():
                 'subparcelas': subparcelas_list
             }
 
-            print(f"\n✅ Importação concluída com sucesso!")
-            print(f"   Parcela: {parcela_name}")
-            print(f"   Subparcelas: {len(analysis_results)}")
-            print(f"   Espécies: {len(response_data['especies'])}")
-            print(f"   Imagens com URL: {sum(1 for r in analysis_results if r['image_path'])}")
+            print(f"✅ Importação concluída: {parcela_name} ({len(analysis_results)} subparcelas, "
+                  f"{len(response_data['especies'])} espécies, "
+                  f"{sum(1 for r in analysis_results if r['image_path'])} com imagem)")
 
             return jsonify(response_data)
-            
-        except Exception as e:
-            # Limpar em caso de erro
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            raise e
-            
+
     except Exception as e:
         print(f"Erro ao importar análise completa: {e}")
         return jsonify({'error': str(e)}), 500
