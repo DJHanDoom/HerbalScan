@@ -334,9 +334,27 @@
                 <button onclick="AIModelModal.close()" class="close-btn">×</button>
             </div>
             <div class="ai-modal-body">
-                <p class="ai-modal-intro">Escolha o provedor e a versão do modelo usados para analisar as imagens.
-                    Modelos <strong>Premium</strong> exigem uma API key paga; os <strong>Grátis</strong> funcionam com
-                    uma chave gratuita do provedor.</p>
+                <div class="ai-explainer">
+                    <h3>🔑 Por que preciso configurar isso?</h3>
+                    <p>
+                        O HerbalScan não tem uma inteligência artificial própria - quem realmente <strong>olha suas
+                        fotos e identifica a vegetação</strong> é um serviço externo de IA (Google, OpenAI, Anthropic
+                        etc). Por isso você precisa de uma <strong>chave de acesso pessoal</strong> (API key) de pelo
+                        menos <u>um</u> desses serviços.
+                    </p>
+                    <p>
+                        É rápido (menos de 2 minutos) e a maioria tem opção <strong>100% gratuita</strong> pra
+                        começar. Sua chave fica guardada só no seu navegador, neste computador - nunca é enviada pra
+                        nós, e cada análise usa sua própria conta diretamente com o provedor escolhido.
+                    </p>
+                </div>
+
+                <div id="ai-quickstart" class="ai-quickstart">
+                    <!-- Preenchido dinamicamente por AIModelModal.render() em app.js -->
+                </div>
+
+                <p class="ai-modal-intro">Ou escolha outro provedor abaixo. Modelos <strong>Premium</strong> exigem
+                    uma API key paga; os <strong>Grátis</strong> funcionam com uma chave gratuita do provedor.</p>
                 <div id="ai-provider-grid" class="ai-provider-grid">
                     <!-- Preenchido dinamicamente por AIModelModal.render() em app.js -->
                 </div>

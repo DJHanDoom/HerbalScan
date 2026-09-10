@@ -429,11 +429,44 @@ const AIModelModal = {
 
         if (!appState.availableAIs || appState.availableAIs.length === 0) {
             grid.innerHTML = '<p>Nenhuma IA disponível. Configure uma API key primeiro.</p>';
+            this._renderQuickstart(null);
             return;
         }
 
         grid.innerHTML = appState.availableAIs.map(ai => this._cardHTML(ai)).join('');
         this.highlightSelected();
+
+        // PEDIDO: essa janela é a primeira coisa que um usuário leigo vê e
+        // precisa deixar claro O QUE fazer e POR QUE - recomenda um caminho
+        // rápido e gratuito (Gemini: cadastro só com conta Google, sem
+        // cartão de crédito) em vez de despejar 6 opções sem contexto.
+        const quickstartAi = appState.availableAIs.find(a => a.id === 'gemini') || appState.availableAIs[0];
+        this._renderQuickstart(quickstartAi);
+    },
+
+    _renderQuickstart(ai) {
+        const el = document.getElementById('ai-quickstart');
+        if (!el) return;
+        if (!ai) { el.innerHTML = ''; return; }
+
+        const hasKey = !!appState.apiKeys[ai.id];
+        el.innerHTML = `
+            <div class="ai-quickstart-card">
+                <div class="ai-quickstart-badge">🚀 Caminho mais rápido e gratuito</div>
+                <div class="ai-quickstart-title">${ai.name} <span class="ai-quickstart-sub">(${ai.provider})</span></div>
+                <p class="ai-quickstart-text">
+                    Não pede cartão de crédito - basta entrar com sua conta Google e gerar a chave.
+                    Recomendado pra quem está usando o HerbalScan pela primeira vez.
+                </p>
+                <div class="ai-quickstart-actions">
+                    <span class="ai-quickstart-step">1</span>
+                    <a href="https://aistudio.google.com/app/apikey" target="_blank" class="btn btn-success">Obter chave grátis →</a>
+                    <span class="ai-quickstart-step">2</span>
+                    <button type="button" class="btn btn-primary" onclick="configureAPIKey('${ai.id}')">
+                        ${hasKey ? '✅ Chave configurada - alterar' : 'Colar minha chave aqui'}
+                    </button>
+                </div>
+            </div>`;
     },
 
     _cardHTML(ai) {
@@ -578,8 +611,15 @@ function checkAPIKeys() {
     // Verificar se pelo menos uma API key está configurada
     const hasAnyKey = Object.values(appState.apiKeys).some(key => key && key.length > 0);
 
+    // BUGFIX: esta era a "janela inicial de configuração de API" que todo
+    // usuário novo via primeiro - mas abria showConfigurationModal(), uma
+    // tela antiga e esquecida (modelos desatualizados tipo "GPT-4 Vision"/
+    // "Gemini 1.5 Pro", sem max-height/scroll, estourava a tela) que nunca
+    // foi atualizada junto com o catálogo de modelos real (AIModelModal, já
+    // usado no resto do app). Agora abre o mesmo modal único e atualizado,
+    // que já tem o texto explicativo + recomendação de início rápido.
     if (!hasAnyKey) {
-        showConfigurationModal();
+        AIModelModal.open();
     }
 }
 
@@ -814,145 +854,10 @@ function removeAPIKey(aiId) {
     }
 }
 
-function showConfigurationModal() {
-    const modal = document.createElement('div');
-    modal.className = 'modal active';
-    modal.innerHTML = `
-        <div class="modal-content" style="max-width: 700px;">
-            <h2>🔑 Configuração Inicial</h2>
-            <p>Para usar o sistema de análise de vegetação, você precisa configurar pelo menos uma API key de IA.</p>
-
-            <div style="margin: 20px 0; padding: 15px; background: #f7fafc; border-radius: 8px;">
-                <h3 style="margin-bottom: 15px;">Modelos Disponíveis:</h3>
-
-                <div style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 8px; border-left: 4px solid #667eea;">
-                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
-                        <div>
-                            <strong style="font-size: 1.1em;">🤖 Claude 3.5 Sonnet</strong>
-                            <br><small style="color: #718096;">Anthropic - Excelente para análise detalhada de vegetação</small>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 10px; margin-top: 10px;">
-                        <button class="btn btn-small btn-primary" onclick="configureAPIKey('claude')">
-                            Configurar
-                        </button>
-                        <a href="https://console.anthropic.com/settings/keys" target="_blank"
-                           class="btn btn-small btn-secondary" style="text-decoration: none;">
-                            Obter Chave →
-                        </a>
-                    </div>
-                </div>
-
-                <div style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 8px; border-left: 4px solid #48bb78;">
-                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
-                        <div>
-                            <strong style="font-size: 1.1em;">🧠 GPT-4 Vision</strong>
-                            <br><small style="color: #718096;">OpenAI - Ótimo reconhecimento de padrões visuais</small>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 10px; margin-top: 10px;">
-                        <button class="btn btn-small btn-primary" onclick="configureAPIKey('gpt4')">
-                            Configurar
-                        </button>
-                        <a href="https://platform.openai.com/api-keys" target="_blank"
-                           class="btn btn-small btn-secondary" style="text-decoration: none;">
-                            Obter Chave →
-                        </a>
-                    </div>
-                </div>
-
-                <div style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 8px; border-left: 4px solid #ed8936;">
-                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
-                        <div>
-                            <strong style="font-size: 1.1em;">✨ Gemini 1.5 Pro</strong>
-                            <br><small style="color: #718096;">Google - Análise rápida e eficiente</small>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 10px; margin-top: 10px;">
-                        <button class="btn btn-small btn-primary" onclick="configureAPIKey('gemini')">
-                            Configurar
-                        </button>
-                        <a href="https://aistudio.google.com/app/apikey" target="_blank"
-                           class="btn btn-small btn-secondary" style="text-decoration: none;">
-                            Obter Chave →
-                        </a>
-                    </div>
-                </div>
-
-                <div style="margin: 25px 0 15px 0; padding: 10px; background: #c6f6d5; border-radius: 8px;">
-                    <strong style="color: #22543d;">🎉 Modelos Gratuitos (Open Source / Free Tier)</strong>
-                </div>
-
-                <div style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 8px; border-left: 4px solid #48bb78;">
-                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
-                        <div>
-                            <strong style="font-size: 1.1em;">🚀 DeepSeek Chat</strong>
-                            <br><small style="color: #718096;">DeepSeek - Totalmente gratuito (US$ 0.14/1M tokens)</small>
-                            <br><small style="color: #22543d; font-weight: 600;">✓ 100% Grátis!</small>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 10px; margin-top: 10px;">
-                        <button class="btn btn-small btn-primary" onclick="configureAPIKey('deepseek')">
-                            Configurar
-                        </button>
-                        <a href="https://platform.deepseek.com/api_keys" target="_blank"
-                           class="btn btn-small btn-secondary" style="text-decoration: none;">
-                            Obter Chave →
-                        </a>
-                    </div>
-                </div>
-
-                <div style="margin-bottom: 20px; padding: 15px; background: white; border-radius: 8px; border-left: 4px solid #48bb78;">
-                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
-                        <div>
-                            <strong style="font-size: 1.1em;">🌐 Alibaba Qwen VL</strong>
-                            <br><small style="color: #718096;">Alibaba DashScope - Grátis com limites generosos</small>
-                            <br><small style="color: #22543d; font-weight: 600;">✓ Free Tier Disponível</small>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 10px; margin-top: 10px;">
-                        <button class="btn btn-small btn-primary" onclick="configureAPIKey('qwen')">
-                            Configurar
-                        </button>
-                        <a href="https://dashscope.console.aliyun.com/apiKey" target="_blank"
-                           class="btn btn-small btn-secondary" style="text-decoration: none;">
-                            Obter Chave →
-                        </a>
-                    </div>
-                </div>
-
-                <div style="margin-bottom: 0; padding: 15px; background: white; border-radius: 8px; border-left: 4px solid #48bb78;">
-                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
-                        <div>
-                            <strong style="font-size: 1.1em;">🤗 HuggingFace LLaVA</strong>
-                            <br><small style="color: #718096;">HuggingFace - Modelos open source totalmente gratuitos</small>
-                            <br><small style="color: #22543d; font-weight: 600;">✓ 100% Open Source!</small>
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 10px; margin-top: 10px;">
-                        <button class="btn btn-small btn-primary" onclick="configureAPIKey('huggingface')">
-                            Configurar
-                        </button>
-                        <a href="https://huggingface.co/settings/tokens" target="_blank"
-                           class="btn btn-small btn-secondary" style="text-decoration: none;">
-                            Obter Token →
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <p style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 6px; font-size: 0.9rem;">
-                💡 <strong>Dica:</strong> As API keys são armazenadas localmente no seu navegador e não são enviadas para servidores externos.
-            </p>
-
-            <div class="form-actions">
-                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">Fechar</button>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(modal);
-}
+// BUGFIX: showConfigurationModal() (a antiga tela inicial de config de API -
+// modelos desatualizados tipo "GPT-4 Vision"/"Gemini 1.5 Pro", sem
+// max-height/scroll, estourava a tela) foi removida. checkAPIKeys() agora
+// abre AIModelModal.open(), o mesmo modal atualizado usado no resto do app.
 
 // Funções principais
 function handleImageSelection(e) {

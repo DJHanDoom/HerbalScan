@@ -119,6 +119,97 @@
     line-height: 1.6;
 }
 
+/* Explicação em linguagem simples pra quem nunca usou o app - PEDIDO:
+   "deve instruir claramente a um usuario leigo o que deve ser feito e
+   porque". Fica no topo do modal, antes de qualquer escolha. */
+.ai-explainer {
+    background: #eef6f1;
+    border: 1px solid rgba(46, 89, 66, 0.25);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+}
+
+.ai-explainer h3 {
+    margin: 0 0 8px 0;
+    color: var(--primary-color);
+    font-size: 1.05rem;
+}
+
+.ai-explainer p {
+    margin: 0 0 8px 0;
+    line-height: 1.55;
+    color: var(--text-primary);
+    font-size: 0.92rem;
+}
+
+.ai-explainer p:last-child {
+    margin-bottom: 0;
+}
+
+/* Card de início rápido - um caminho único e recomendado pro usuário leigo,
+   em vez de jogar 6 opções sem contexto (ver AIModelModal._renderQuickstart) */
+.ai-quickstart-card {
+    background: linear-gradient(135deg, #eafaf1, #e3f6ed);
+    border: 2px solid #43a047;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    position: relative;
+}
+
+.ai-quickstart-badge {
+    display: inline-block;
+    background: #2e7d32;
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 20px;
+    margin-bottom: 10px;
+}
+
+.ai-quickstart-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--primary-color);
+    margin-bottom: 6px;
+}
+
+.ai-quickstart-sub {
+    font-weight: 400;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.ai-quickstart-text {
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    margin: 0 0 14px 0;
+}
+
+.ai-quickstart-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.ai-quickstart-step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    color: white;
+    font-size: 0.8rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
 .ai-provider-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
