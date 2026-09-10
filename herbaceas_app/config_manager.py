@@ -5,9 +5,21 @@ Cria e gerencia o arquivo .env automaticamente.
 import os
 import sys
 from pathlib import Path
-import tkinter as tk
-from tkinter import ttk, messagebox
 import webbrowser
+# BUGFIX: tkinter era importado aqui no topo do modulo - em qualquer lugar
+# que so precisa de get_app_data_dir()/load_env()/save_env() (ex: app.py
+# rodando num container Linux, sem GUI), o import falhava antes mesmo de
+# chegar no try/except de ensure_config() (que só protege a INSTANCIAÇÃO do
+# wizard, não o import do modulo). python:3.12-slim nem tem tkinter
+# instalado (pacote python3-tk não vem por padrão). Adiado pra dentro de
+# ConfigWizard - só é necessário quando o wizard realmente abre (uso local/
+# desktop), nunca no servidor web.
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox
+    TKINTER_AVAILABLE = True
+except ImportError:
+    TKINTER_AVAILABLE = False
 
 
 def get_app_data_dir():
@@ -283,19 +295,26 @@ def ensure_config():
 
     if not env_exists():
         print("[DEBUG] .env não existe, criando configuração...")
-        try:
-            print("[DEBUG] Tentando abrir wizard...")
-            wizard = ConfigWizard()
-            wizard.run()
-            print("[DEBUG] Wizard concluído!")
-        except Exception as e:
-            # Se falhar ao criar wizard, criar .env básico
-            print(f"[DEBUG] Erro no wizard: {e}")
-            import traceback
-            traceback.print_exc()
-            print("[DEBUG] Criando configuração padrão...")
+        # Sem tkinter (ex: container Linux/servidor headless) nem tenta abrir
+        # o wizard - vai direto pro fallback de config padrão abaixo.
+        if not TKINTER_AVAILABLE:
+            print("[DEBUG] tkinter indisponível (ambiente headless/servidor) - pulando wizard")
             save_env({'DEFAULT_AI': 'gemini'})
             print("[DEBUG] Configuração padrão criada!")
+        else:
+            try:
+                print("[DEBUG] Tentando abrir wizard...")
+                wizard = ConfigWizard()
+                wizard.run()
+                print("[DEBUG] Wizard concluído!")
+            except Exception as e:
+                # Se falhar ao criar wizard, criar .env básico
+                print(f"[DEBUG] Erro no wizard: {e}")
+                import traceback
+                traceback.print_exc()
+                print("[DEBUG] Criando configuração padrão...")
+                save_env({'DEFAULT_AI': 'gemini'})
+                print("[DEBUG] Configuração padrão criada!")
 
     # Carregar as variáveis de ambiente
     print("[DEBUG] Carregando variáveis de ambiente...")
