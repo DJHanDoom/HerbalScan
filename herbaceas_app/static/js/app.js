@@ -6013,21 +6013,28 @@ async function exportToZip() {
         btn.disabled = true;
         btn.textContent = '🔄 Gerando ZIP...';
 
-        const response = await fetch('/export_zip', {
+        // BUGFIX: usava /export_zip, que monta as subparcelas com chaves
+        // sintéticas "sub_N" (N = posição na lista) mas guarda o id numérico
+        // REAL da subparcela só dentro do campo 'nome'. Ao reimportar, o
+        // backend usa essas chaves "sub_N" tal como vêm no JSON como as
+        // chaves canônicas de analysis_data[...]['subparcelas'], mas o
+        // FRONTEND reconstrói result.subparcela a partir de 'nome' (o id
+        // numérico original, ex: 1) - depois de importar, qualquer edição de
+        // polígono manda subparcela=1 pro backend, que só tem a chave
+        // "sub_1" -> 404 "Subparcela não encontrada" (nunca falhava no
+        // export em si, só depois, ao editar um polígono do projeto
+        // reimportado). /api/analysis/export-complete usa o id numérico real
+        // como chave em vez de "sub_N" sintético - mesma convenção usada em
+        // todo o resto do app - e o backend já monta o pacote a partir do
+        // estado salvo (analysis_data), sem precisar reenviar tudo do
+        // cliente.
+        const response = await fetch('/api/analysis/export-complete', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                parcela: appState.parcelaNome,
-                especies: appState.especies,
-                analysisResults: appState.analysisResults,
-                analytics: {
-                    diversity: AdvancedAnalytics.calculateShannonDiversity(),
-                    richness: AdvancedAnalytics.calculateSpeciesRichness(),
-                    eveness: AdvancedAnalytics.calculateEveness(),
-                    simpson: AdvancedAnalytics.calculateSimpsonDominance()
-                }
+                parcela: appState.parcelaNome
             })
         });
 

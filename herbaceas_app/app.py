@@ -6403,13 +6403,37 @@ def import_complete_analysis():
                     'subparcela': idx
                 })
             
+            # BUGFIX: ZIPs exportados pelo endpoint antigo /export_zip usavam
+            # chaves sintéticas "sub_N" pras subparcelas, mas guardavam o id
+            # numérico REAL só dentro do campo 'nome' de cada uma. A resposta
+            # deste endpoint devolve pro frontend result.subparcela = 'nome'
+            # (não a chave do dict) - depois de importar um ZIP desses,
+            # qualquer edição de polígono mandava esse id numérico de volta
+            # pro backend, que só tinha a chave sintética "sub_N" -> 404
+            # "Subparcela não encontrada". Corrigido na fonte (/export_zip
+            # não é mais usado pro botão "Exportar Projeto"), mas ZIPs já
+            # exportados ANTES dessa correção continuam com esse formato -
+            # remapeia aqui pra manter compatibilidade com pacotes antigos:
+            # sempre que a chave parecer sintética ("sub_N") e existir um
+            # 'nome' que sirva de id real, a subparcela é regravada sob essa
+            # chave (a mesma que volta pro frontend como result.subparcela).
+            fixed_subparcelas = {}
+            for sub_key, sub_data in imported_data['subparcelas'].items():
+                real_key = sub_key
+                if isinstance(sub_key, str) and sub_key.startswith('sub_'):
+                    nome = sub_data.get('nome')
+                    if nome not in (None, ''):
+                        real_key = nome
+                fixed_subparcelas[real_key] = sub_data
+            imported_data['subparcelas'] = fixed_subparcelas
+
             # Restaurar dados na memória
             if parcela_name not in analysis_data['parcelas']:
                 analysis_data['parcelas'][parcela_name] = {
                     'images': [],
                     'subparcelas': {}
                 }
-            
+
             analysis_data['parcelas'][parcela_name]['subparcelas'] = imported_data['subparcelas']
             analysis_data['parcelas'][parcela_name]['images'] = images_list
             
@@ -6424,11 +6448,25 @@ def import_complete_analysis():
             shutil.rmtree(temp_dir, ignore_errors=True)
             
             # Preparar dados de resposta completos para restaurar a interface
+            #
+            # BUGFIX (raiz do "subparcela não encontrada" ao editar um
+            # polígono de projeto importado): result_data['subparcela'] vinha
+            # de subparcela_data.get('nome', ...) - um campo que analises
+            # reais (vindas do fluxo normal de analise por IA) NUNCA tem, so
+            # caindo sempre no fallback "Sub N" (nem batendo com o formato
+            # "sub_N" das chaves antigas). O frontend guarda esse valor como
+            # result.subparcela e reenvia exatamente ele em toda edição de
+            # polígono depois - PRECISA ser identico a chave usada em
+            # analysis_data['parcelas'][x]['subparcelas'], nunca um valor
+            # derivado/reformatado. Usar subparcela_id (a propria chave do
+            # dict, já remapeada acima se veio de um ZIP no formato antigo)
+            # garante essa igualdade por construção, não por coincidência de
+            # formato.
             analysis_results = []
             print(f"\n📤 Preparando resposta para frontend...")
-            for subparcela_id, subparcela_data in sorted(imported_data['subparcelas'].items()):
+            for subparcela_id, subparcela_data in sorted(imported_data['subparcelas'].items(), key=lambda kv: str(kv[0])):
                 result_data = {
-                    'subparcela': subparcela_data.get('nome', f'Sub {len(analysis_results) + 1}'),
+                    'subparcela': subparcela_id,
                     'image_path': subparcela_data.get('image_path', ''),
                     'especies': subparcela_data.get('especies', []),
                     'cobertura_total': subparcela_data.get('cobertura_total', 0),

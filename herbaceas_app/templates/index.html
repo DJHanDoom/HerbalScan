@@ -146,16 +146,14 @@
             <button id="help-btn" class="btn btn-secondary" onclick="openHelpModal()" style="margin-right: 15px;">
                 ❓ Help
             </button>
-            <div class="export-footer-buttons" style="display: flex; align-items: center; gap: 15px;">
-                <div class="export-footer-title"
-                    style="margin-right: 15px; font-weight: 600; color: var(--text-secondary);">📦 Exportação &
-                    Importação:</div>
+            <div class="export-footer-title">📦 Exportação &amp; Importação:</div>
+            <div class="export-footer-buttons">
+                <button id="export-zip-btn" class="btn btn-warning">📦 Exportar Projeto</button>
                 <button id="import-zip-footer-btn" class="btn btn-info" onclick="AnalysisManager.importCompleteZip()">
                     📥 Importar Projeto
                 </button>
                 <button id="export-excel-btn" class="btn btn-primary">📊 Excel</button>
                 <button id="export-pdf-btn" class="btn btn-danger">📄 PDF</button>
-                <button id="export-zip-btn" class="btn btn-warning">📦 ZIP</button>
                 <button id="new-analysis-footer-btn" class="btn btn-success" onclick="startNewAnalysis()">
                     ✨ Nova Análise
                 </button>
@@ -163,7 +161,7 @@
         </div>
     </footer>
 
-    <div style="height: 50px;"></div> <!-- Espaçamento para o footer fixo -->
+    <div id="export-footer-spacer" style="height: 50px;"></div> <!-- Espaçamento para o footer fixo (some no mobile, onde o footer não é mais fixo) -->
 
     <!-- Overlay do Painel Lateral -->
     <div id="edit-panel-overlay" class="edit-panel-overlay"></div>

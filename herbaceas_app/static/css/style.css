@@ -1719,8 +1719,28 @@ tbody tr:hover {
 }
 
 @media (max-width: 768px) {
+    /* BUGFIX: no celular, com o footer position:fixed e os 5 botões (+ Help
+       + título) empilhados em 1 coluna cada um 100% de largura, o rodapé
+       virava um bloco fixo enorme (7+ linhas) grudado na tela, cobrindo boa
+       parte do conteúdo por baixo o tempo todo, mesmo rolando a página.
+       PEDIDO: "desafixar" o rodapé no mobile - ele volta a ser um bloco
+       normal no fim da página (rola junto com o resto), em vez de flutuar
+       permanentemente sobre o conteúdo. Grade de 2 colunas (em vez de 1)
+       também reduz a altura do bloco pela metade.
+       */
+    #export-footer {
+        position: static;
+        animation: none;
+    }
+
+    /* Sem o footer fixo, não há mais nada pra "compensar" no fim da página */
+    #export-footer-spacer {
+        height: 0;
+    }
+
     .export-footer-buttons {
-        flex-direction: column;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
     }
 
     .export-footer-buttons .btn {
