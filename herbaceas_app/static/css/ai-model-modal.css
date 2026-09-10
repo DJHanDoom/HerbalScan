@@ -1,0 +1,211 @@
+/* AI Model Selection Modal - segue o mesmo padrão visual do help-modal.css */
+
+/* Botão-resumo que abre o modal (substitui o antigo <select id="ai-model">) */
+.ai-model-summary-btn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 12px 16px;
+    background: white;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: var(--font-body);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.ai-model-summary-btn:hover {
+    border-color: var(--primary-color);
+    box-shadow: 0 2px 8px rgba(46, 89, 66, 0.12);
+}
+
+.ai-model-summary-edit {
+    flex-shrink: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+#ai-model-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 10000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow-y: auto;
+    padding: 20px;
+}
+
+.ai-modal-content {
+    background: var(--background-color);
+    border-radius: 12px;
+    max-width: 1000px;
+    width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    animation: aiModalSlideIn 0.3s ease-out;
+}
+
+@keyframes aiModalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.ai-modal-header {
+    background: linear-gradient(135deg, #2e7d32, #43a047);
+    color: white;
+    padding: 20px 30px;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ai-modal-header h2 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 600;
+}
+
+.ai-modal-header .close-btn {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    color: white;
+    font-size: 32px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s;
+    line-height: 1;
+    padding: 0;
+}
+
+.ai-modal-header .close-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: rotate(90deg);
+}
+
+.ai-modal-body {
+    padding: 24px 30px 30px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.ai-modal-intro {
+    color: var(--text-secondary);
+    margin: 0 0 20px 0;
+    line-height: 1.6;
+}
+
+.ai-provider-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+}
+
+.ai-provider-card {
+    background: var(--card-bg);
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: all 0.2s;
+}
+
+.ai-provider-card.selected {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(46, 89, 66, 0.15);
+}
+
+.ai-provider-card-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.ai-provider-name {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: var(--primary-color);
+    margin-right: auto;
+}
+
+.ai-provider-sub {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-top: -6px;
+}
+
+.ai-provider-card .ai-select {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    font-size: 0.9rem;
+    background: white;
+}
+
+.ai-provider-key-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.85rem;
+}
+
+.ai-provider-key-status {
+    color: var(--text-secondary);
+}
+
+.ai-provider-select-btn {
+    width: 100%;
+    margin-top: 4px;
+}
+
+@media (max-width: 768px) {
+    .ai-modal-content {
+        max-width: 95%;
+        margin: 10px;
+    }
+
+    .ai-modal-header {
+        padding: 15px 20px;
+    }
+
+    .ai-modal-header h2 {
+        font-size: 20px;
+    }
+
+    .ai-modal-body {
+        padding: 16px 20px 20px;
+    }
+
+    .ai-provider-grid {
+        grid-template-columns: 1fr;
+    }
+}

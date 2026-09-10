@@ -818,17 +818,18 @@ const PromptConfig = {
 
         localStorage.setItem('promptConfig', JSON.stringify(config));
 
-        // Verificar se há imagens pendentes para adicionar à análise
-        if (window.appState && window.appState.pendingNewImages) {
-            this.close();
-            // Chamar função para adicionar imagens com a configuração
-            if (window.addImagesToExistingAnalysis) {
-                window.addImagesToExistingAnalysis(window.appState.pendingNewImages, config);
-            }
-        } else {
-            alert('✓ Configuração salva! Será aplicada na próxima análise.');
-            this.close();
-        }
+        // BUGFIX: aqui existia um atalho legado que, se houvesse fotos
+        // pendentes (appState.pendingNewImages), disparava a análise
+        // AUTOMATICAMENTE ao salvar o prompt - sem miniatura, sem metadados e
+        // sem confirmação do usuário. Além de ser exatamente o comportamento
+        // reclamado ("novas fotos são incluídas nas análises sem uma
+        // confirmação"), ele chamava addImagesToExistingAnalysis com a
+        // assinatura antiga de 2 argumentos (files, config), que hoje é
+        // (files, metadata, promptConfig, scope) - o config cairia no lugar
+        // dos metadados. O fluxo de adicionar fotos agora tem um único ponto
+        // de entrada explícito: o painel de confirmação em showAddImagesConfirm().
+        alert('✓ Configuração salva! Será aplicada na próxima análise.');
+        this.close();
     },
 
     loadSavedConfig() {

@@ -6,6 +6,23 @@ import json
 import zipfile
 import io
 import shutil
+import math
+import copy
+
+# Forçar UTF-8 em stdout/stderr no Windows, sempre (dev mode E executável
+# congelado). O bug histórico daqui era só aplicar isso quando `sys.frozen`
+# estava setado, então rodando via `python app.py` direto o console ficava
+# em cp1252 e qualquer print() com emoji (🔑, ✓, ⚠️...) derrubava a request
+# inteira com UnicodeEncodeError. errors='replace' garante que mesmo um
+# caractere fora do alcance nunca mais derruba o processo.
+if sys.platform == 'win32':
+    for _stream_name in ('stdout', 'stderr'):
+        _stream = getattr(sys, _stream_name, None)
+        if _stream is not None and hasattr(_stream, 'reconfigure'):
+            try:
+                _stream.reconfigure(encoding='utf-8', errors='replace')
+            except Exception:
+                pass
 
 # Tratamento de erro global para capturar falhas silenciosas
 # Deve ser configurado o mais cedo possível
@@ -495,6 +512,13 @@ def _convert_entities_to_species(analysis_result):
             'tamanho_evidencia': ent.get('tamanho_evidencia'),
             # Polígonos de área (coordenadas em % 0-100)
             'areas': ent.get('areas'),  # [[x1,y1], [x2,y2], ...] formato do prompt de paisagem
+            # BUGFIX: numero_individuos (contagem de individuos do morfotipo)
+            # nunca era copiado aqui - mesmo quando a IA informava o campo
+            # corretamente, ele era descartado nesta conversao entidade->
+            # especie, e a contagem exibida na tabela sempre caia no default
+            # de 1 mais adiante. 'contagem' aceito como alias (nome de campo
+            # usado em uma instrucao antiga do prompt, ver build_prompt).
+            'numero_individuos': ent.get('numero_individuos') or ent.get('contagem'),
         }
         
         # Remover campos None para não poluir o objeto
@@ -509,6 +533,102 @@ def _convert_entities_to_species(analysis_result):
     return analysis_result
 
 
+def _resolve_species_polygons(esp):
+    """Resolve a lista de poligonos VIGENTE de uma especie, em ordem de
+    prioridade, no formato [{'points': [{x,y}, ...]}, ...] que polygon_utils
+    espera.
+
+    Prioridade:
+      1. 'area_shapes'   - desenho do usuario (manual ou importacao ja
+                           persistida via /api/species/area). Sempre vence:
+                           edicao manual e a fonte da verdade.
+      2. 'species_shapes'- poligonos da IA ja no formato canonico.
+      3. 'areas'         - poligonos crus da IA (lista de listas de pontos).
+
+    Existe porque polygon_utils lia SOMENTE 'area_shapes': logo apos uma
+    analise, quando o usuario ainda nao desenhou nada, os poligonos da IA
+    vivem em 'species_shapes'/'areas' e o recalculo devolvia 0% pra todas as
+    especies, apagando a estimativa que estava na tela.
+    """
+    if not isinstance(esp, dict):
+        return []
+
+    shapes = esp.get('area_shapes')
+    if isinstance(shapes, list) and shapes:
+        out = [s for s in shapes if isinstance(s, dict) and s.get('points')]
+        if out:
+            return out
+
+    shapes = esp.get('species_shapes')
+    if isinstance(shapes, list) and shapes:
+        out = [s for s in shapes if isinstance(s, dict) and s.get('points')]
+        if out:
+            return out
+
+    areas = esp.get('areas')
+    if isinstance(areas, list) and areas:
+        out = []
+        for poly in areas:
+            # 'areas' pode vir como lista de pontos, ou ja como {'points': [...]}
+            if isinstance(poly, dict) and poly.get('points'):
+                out.append({'points': poly['points']})
+            elif isinstance(poly, list) and len(poly) >= 3:
+                out.append({'points': poly})
+        if out:
+            return out
+
+    return []
+
+
+def _sanitize_ai_points(raw_points, tolerance=20.0):
+    """Valida/normaliza um poligono cru vindo da IA (coords 0..100 esperadas).
+
+    Aceita pontos em formato {"x":..,"y":..} OU [x,y]. NUNCA descarta um
+    poligono so por estar fora de escala - a IA as vezes responde num
+    intervalo maior (ex: 0..1000 em vez de 0..100), mas de forma
+    CONSISTENTE entre os pontos. Exemplo real visto em teste: pontos como
+    x=1000, x=860, x=275 pareciam lixo, mas divididos por 10 formavam um
+    quadrilatero perfeitamente valido (o formato pretendido sobrevive, so a
+    escala estava errada). Entao: detecta esse fator de escala (potencia de
+    10) e corrige antes de clampar, em vez de jogar a resposta da IA fora.
+    So o que realmente nao da pra usar (menos de 3 pontos numericos) retorna
+    None; qualquer coisa com forma reconhecivel e preservada.
+    """
+    if not isinstance(raw_points, list) or len(raw_points) < 3:
+        return None
+
+    parsed = []
+    for p in raw_points:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+        elif isinstance(p, dict) and 'x' in p and 'y' in p:
+            x, y = p['x'], p['y']
+        else:
+            continue
+        try:
+            parsed.append((float(x), float(y)))
+        except (TypeError, ValueError):
+            continue
+
+    if len(parsed) < 3:
+        return None
+
+    max_coord = max((max(abs(x), abs(y)) for x, y in parsed), default=0.0)
+
+    # Corrigir escala: se o maior valor absoluto passa de 100+tolerancia,
+    # assume que a IA usou uma escala 10x/100x/etc maior por engano e
+    # normaliza pela potencia de 10 mais proxima que traz o pico de volta
+    # para perto de 0..100.
+    if max_coord > 100 + tolerance:
+        factor = 10 ** math.ceil(math.log10(max_coord / 100.0))
+        parsed = [(x / factor, y / factor) for x, y in parsed]
+
+    # Clampar o residual (folga normal tipo 102 -> 100, ou sobra minima
+    # depois da correcao de escala acima)
+    sanitized = [{'x': max(0.0, min(100.0, x)), 'y': max(0.0, min(100.0, y))} for x, y in parsed]
+    return sanitized if len(sanitized) >= 3 else None
+
+
 def validate_and_filter_results(analysis_result, template_config=None):
     """
     Valida e filtra os resultados da análise de acordo com as configurações do template.
@@ -521,6 +641,15 @@ def validate_and_filter_results(analysis_result, template_config=None):
     Returns:
         dict: resultado filtrado e validado
     """
+    # raw_mode: usado por fluxos que NÃO retornam o formato padrão
+    # {'especies': [...]} - ex: deteccao de uma especie especifica (ver
+    # /api/species/detect-specific), cujo prompt customizado pede um JSON
+    # {apelido, areas: [...]} diferente. Pular toda a validacao/agrupamento
+    # de especies (que exige o array 'especies' e quebraria/filtraria tudo)
+    # e devolver a resposta da IA como veio, ja parseada de JSON.
+    if template_config and template_config.get('raw_mode'):
+        return analysis_result
+
     # 🛰️ SUPORTE A MODO PAISAGEM: Converter 'entidades' para 'especies'
     if 'entidades' in analysis_result and 'especies' not in analysis_result:
         print("🛰️ Modo Paisagem detectado: convertendo 'entidades' para 'especies'")
@@ -582,6 +711,52 @@ def validate_and_filter_results(analysis_result, template_config=None):
     print(f"🔍 validate_and_filter_results - INÍCIO")
     print(f"   Total espécies RECEBIDAS da IA: {len(analysis_result.get('especies', []))}")
 
+    # Sanitizar TODOS os poligonos crus vindos da IA (area_shape, species_shapes,
+    # areas por especie) antes de qualquer uso. Bug real encontrado em teste:
+    # a IA as vezes responde num intervalo maior que 0..100 (ex: escala 0..1000
+    # por engano), o que sem correcao virava poligono ~10x maior que a propria
+    # imagem (visualmente "fora da foto", cobertura errada, backend rejeitando
+    # com 400 ao tentar editar/salvar essa forma). _sanitize_ai_points() NUNCA
+    # descarta a resposta da IA por isso - ela detecta e corrige o fator de
+    # escala (a forma pretendida sobrevive), preservando a resposta em vez de
+    # jogar fora. Só falha (None) se sobrarem menos de 3 pontos numericos utilizaveis.
+    # Fallback: imagem inteira quando nao ha area_shape nenhuma (pedido
+    # explicito do usuario - "quando nao houver delimitador de parcela,
+    # considerar a imagem inteira") - sem isso, a ausencia de area_shape
+    # bloqueava o botao "Importar Areas IA"
+    # (que exige uma area 100% definida antes de importar especies).
+    _FULL_IMAGE_AREA_SHAPE_POINTS = [
+        {'x': 0.0, 'y': 0.0}, {'x': 100.0, 'y': 0.0},
+        {'x': 100.0, 'y': 100.0}, {'x': 0.0, 'y': 100.0},
+    ]
+    if analysis_result.get('area_shape'):
+        sanitized_pts = _sanitize_ai_points(analysis_result['area_shape'].get('points'))
+        analysis_result['area_shape'] = {'points': sanitized_pts or _FULL_IMAGE_AREA_SHAPE_POINTS}
+    else:
+        analysis_result['area_shape'] = {'points': _FULL_IMAGE_AREA_SHAPE_POINTS}
+
+    if analysis_result.get('species_shapes'):
+        sanitized_shapes = {}
+        for _idx, _shapes in analysis_result['species_shapes'].items():
+            _clean = []
+            for _shape in (_shapes or []):
+                _pts = _sanitize_ai_points((_shape or {}).get('points'))
+                if _pts:
+                    _clean.append({'points': _pts})
+            if _clean:
+                sanitized_shapes[_idx] = _clean
+        analysis_result['species_shapes'] = sanitized_shapes
+
+    for _esp in analysis_result.get('especies', []):
+        # 'areas': lista de poligonos, cada poligono uma lista de pontos {x,y}
+        if _esp.get('areas'):
+            _clean_polys = []
+            for _poly in _esp['areas']:
+                _pts = _sanitize_ai_points(_poly)
+                if _pts:
+                    _clean_polys.append(_pts)
+            _esp['areas'] = _clean_polys
+
     # 1. AGRUPAMENTO E NORMALIZAÇÃO DE ESPÉCIES
     # Mapa para agrupar espécies pelo nome normalizado
     especies_map = {}
@@ -600,7 +775,40 @@ def validate_and_filter_results(analysis_result, template_config=None):
     # Área total da imagem (sistema de coordenadas 0-100)
     TOTAL_IMAGE_AREA = 10000.0  # 100 * 100
 
-    for esp in analysis_result.get('especies', []):
+    # species_shapes (quando presente) e um dict separado no JSON da IA,
+    # {"<indice original no array especies>": [{"points": [{x,y},...]}, ...]}.
+    # Precisa ser mesclado aqui, ANTES do agrupamento/reindexacao abaixo,
+    # senao fica orfao: os indices finais de especies_filtradas nao
+    # correspondem mais aos indices originais da IA (seuvo campos podem se
+    # fundir por nome, ser reordenados por cobertura, etc). Bug real
+    # encontrado em teste: o frontend sempre reportava "0 areas importadas"
+    # porque essa mesclagem nunca acontecia.
+    raw_species_shapes = analysis_result.get('species_shapes') or {}
+
+    # Recorte geometrico pelo delimitador (Camada 1 follow-up): modelos de
+    # visao nem sempre respeitam com precisao o delimitador fisico da
+    # subparcela (PVC/madeira/barbante) que o prompt pede para identificar -
+    # poligonos de especie podem "vazar" um pouco para fora dele. Em vez de
+    # confiar cegamente na IA, recortamos aqui com Shapely: garante que
+    # nenhum poligono (nem a cobertura calculada a partir dele) fique fora
+    # da area_shape, independente da precisao do modelo.
+    _area_shape_boundary = (analysis_result.get('area_shape') or {}).get('points')
+    try:
+        from polygon_utils import clip_polygon_to_boundary, SHAPELY_OK as _SHAPELY_OK
+    except ImportError:
+        clip_polygon_to_boundary, _SHAPELY_OK = None, False
+
+    def _clip_polygons(poly_list_in):
+        """Recorta uma lista de poligonos [[{x,y},...], ...] pelo delimitador.
+        Sem boundary/shapely disponivel, retorna a lista original (fail-open)."""
+        if not _SHAPELY_OK or not _area_shape_boundary or not poly_list_in:
+            return poly_list_in
+        clipped = []
+        for poly in poly_list_in:
+            clipped.extend(clip_polygon_to_boundary(poly, _area_shape_boundary))
+        return clipped
+
+    for orig_idx, esp in enumerate(analysis_result.get('especies', [])):
         apelido_raw = esp.get('apelido', 'Desconhecido')
         # Normalizar: minúsculo, remover acentos (simples), remover espaços extras
         import unicodedata
@@ -631,6 +839,7 @@ def validate_and_filter_results(analysis_result, template_config=None):
                 'observacoes': esp.get('observacoes', ''),
                 'numero_individuos': 0,
                 'areas': [], # Lista de listas de pontos (polígonos)
+                'species_shapes': [], # Polígonos no formato canônico {points:[{x,y}...]}, ver raw_species_shapes acima
                 'area_total_pixels': 0.0,
                 # Campo temporario: maior estimativa textual da IA usada como
                 # fallback quando nao ha poligono valido (Camada 1, substitui
@@ -651,24 +860,48 @@ def validate_and_filter_results(analysis_result, template_config=None):
                 target['_ai_cobertura_max'] = ai_est
         except (TypeError, ValueError):
             pass
-        
-        # 1. Somar Indivíduos
-        try:
-            target['numero_individuos'] += int(esp.get('numero_individuos', 1))
-        except:
-            target['numero_individuos'] += 1
-            
-        # 2. Agregar Polígonos
+
+        # 2. Agregar Polígonos (calculado ANTES da contagem de indivíduos, ver
+        # BUGFIX abaixo - a contagem depende de quantos polígonos vieram)
         # A IA pode retornar 'areas' (lista de poligonos) ou 'points' (um poligono em 'area_shape' as vezes incorreto)
         # Mas no modo paisagem, esperamos 'areas' dentro da entidade, ou convertemos.
-        # O _convert_entities_to_species infelizmente não traz 'areas' explicitamente no código anterior...
-        # VAMOS CHECAR: na conversão anterior em validate_and_filter_results não copiamos 'areas'.
-        # PRECISAMOS COPIAR 'areas' no bloco anterior de "Modo Paisagem".
-        # Mas assumindo que 'areas' pode estar em 'esp' se trouxermos:
         poly_list = esp.get('areas', [])
         if not poly_list and 'points' in esp: # Fallback
              poly_list = [esp['points']]
-             
+        poly_list = _clip_polygons(poly_list)
+
+        # 1. Somar Indivíduos
+        # BUGFIX RAIZ: o parametro count_individuals=False no template padrao
+        # de paisagem/drone fazia o schema do JSON nem pedir 'numero_individuos'
+        # pra IA - o campo simplesmente nunca vinha na resposta. O default
+        # ANTIGO (esp.get('numero_individuos', 1)) tratava "campo ausente"
+        # exatamente igual a "1 individuo confirmado", entao mesmo quando a IA
+        # desenhava 2+ poligonos pro mesmo morfotipo (2+ individuos visiveis,
+        # como no caso reportado - "Dois indivíduos com coloração distinta"
+        # nas observacoes, mas indivíduos=1 na tabela), a contagem ficava
+        # travada em 1. Agora, se a IA nao informou o campo (ou informou 0),
+        # o fallback e o numero de poligonos desenhados - deixa de contar como
+        # "1 individuo por padrao" e passa a contar "1 individuo por poligono"
+        # (correto na maioria dos casos, ja que cada poligono deve tracar UM
+        # espécime - ver instrucoes de geometria no prompt). Quando a IA
+        # informa um numero EXPLICITO (ex: 2 poligonos sao pedacos do MESMO
+        # individuo ocluso), esse numero e respeitado normalmente.
+        raw_individuos = esp.get('numero_individuos')
+        try:
+            n_individuos = int(raw_individuos) if raw_individuos not in (None, '') else None
+        except (TypeError, ValueError):
+            n_individuos = None
+        if not n_individuos or n_individuos <= 0:
+            n_individuos = len(poly_list) if poly_list else 1
+        target['numero_individuos'] += n_individuos
+
+        # Mesclar species_shapes[orig_idx] (formato canônico {points:[...]})
+        # usando o índice ORIGINAL (pré-agrupamento) da IA.
+        shape_entry = raw_species_shapes.get(str(orig_idx), raw_species_shapes.get(orig_idx))
+        if isinstance(shape_entry, list) and shape_entry:
+            clipped_shapes = _clip_polygons([s.get('points', []) for s in shape_entry if isinstance(s, dict)])
+            target['species_shapes'].extend({'points': pts} for pts in clipped_shapes)
+
         if poly_list:
             target['areas'].extend(poly_list)
             # Somar área geométrica
@@ -806,24 +1039,51 @@ def validate_and_filter_results(analysis_result, template_config=None):
     return analysis_result
 
 
-def get_analysis_prompt(template_name="default", custom_params=None, custom_prompt=None):
+def _format_field_context(metadata):
+    """Formata os metadados OPCIONAIS de campo (município/UF/bioma/coordenadas/
+    data) de uma subparcela como um bloco de contexto pro prompt da IA.
+    Retorna '' se não houver nada preenchido - nunca obrigatório."""
+    if not metadata or not isinstance(metadata, dict):
+        return ''
+
+    labels = {
+        'municipio': 'Município', 'uf': 'UF', 'bioma': 'Bioma',
+        'coordenadas': 'Coordenadas', 'data': 'Data da coleta',
+    }
+    linhas = [f"{labels[k]}: {metadata[k]}" for k in labels if metadata.get(k)]
+    if not linhas:
+        return ''
+
+    return (
+        "\n\n📍 CONTEXTO DE CAMPO (informado pelo usuário, use para embasar a "
+        "identificação de espécies típicas da região/época, mas continue "
+        "baseando a identificação principalmente no que é visível na imagem):\n"
+        + "\n".join(f"- {linha}" for linha in linhas) + "\n"
+    )
+
+
+def get_analysis_prompt(template_name="default", custom_params=None, custom_prompt=None, field_context=None):
     """
     Retorna o prompt para análise de imagens baseado em template ou prompt customizado
-    
+
     Args:
         template_name: nome do template (default, regeneracao, carbono, etc)
         custom_params: dict com parâmetros customizados para sobrescrever
         custom_prompt: prompt editado manualmente pelo usuário (sobrescreve template)
-    
+        field_context: dict com metadados opcionais de campo (município/UF/
+            bioma/coordenadas/data) para dar contexto adicional à IA
+
     Returns:
         str: prompt formatado
     """
+    contexto = _format_field_context(field_context)
+
     # Se houver prompt customizado (editado manualmente), usar ele diretamente
     if custom_prompt:
         print("📝 Usando prompt editado manualmente pelo usuário")
-        return custom_prompt
-    
-    return build_prompt(template_name, custom_params)
+        return custom_prompt + contexto
+
+    return build_prompt(template_name, custom_params) + contexto
 
 def analyze_image_with_claude(image_path, api_key=None, model_version=None, template_config=None):
     """Analisa uma imagem usando Claude API"""
@@ -846,7 +1106,8 @@ def analyze_image_with_claude(image_path, api_key=None, model_version=None, temp
             prompt = get_analysis_prompt(
                 template_config.get('template', 'default'),
                 template_config.get('params'),
-                template_config.get('customPrompt')  # Prompt editado manualmente
+                template_config.get('customPrompt'),  # Prompt editado manualmente
+                template_config.get('fieldContext')
             )
         else:
             prompt = get_analysis_prompt()
@@ -857,13 +1118,12 @@ def analyze_image_with_claude(image_path, api_key=None, model_version=None, temp
             print(f"Usando versão específica do Claude: {model_version}")
         else:
             # Tentar diferentes modelos Claude em ordem de preferência
-            # Modelos válidos Claude (2025)
+            # Modelos atuais (2026) - IDs sem sufixo de data, ver AI_MODELS_CATALOG
             model_names = [
-                "claude-3-7-sonnet-20251201",  # Hypothetical late 2025
-                "claude-3-5-sonnet-latest",    # Always latest 3.5 Sonnet
-                "claude-3-5-sonnet-20241022",  # Stable
-                "claude-3-5-haiku-20241022",   # Stable Haiku
-                "claude-3-opus-20240229"       # Stable Opus
+                "claude-sonnet-5",   # Melhor custo-benefício (recomendado)
+                "claude-opus-5",     # Mais avançado
+                "claude-haiku-4-5",  # Rápido/econômico
+                "claude-opus-4-8",   # Geração anterior (fallback)
             ]
 
         last_error = None
@@ -873,7 +1133,11 @@ def analyze_image_with_claude(image_path, api_key=None, model_version=None, temp
                 
                 message = client.messages.create(
                     model=model_name,
-                    max_tokens=2000,
+                    # 8192 (era 2000): 2000 tokens de saída truncava o JSON em
+                    # templates detalhados (até 15 morfotipos com observações
+                    # longas), forçando o parser de correção automática a agir
+                    # sempre. Ver mesmo ajuste em Gemini/GPT/DeepSeek/Qwen.
+                    max_tokens=8192,
                     messages=[
                         {
                             "role": "user",
@@ -941,13 +1205,10 @@ def analyze_image_with_claude(image_path, api_key=None, model_version=None, temp
                         if len(model_names) == 1:  # Se só tinha 1 modelo (o específico)
                             print("⚠️ Expandindo busca para todos os modelos Claude disponíveis")
                             model_names.extend([
-                                "claude-opus-4-1-20250805",
-                                "claude-sonnet-4-5-20250929",
-                                "claude-opus-4-20250514",
-                                "claude-sonnet-4-20250514",
-                                "claude-haiku-4-5-20251001",
-                                "claude-3-5-haiku-20241022",
-                                "claude-3-haiku-20240307"
+                                "claude-sonnet-5",
+                                "claude-opus-5",
+                                "claude-haiku-4-5",
+                                "claude-opus-4-8",
                             ])
                         continue  # Tentar próximo modelo
                     else:
@@ -998,7 +1259,7 @@ def analyze_image_with_gpt4(image_path, api_key=None, model_version=None, templa
         template_name = template_config.get('template', 'default')
         custom_params = template_config.get('params')
         custom_prompt = template_config.get('customPrompt')
-        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt)
+        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt, template_config.get('fieldContext'))
         print(f"Usando template: {template_name}")
 
         with open(image_path, "rb") as image_file:
@@ -1007,17 +1268,14 @@ def analyze_image_with_gpt4(image_path, api_key=None, model_version=None, templa
         ext = image_path.split('.')[-1].lower()
         media_type = f"image/{ext}" if ext != 'jpg' else "image/jpeg"
 
-        # Usar modelo selecionado ou padrão
-        model_name = model_version or "gpt-4o"
+        # Usar modelo selecionado ou padrão (atualizado 2026-09, ver AI_MODELS_CATALOG)
+        model_name = model_version or "gpt-5.6-terra"
 
         # Fallback: se o modelo selecionado falhar, tentar outros
         models_to_try = [model_name]
-        if model_name != "gpt-4o":
-            models_to_try.append("gpt-4o")
-        if model_name != "gpt-4o-mini":
-            models_to_try.append("gpt-4o-mini")
-        if "gpt-4-turbo" not in model_name:
-            models_to_try.append("gpt-4-turbo-2024-04-09")
+        for fallback_model in ("gpt-5.6-terra", "gpt-5.6-luna", "gpt-4o"):
+            if fallback_model not in models_to_try:
+                models_to_try.append(fallback_model)
 
         last_error = None
 
@@ -1043,7 +1301,7 @@ def analyze_image_with_gpt4(image_path, api_key=None, model_version=None, templa
                             ]
                         }
                     ],
-                    max_tokens=2000
+                    max_tokens=8192  # era 2000: truncava JSON em templates detalhados
                 )
                 print(f"✓ Sucesso com modelo: {current_model}")
                 break  # Sucesso, sair do loop
@@ -1106,7 +1364,7 @@ def analyze_image_with_gemini(image_path, api_key=None, model_version=None, temp
         template_name = template_config.get('template', 'default')
         custom_params = template_config.get('params')
         custom_prompt = template_config.get('customPrompt')
-        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt)
+        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt, template_config.get('fieldContext'))
         print(f"Usando template: {template_name}")
 
         # Se um modelo específico foi fornecido, use-o primeiro
@@ -1115,17 +1373,16 @@ def analyze_image_with_gemini(image_path, api_key=None, model_version=None, temp
             model_names = [model_version]
             print(f"Usando modelo Gemini específico: {model_version}")
         else:
-            # Modelos Gemini (Atualizado 2025)
-            # Usando aliases automáticos que sempre apontam para versões mais recentes
+            # Modelos Gemini (atualizado 2026-09) - ver AI_MODELS_CATALOG.
+            # gemini-1.5-*/2.0-* foram desativados pelo Google em 2026 e NÃO
+            # devem voltar a esta lista. gemini-2.5-* está no fim porque será
+            # desligado em 16/out/2026 (mantido só como último fallback).
             model_names = [
-                'gemini-3.0-pro',            # 2026 Preview/Early 2026?
-                'gemini-3.0-flash',          # 2026 Preview/Early 2026?
-                'gemini-2.5-pro',            # High reasoning
-                'gemini-2.5-flash',          # High speed
-                'gemini-2.0-pro',            # Stable Pro
-                'gemini-2.0-flash',          # Stable Flash
-                'gemini-1.5-pro',            # Legacy Pro
-                'gemini-1.5-flash'           # Legacy Flash
+                'gemini-3.8-flash',          # Mais recente/inteligente (lançado 02/set/2026)
+                'gemini-3.7-flash',          # Geração atual
+                'gemini-3.1-flash-lite',     # Estável desde mai/2026 (mais leve/barato)
+                'gemini-2.5-flash',          # Legado - desliga 16/out/2026
+                'gemini-2.5-pro',            # Legado - desliga 16/out/2026
             ]
 
         model = None
@@ -1176,11 +1433,13 @@ def analyze_image_with_gemini(image_path, api_key=None, model_version=None, temp
                 from PIL import Image
                 img = Image.open(image_path)
 
-                # Gerar resposta
-                response = model.generate_content([
-                    prompt_text,
-                    img
-                ])
+                # Gerar resposta (timeout de seguranca: sem isso, uma resposta
+                # lenta/travada da API do Google deixava a stream SSE inteira
+                # pendurada pra sempre, sem nenhum feedback pro usuario)
+                response = model.generate_content(
+                    [prompt_text, img],
+                    request_options={'timeout': 90}
+                )
 
                 # Checking finish reason and blocking
                 finish_reason = None
@@ -1264,20 +1523,21 @@ def analyze_image_with_gemini(image_path, api_key=None, model_version=None, temp
                         if len(model_names) == 1:  # Se só tinha 1 modelo (o específico)
                             print("⚠️ Expandindo busca para todos os modelos Gemini disponíveis")
                             model_names.extend([
-                                "gemini-3.0-pro",
-                                "gemini-3.0-flash",
-                                "gemini-2.5-pro",
+                                "gemini-3.8-flash",
+                                "gemini-3.7-flash",
+                                "gemini-3.1-flash-lite",
                                 "gemini-2.5-flash",
-                                "gemini-2.0-flash"
                             ])
                         continue  # Tentar próximo modelo
                     else:
                         # Se foi erro de cota (429), tentar fallback para Flash
                         if "429" in error_str or "quota" in error_str.lower():
-                            print(f"⚠️ Cota excedida para {model_version}. Tentando fallback para gemini-2.5-flash...")
+                            print(f"⚠️ Cota excedida para {model_version}. Tentando fallback para gemini-3.1-flash-lite...")
                             try:
-                                model = genai.GenerativeModel('gemini-2.5-flash')
-                                response = model.generate_content([prompt, img])
+                                # BUGFIX: usava a variável indefinida `prompt` (NameError
+                                # mascarado pelo except abaixo) em vez de `prompt_text`.
+                                model = genai.GenerativeModel('gemini-3.1-flash-lite')
+                                response = model.generate_content([prompt_text, img], request_options={'timeout': 90})
                                 return response.text
                             except Exception as fallback_error:
                                 print(f"❌ Fallback falhou: {str(fallback_error)}")
@@ -1334,7 +1594,7 @@ def analyze_image_with_gemini(image_path, api_key=None, model_version=None, temp
             ]
         }
 
-def analyze_image_with_deepseek(image_path, api_key=None, template_config=None):
+def analyze_image_with_deepseek(image_path, api_key=None, template_config=None, model_version=None):
     """Analisa uma imagem usando DeepSeek (API compatível com OpenAI) - GRATUITO"""
     try:
         key = api_key or os.environ.get("DEEPSEEK_API_KEY")
@@ -1349,7 +1609,7 @@ def analyze_image_with_deepseek(image_path, api_key=None, template_config=None):
         template_name = template_config.get('template', 'default')
         custom_params = template_config.get('params')
         custom_prompt = template_config.get('customPrompt')
-        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt)
+        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt, template_config.get('fieldContext'))
         print(f"Usando template: {template_name}")
 
         # DeepSeek usa API compatível com OpenAI
@@ -1365,7 +1625,10 @@ def analyze_image_with_deepseek(image_path, api_key=None, template_config=None):
         media_type = f"image/{ext}" if ext != 'jpg' else "image/jpeg"
 
         response = client.chat.completions.create(
-            model="deepseek-chat",
+            # deepseek-chat não tem visão. deepseek-v4-flash-vision-exp é o
+            # modelo experimental de visão da DeepSeek (lançado 21/ago/2026),
+            # mesmo endpoint/preço do V4-Flash texto. Ver AI_MODELS_CATALOG.
+            model=model_version or "deepseek-v4-flash-vision-exp",
             messages=[
                 {
                     "role": "user",
@@ -1383,7 +1646,7 @@ def analyze_image_with_deepseek(image_path, api_key=None, template_config=None):
                     ]
                 }
             ],
-            max_tokens=2000
+            max_tokens=8192  # era 2000: truncava JSON em templates detalhados
         )
 
         response_text = response.choices[0].message.content.strip()
@@ -1392,10 +1655,10 @@ def analyze_image_with_deepseek(image_path, api_key=None, template_config=None):
             response_text = '\n'.join(lines[1:-1])
 
         result = json.loads(response_text)
-        
+
         # Validar e filtrar resultados de acordo com configuração
         result = validate_and_filter_results(result, template_config)
-        
+
         return result
 
     except Exception as e:
@@ -1410,7 +1673,7 @@ def analyze_image_with_deepseek(image_path, api_key=None, template_config=None):
             }]
         }
 
-def analyze_image_with_qwen(image_path, api_key=None, template_config=None):
+def analyze_image_with_qwen(image_path, api_key=None, template_config=None, model_version=None):
     """Analisa uma imagem usando Qwen (Alibaba) - GRATUITO"""
     try:
         key = api_key or os.environ.get("QWEN_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")
@@ -1425,7 +1688,7 @@ def analyze_image_with_qwen(image_path, api_key=None, template_config=None):
         template_name = template_config.get('template', 'default')
         custom_params = template_config.get('params')
         custom_prompt = template_config.get('customPrompt')
-        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt)
+        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt, template_config.get('fieldContext'))
         print(f"Usando template: {template_name}")
 
         # Qwen via DashScope (Alibaba Cloud)
@@ -1441,7 +1704,9 @@ def analyze_image_with_qwen(image_path, api_key=None, template_config=None):
         media_type = f"image/{ext}" if ext != 'jpg' else "image/jpeg"
 
         response = client.chat.completions.create(
-            model="qwen-vl-max",
+            # qwen3-vl-plus é o modelo de visão recomendado atual (substitui
+            # qwen-vl-max). Ver AI_MODELS_CATALOG.
+            model=model_version or "qwen3-vl-plus",
             messages=[
                 {
                     "role": "user",
@@ -1459,7 +1724,7 @@ def analyze_image_with_qwen(image_path, api_key=None, template_config=None):
                     ]
                 }
             ],
-            max_tokens=2000
+            max_tokens=8192  # era 2000: truncava JSON em templates detalhados
         )
 
         response_text = response.choices[0].message.content.strip()
@@ -1486,8 +1751,16 @@ def analyze_image_with_qwen(image_path, api_key=None, template_config=None):
             }]
         }
 
-def analyze_image_with_huggingface(image_path, api_key=None, template_config=None):
-    """Analisa uma imagem usando modelos da Hugging Face - GRATUITO"""
+def analyze_image_with_huggingface(image_path, api_key=None, template_config=None, model_version=None):
+    """Analisa uma imagem usando modelos de visão da Hugging Face - GRATUITO
+
+    REESCRITO 2026-09: o endpoint legado api-inference.huggingface.co foi
+    desativado pela HuggingFace (retorna 410/404 desde o fim de 2025). O
+    acesso agora é via "Inference Providers", um router único compatível
+    com a API de Chat Completions da OpenAI. Por isso usamos aqui o mesmo
+    padrão (client openai.OpenAI com base_url customizada) já usado para
+    DeepSeek/Qwen, em vez de POST bruto de bytes de imagem.
+    """
     try:
         key = api_key or os.environ.get("HUGGINGFACE_API_KEY")
         if not key:
@@ -1496,61 +1769,77 @@ def analyze_image_with_huggingface(image_path, api_key=None, template_config=Non
         # Configuração de template padrão
         if template_config is None:
             template_config = {'template': 'default', 'params': None}
-        
+
         # Gerar prompt usando template ou prompt customizado (HuggingFace)
         template_name = template_config.get('template', 'default')
         custom_params = template_config.get('params')
         custom_prompt = template_config.get('customPrompt')
-        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt)
+        prompt_text = get_analysis_prompt(template_name, custom_params, custom_prompt, template_config.get('fieldContext'))
         print(f"Usando template: {template_name}")
 
-        # Usar modelo de visão da Hugging Face (ex: LLaVA)
+        client = openai.OpenAI(
+            api_key=key,
+            base_url="https://router.huggingface.co/v1"
+        )
+
         with open(image_path, "rb") as image_file:
-            image_data = image_file.read()
+            image_data = base64.standard_b64encode(image_file.read()).decode("utf-8")
 
-        headers = {"Authorization": f"Bearer {key}"}
+        ext = image_path.split('.')[-1].lower()
+        media_type = f"image/{ext}" if ext != 'jpg' else "image/jpeg"
 
-        # Tentar diferentes modelos
-        models = [
-            "llava-hf/llava-1.5-7b-hf",
-            "Salesforce/blip-image-captioning-large",
-            "nlpconnect/vit-gpt2-image-captioning"
-        ]
+        # Modelos gratuitos de visão via Inference Providers (recomendado
+        # primeiro). Ver AI_MODELS_CATALOG.
+        models_to_try = [model_version] if model_version else []
+        for fallback_model in (
+            "meta-llama/Llama-3.2-11B-Vision-Instruct",
+            "Qwen/Qwen2.5-VL-3B-Instruct",
+        ):
+            if fallback_model not in models_to_try:
+                models_to_try.append(fallback_model)
 
-        for model_id in models:
+        last_error = None
+        for model_id in models_to_try:
             try:
-                api_url = f"https://api-inference.huggingface.co/models/{model_id}"
-
-                payload = {
-                    "inputs": prompt_text
-                }
-
-                response = requests.post(
-                    api_url,
-                    headers=headers,
-                    files={"file": image_data},
-                    data=payload,
-                    timeout=30
+                print(f"Tentando modelo HuggingFace: {model_id}")
+                response = client.chat.completions.create(
+                    model=model_id,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{media_type};base64,{image_data}"
+                                    }
+                                },
+                                {
+                                    "type": "text",
+                                    "text": prompt_text
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens=8192
                 )
 
-                if response.status_code == 200:
-                    result = response.json()
-                    # Processar resposta e converter para formato esperado
-                    # Nota: pode precisar de parsing customizado dependendo do modelo
-                    return {
-                        "especies": [{
-                            "apelido": "Análise HuggingFace",
-                            "cobertura": 50,
-                            "altura": 30,
-                            "forma_vida": "Erva",
-                            "nota": "Modelo gratuito - requer validação manual"
-                        }]
-                    }
+                response_text = response.choices[0].message.content.strip()
+                response_text = clean_json_response(response_text)
+                result = json.loads(response_text)
+
+                # Validar e filtrar resultados de acordo com configuração
+                result = validate_and_filter_results(result, template_config)
+
+                print(f"✓ Sucesso com modelo: {model_id}")
+                return result
+
             except Exception as e:
-                print(f"Erro com modelo {model_id}: {str(e)}")
+                last_error = e
+                print(f"✗ Falha com {model_id}: {str(e)[:200]}")
                 continue
 
-        raise Exception("Nenhum modelo HuggingFace respondeu")
+        raise Exception(f"Nenhum modelo HuggingFace respondeu. Último erro: {last_error}")
 
     except Exception as e:
         print(f"Erro na análise com HuggingFace: {str(e)}")
@@ -1564,7 +1853,7 @@ def analyze_image_with_huggingface(image_path, api_key=None, template_config=Non
             }]
         }
 
-def analyze_image_with_ai(image_path, ai_model='claude', api_key=None, gemini_version=None, claude_version=None, gpt_version=None, template_config=None):
+def analyze_image_with_ai(image_path, ai_model='claude', api_key=None, gemini_version=None, claude_version=None, gpt_version=None, template_config=None, deepseek_version=None, qwen_version=None, huggingface_version=None):
     """
     Analisa imagem com a IA selecionada
 
@@ -1576,11 +1865,14 @@ def analyze_image_with_ai(image_path, ai_model='claude', api_key=None, gemini_ve
         claude_version: versão do Claude (se aplicável)
         gpt_version: versão do GPT (se aplicável)
         template_config: dict com 'template' e/ou 'params' para customizar prompt
+        deepseek_version: versão do DeepSeek (se aplicável)
+        qwen_version: versão do Qwen (se aplicável)
+        huggingface_version: versão do HuggingFace (se aplicável)
     """
     # Configuração de template padrão se não fornecida
     if template_config is None:
         template_config = {'template': 'default', 'params': None}
-    
+
     if ai_model == 'claude' and CLAUDE_AVAILABLE:
         return analyze_image_with_claude(image_path, api_key, claude_version, template_config)
     elif ai_model == 'gpt4' and GPT_AVAILABLE:
@@ -1588,11 +1880,11 @@ def analyze_image_with_ai(image_path, ai_model='claude', api_key=None, gemini_ve
     elif ai_model == 'gemini' and GEMINI_AVAILABLE:
         return analyze_image_with_gemini(image_path, api_key, gemini_version, template_config)
     elif ai_model == 'deepseek' and DEEPSEEK_AVAILABLE:
-        return analyze_image_with_deepseek(image_path, api_key, template_config)
+        return analyze_image_with_deepseek(image_path, api_key, template_config, deepseek_version)
     elif ai_model == 'qwen' and QWEN_AVAILABLE:
-        return analyze_image_with_qwen(image_path, api_key, template_config)
+        return analyze_image_with_qwen(image_path, api_key, template_config, qwen_version)
     elif ai_model == 'huggingface' and HUGGINGFACE_AVAILABLE:
-        return analyze_image_with_huggingface(image_path, api_key, template_config)
+        return analyze_image_with_huggingface(image_path, api_key, template_config, huggingface_version)
     else:
         # Fallback: tentar modelos gratuitos primeiro
         if DEEPSEEK_AVAILABLE and api_key:
@@ -1636,15 +1928,28 @@ def upload_images():
     parcela_dir = os.path.join(app.config['UPLOAD_FOLDER'], parcela)
     os.makedirs(parcela_dir, exist_ok=True)
 
+    # Metadados de campo OPCIONAIS por subparcela (nome/código, município,
+    # UF, bioma, coordenadas, data) - mesma ordem dos arquivos em 'images'.
+    # Usados como contexto no prompt da IA e exibidos nos relatórios exportados.
+    try:
+        raw_metadata = json.loads(request.form.get('metadata', '[]'))
+        if not isinstance(raw_metadata, list):
+            raw_metadata = []
+    except (ValueError, TypeError):
+        raw_metadata = []
+
     for idx, file in enumerate(files, 1):
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
             filepath = os.path.join(parcela_dir, filename)
             file.save(filepath)
+            meta = raw_metadata[idx - 1] if idx - 1 < len(raw_metadata) and isinstance(raw_metadata[idx - 1], dict) else {}
             uploaded_files.append({
                 'filename': filename,
                 'path': filepath,
-                'subparcela': idx
+                'subparcela': idx,
+                # Só grava campos realmente preenchidos - tudo aqui é opcional
+                'metadata': {k: v for k, v in meta.items() if v}
             })
 
     # Inicializar dados da parcela
@@ -1663,60 +1968,87 @@ def upload_images():
         'files': uploaded_files
     })
 
+# ============================================================
+# Catálogo de modelos de IA (atualizado 2026-09-03)
+# Fonte única de verdade para /api/ai/available e para o modal de
+# seleção de modelos do frontend. Os fallbacks internos de cada
+# analyze_image_with_* usam os mesmos IDs - ao atualizar aqui,
+# atualize também o(s) model_names/models_to_try da função correspondente.
+# ============================================================
+AI_MODELS_CATALOG = {
+    'claude': {
+        'id': 'claude', 'name': 'Claude', 'provider': 'Anthropic', 'tier': 'premium',
+        'available': CLAUDE_AVAILABLE,
+        'default_model': 'claude-sonnet-5',
+        'models': [
+            {'id': 'claude-opus-5', 'label': 'Claude Opus 5 (mais avançado)'},
+            {'id': 'claude-sonnet-5', 'label': 'Claude Sonnet 5 (recomendado)', 'recommended': True},
+            {'id': 'claude-haiku-4-5', 'label': 'Claude Haiku 4.5 (rápido/econômico)'},
+            {'id': 'claude-opus-4-8', 'label': 'Claude Opus 4.8 (geração anterior)'},
+        ],
+    },
+    'gpt4': {
+        'id': 'gpt4', 'name': 'GPT', 'provider': 'OpenAI', 'tier': 'premium',
+        'available': GPT_AVAILABLE,
+        'default_model': 'gpt-5.6-terra',
+        'models': [
+            {'id': 'gpt-5.6-sol', 'label': 'GPT-5.6 Sol (flagship)'},
+            {'id': 'gpt-5.6-terra', 'label': 'GPT-5.6 Terra (recomendado)', 'recommended': True},
+            {'id': 'gpt-5.6-luna', 'label': 'GPT-5.6 Luna (rápido/econômico)'},
+            {'id': 'gpt-4o', 'label': 'GPT-4o (legado estável)'},
+        ],
+    },
+    'gemini': {
+        'id': 'gemini', 'name': 'Gemini', 'provider': 'Google', 'tier': 'free',
+        'available': GEMINI_AVAILABLE,
+        'default_model': 'gemini-3.1-flash-lite',
+        'models': [
+            {'id': 'gemini-3.8-flash', 'label': 'Gemini 3.8 Flash (mais novo/inteligente)'},
+            {'id': 'gemini-3.7-flash', 'label': 'Gemini 3.7 Flash'},
+            {'id': 'gemini-3.1-flash-lite', 'label': 'Gemini 3.1 Flash-Lite (recomendado/estável)', 'recommended': True},
+            {'id': 'gemini-3.1-pro-preview', 'label': 'Gemini 3.1 Pro (preview, mais poderoso)'},
+            {'id': 'gemini-2.5-pro', 'label': 'Gemini 2.5 Pro (legado - desliga 16/out/2026)'},
+            {'id': 'gemini-2.5-flash', 'label': 'Gemini 2.5 Flash (legado - desliga 16/out/2026)'},
+        ],
+    },
+    'deepseek': {
+        'id': 'deepseek', 'name': 'DeepSeek', 'provider': 'DeepSeek (Grátis)', 'tier': 'free',
+        'available': DEEPSEEK_AVAILABLE,
+        'experimental': True,
+        'default_model': 'deepseek-v4-flash-vision-exp',
+        'models': [
+            {'id': 'deepseek-v4-flash-vision-exp', 'label': 'DeepSeek V4-Flash Vision (experimental)', 'recommended': True},
+        ],
+    },
+    'qwen': {
+        'id': 'qwen', 'name': 'Qwen VL', 'provider': 'Alibaba (Grátis)', 'tier': 'free',
+        'available': QWEN_AVAILABLE,
+        'default_model': 'qwen3-vl-plus',
+        'models': [
+            {'id': 'qwen3-vl-plus', 'label': 'Qwen3-VL Plus (recomendado)', 'recommended': True},
+            {'id': 'qwen-vl-max', 'label': 'Qwen-VL Max (legado)'},
+        ],
+    },
+    'huggingface': {
+        'id': 'huggingface', 'name': 'HuggingFace', 'provider': 'HuggingFace (Grátis)', 'tier': 'free',
+        'available': HUGGINGFACE_AVAILABLE,
+        'default_model': 'meta-llama/Llama-3.2-11B-Vision-Instruct',
+        'models': [
+            {'id': 'meta-llama/Llama-3.2-11B-Vision-Instruct', 'label': 'Llama 3.2 11B Vision (recomendado)', 'recommended': True},
+            {'id': 'Qwen/Qwen2.5-VL-3B-Instruct', 'label': 'Qwen2.5-VL 3B (leve/rápido)'},
+        ],
+    },
+}
+
+
 @app.route('/api/ai/available', methods=['GET'])
 def get_available_ais():
-    """Retorna lista de IAs disponíveis"""
-    ais = []
-
-    # Modelos Premium
-    if CLAUDE_AVAILABLE:
-        ais.append({
-            'id': 'claude',
-            'name': 'Claude',
-            'provider': 'Anthropic',
-            'tier': 'premium',
-            'available': True
-        })
-
-    if GPT_AVAILABLE:
-        ais.append({
-            'id': 'gpt4',
-            'name': 'GPT-4 Vision',
-            'provider': 'OpenAI',
-            'tier': 'premium',
-            'available': True
-        })
-
-    if GEMINI_AVAILABLE:
-        ais.append({
-            'id': 'gemini',
-            'name': 'Gemini',
-            'provider': 'Google',
-            'tier': 'free',
-            'available': True
-        })
-
-    # Modelos Gratuitos/Open Source
-    # NOTA: DeepSeek Chat não suporta análise de imagens, apenas texto
-    # Removido temporariamente até que lancem modelo com visão
-
-    if QWEN_AVAILABLE:
-        ais.append({
-            'id': 'qwen',
-            'name': 'Qwen VL Max',
-            'provider': 'Alibaba (Grátis)',
-            'tier': 'free',
-            'available': True
-        })
-
-    if HUGGINGFACE_AVAILABLE:
-        ais.append({
-            'id': 'huggingface',
-            'name': 'HuggingFace LLaVA',
-            'provider': 'HuggingFace (Grátis)',
-            'tier': 'free',
-            'available': True
-        })
+    """Retorna lista de IAs disponíveis, cada uma com seu catálogo de modelos"""
+    ais = [
+        {k: v for k, v in entry.items() if k != 'available'}
+        for entry in AI_MODELS_CATALOG.values()
+        if entry['available']
+    ]
 
     return jsonify({
         'ais': ais,
@@ -1895,17 +2227,20 @@ def analyze_parcela(parcela):
     print(f"Template de prompt: {template_config.get('template', 'default')}")
 
     # Obter versão específica do Gemini (se aplicável)
-    gemini_version = request.headers.get('X-Gemini-Version', 'gemini-flash-latest')
+    gemini_version = request.headers.get('X-Gemini-Version', 'gemini-3.1-flash-lite')
     if ai_model == 'gemini':
         print(f"Versão do Gemini selecionada: {gemini_version}")
 
     # Obter versão específica do Claude (se aplicável)
-    claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-4-5-20250929')
+    claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-5')
     if ai_model == 'claude':
         print(f"Versão do Claude selecionada: {claude_version}")
 
     # Obter versão específica do GPT (se aplicável)
-    gpt_version = request.headers.get('X-GPT-Version', 'gpt-4o')
+    gpt_version = request.headers.get('X-GPT-Version', 'gpt-5.6-terra')
+    deepseek_version = request.headers.get('X-DeepSeek-Version', 'deepseek-v4-flash-vision-exp')
+    qwen_version = request.headers.get('X-Qwen-Version', 'qwen3-vl-plus')
+    huggingface_version = request.headers.get('X-HuggingFace-Version', 'meta-llama/Llama-3.2-11B-Vision-Instruct')
     if ai_model == 'gpt4':
         print(f"Versão do GPT selecionada: {gpt_version}")
 
@@ -1959,7 +2294,12 @@ def analyze_parcela(parcela):
             else:
                 subparcela = img_info['subparcela']
                 filepath = img_info['path']
-            
+
+            # Metadados de campo OPCIONAIS desta subparcela (município/UF/
+            # bioma/coordenadas/data, definidos na tela de upload) -
+            # repassados como contexto pro prompt da IA nesta análise.
+            template_config['fieldContext'] = img_info.get('metadata') if isinstance(img_info, dict) else None
+
             # Evento de progresso: iniciando análise
             percentage = int((idx - 1) / total_images * 100)
             yield f"data: {json.dumps({'type': 'progress', 'current': idx-1, 'total': total_images, 'percentage': percentage, 'subparcela': subparcela, 'status': 'analyzing'})}\n\n"
@@ -2028,7 +2368,7 @@ def analyze_parcela(parcela):
                     elif ai_model == 'gpt4':
                         analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, gpt_version, template_config)
                     else:
-                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config)
+                        analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config, deepseek_version, qwen_version, huggingface_version)
                     
                     # Validar se retornou espécies válidas
                     especies_validas = []
@@ -2147,11 +2487,17 @@ def analyze_parcela(parcela):
                     'cobertura': esp['cobertura'],
                     'altura': esp['altura'],
                     'forma_vida': esp['forma_vida'],
+                    # BUGFIX: idem aos outros dois pontos de montagem deste
+                    # dict (additional-images/reanalyze) - numero_individuos
+                    # ja vem correto de validate_and_filter_results mas nunca
+                    # era copiado pra fora, entao a tabela sempre mostrava 1.
+                    'numero_individuos': esp.get('numero_individuos', 1),
                     # Campos de paisagem
                     'tipo_entidade': esp.get('tipo_entidade'),
                     'altura_m': esp.get('altura_m'),
                     # Polígonos de área (para importação)
                     'areas': esp.get('areas'),
+                    'species_shapes': esp.get('species_shapes'),
                 })
 
             # Converter caminho absoluto para URL relativa
@@ -2166,10 +2512,18 @@ def analyze_parcela(parcela):
                 # Assume que é relativo dentro de uploads
                 image_url = f'/static/uploads/{parcela}/{img_info["filename"]}'
 
+            # BUGFIX: area_shape/species_shapes eram descartados aqui - o
+            # estado canonico do backend ficava sem o poligono da area 100%
+            # detectado pela IA, entao /api/recalculate-coverage caia sempre
+            # no denominador "imagem inteira" e ignorava o delimitador fisico
+            # da subparcela.
             parcela_info['subparcelas'][subparcela] = {
                 'image': img_info['filename'],
                 'image_path': image_url,
-                'especies': especies_encontradas
+                'especies': especies_encontradas,
+                'area_shape': analysis.get('area_shape'),
+                'species_shapes': analysis.get('species_shapes'),
+                'modo_paisagem': analysis.get('modo_paisagem', False),
             }
 
             results.append({
@@ -2179,7 +2533,10 @@ def analyze_parcela(parcela):
                 'especies': especies_encontradas,
                 'area_shape': analysis.get('area_shape'),  # Polígono da área 100%
                 'species_shapes': analysis.get('species_shapes'),  # Polígonos por espécie
-                'modo_paisagem': analysis.get('modo_paisagem', False)  # Flag de modo paisagem
+                'modo_paisagem': analysis.get('modo_paisagem', False),  # Flag de modo paisagem
+                # Metadados de campo opcionais (nome/código, município, UF,
+                # bioma, coordenadas, data) - ver /api/upload
+                'metadata': img_info.get('metadata') if isinstance(img_info, dict) else None
             })
             
             # 📊 Enviar resumo acumulativo após processar cada subparcela
@@ -2235,22 +2592,34 @@ def upload_additional_images():
     parcela_dir = os.path.join(app.config['UPLOAD_FOLDER'], parcela_nome)
     os.makedirs(parcela_dir, exist_ok=True)
 
+    # Metadados de campo OPCIONAIS por subparcela (nome/código, município, UF,
+    # bioma, coordenadas, data) - mesma ordem dos arquivos em 'images'. Ver
+    # /api/upload para o mesmo contrato.
+    try:
+        raw_metadata = json.loads(request.form.get('metadata', '[]'))
+        if not isinstance(raw_metadata, list):
+            raw_metadata = []
+    except (ValueError, TypeError):
+        raw_metadata = []
+
     uploaded_files = []
     subparcela_ids = []
 
-    for file in files:
+    for idx, file in enumerate(files):
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
             filepath = os.path.join(parcela_dir, filename)
             file.save(filepath)
-            
+
             subparcela_id = next_subparcela_id
             next_subparcela_id += 1
-            
+
+            meta = raw_metadata[idx] if idx < len(raw_metadata) and isinstance(raw_metadata[idx], dict) else {}
             uploaded_files.append({
                 'filename': filename,
                 'path': filepath,
-                'subparcela': subparcela_id
+                'subparcela': subparcela_id,
+                'metadata': {k: v for k, v in meta.items() if v}
             })
             subparcela_ids.append(subparcela_id)
 
@@ -2290,6 +2659,21 @@ def analyze_additional_images():
     
     if not api_key:
         return jsonify({'error': f'API key não fornecida para {ai_model}'}), 400
+
+    # BUGFIX ("Confirmar e Analisar" sempre dava "nenhuma espécie detectada"):
+    # este endpoint chamava analyze_image_with_ai SEM a versão do modelo, ou
+    # seja gemini_version/claude_version/... = None. Sem nome de modelo a
+    # chamada à API falhava (ou caía num modelo inválido), a exceção virava a
+    # espécie "Erro na análise", que o filtro de erro descartava - e depois
+    # das tentativas sobrava só o placeholder "Vegetação Não Detectada".
+    # Agora lê as versões dos headers exatamente como /api/analyze e
+    # /reanalyze fazem (mesmo fallback), e repassa adiante.
+    gemini_version = request.headers.get('X-Gemini-Version', 'gemini-3.1-flash-lite')
+    claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-5')
+    gpt_version = request.headers.get('X-GPT-Version', 'gpt-5.6-terra')
+    deepseek_version = request.headers.get('X-DeepSeek-Version', 'deepseek-v4-flash-vision-exp')
+    qwen_version = request.headers.get('X-Qwen-Version', 'qwen3-vl-plus')
+    huggingface_version = request.headers.get('X-HuggingFace-Version', 'meta-llama/Llama-3.2-11B-Vision-Instruct')
 
     parcela_info = analysis_data['parcelas'][parcela_nome]
     
@@ -2334,68 +2718,113 @@ def analyze_additional_images():
         print(f"Apelidos para padronização: {all_apelidos}")
 
     novas_subparcelas = []
-    
-    # Analisar apenas as novas subparcelas
+
+    # Analisar as subparcelas pedidas (novas, ou todas se o usuario escolheu
+    # "reanalisar com contexto completo" no frontend - o endpoint nao faz
+    # distincao, so processa a lista de ids recebida)
     for img_info in parcela_info['images']:
         subparcela_id = img_info['subparcela']
-        
+
         if subparcela_id not in subparcela_ids:
             continue
-        
+
         filepath = img_info['path']
-        
+
+        # Metadados de campo OPCIONAIS desta subparcela (municipio/UF/bioma/
+        # coordenadas/data) - mesmo contrato do endpoint principal de analise.
+        # BUGFIX: precisa ser reatribuido a cada iteracao (era setado uma vez
+        # so fora do loop antes, entao todas as subparcelas usavam o contexto
+        # da ultima imagem processada).
+        template_config = dict(prompt_config)
+        template_config['fieldContext'] = img_info.get('metadata') if isinstance(img_info, dict) else None
+
         print(f"\nAnalisando nova subparcela {subparcela_id}")
         print(f"Arquivo: {filepath}")
-        
-        try:
-            # Analisar imagem
-            analysis = analyze_image_with_ai(
-                filepath, 
-                ai_model=ai_model, 
-                api_key=api_key,
-                template_config=prompt_config
-            )
-            
-            num_especies = len(analysis.get('especies', []))
-            print(f"✓ Análise concluída: {num_especies} espécies encontradas")
-            
-        except Exception as e:
-            error_msg = str(e)
-            print(f"ERRO na análise da subparcela {subparcela_id}: {error_msg}")
-            
-            analysis = {
-                "especies": [{
-                    "apelido": "Erro na análise",
-                    "cobertura": 0,
-                    "altura": 0,
-                    "forma_vida": "-",
-                    "erro": error_msg
+
+        max_retries = 2
+        analysis = None
+        especies_validas = []
+
+        for retry in range(max_retries + 1):
+            try:
+                # Analisar imagem (com a versão do modelo, ver BUGFIX acima)
+                if ai_model == 'gemini':
+                    analysis = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, None, template_config)
+                elif ai_model == 'claude':
+                    analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, None, template_config)
+                elif ai_model == 'gpt4':
+                    analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, gpt_version, template_config)
+                else:
+                    analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config, deepseek_version, qwen_version, huggingface_version)
+            except Exception as e:
+                error_msg = str(e)
+                print(f"ERRO na análise da subparcela {subparcela_id}: {error_msg}")
+                analysis = {
+                    "especies": [{
+                        "apelido": "Erro na análise",
+                        "cobertura": 0,
+                        "altura": 0,
+                        "forma_vida": "-",
+                        "erro": error_msg
+                    }]
+                }
+
+            especies_validas = []
+            for esp in analysis.get('especies', []):
+                apelido = esp.get('apelido', '')
+                erro_keywords = [
+                    'erro', 'error', 'falha', 'limite', 'atingido',
+                    'aguarde', 'não disponível', 'timeout', 'quota',
+                    'exceeded', 'rate limit', 'api key', 'invalid'
+                ]
+                apelido_lower = apelido.lower()
+                is_error = any(keyword in apelido_lower for keyword in erro_keywords)
+                if not is_error and 'erro' not in esp:
+                    especies_validas.append(esp)
+
+            if len(especies_validas) > 0:
+                num_especies = len(especies_validas)
+                print(f"✓ Análise concluída: {num_especies} espécies encontradas")
+                break
+
+            if retry == max_retries:
+                print(f"⚠️ AVISO: Após {max_retries + 1} tentativas, nenhuma espécie válida detectada")
+                especies_validas = [{
+                    'apelido': 'Vegetação Não Detectada',
+                    'genero': '',
+                    'familia': '',
+                    'observacoes': 'IA não conseguiu identificar vegetação clara nesta subparcela após múltiplas tentativas. Revise manualmente.',
+                    'cobertura': 100,
+                    'altura': 0,
+                    'forma_vida': '-'
                 }]
-            }
-        
+                analysis['especies'] = especies_validas
+            else:
+                print(f"⚠️ Tentativa {retry + 1}/{max_retries + 1} - análise anterior retornou vazia, tentando novamente...")
+
         # Processar resultados (mesmo código da análise principal)
         especies_encontradas = []
         for esp_idx, esp in enumerate(analysis.get('especies', []), 1):
             apelido = esp['apelido']
-            
+
             # Filtrar mensagens de erro
             erro_keywords = [
-                'erro', 'error', 'falha', 'limite', 'atingido', 
+                'erro', 'error', 'falha', 'limite', 'atingido',
                 'aguarde', 'não disponível', 'timeout', 'quota',
                 'exceeded', 'rate limit', 'api key', 'invalid'
             ]
-            
+
             apelido_lower = apelido.lower()
             is_error = any(keyword in apelido_lower for keyword in erro_keywords)
-            
+
             if is_error or 'erro' in esp:
                 print(f"⚠️  IGNORANDO mensagem de erro: {apelido}")
                 continue
-            
+
             # Adicionar/atualizar espécie unificada (com parcela)
             if parcela_nome not in analysis_data['especies_unificadas']:
                 analysis_data['especies_unificadas'][parcela_nome] = {}
-                
+
             if apelido not in analysis_data['especies_unificadas'][parcela_nome]:
                 analysis_data['especies_unificadas'][parcela_nome][apelido] = {
                     'apelido_original': apelido,
@@ -2413,9 +2842,9 @@ def analyze_additional_images():
                     analysis_data['especies_unificadas'][parcela_nome][apelido]['familia'] = esp.get('familia')
                 if esp.get('observacoes') and not analysis_data['especies_unificadas'][parcela_nome][apelido]['observacoes']:
                     analysis_data['especies_unificadas'][parcela_nome][apelido]['observacoes'] = esp.get('observacoes')
-            
+
             analysis_data['especies_unificadas'][parcela_nome][apelido]['ocorrencias'] += 1
-            
+
             especies_encontradas.append({
                 'indice': esp_idx,
                 'apelido': apelido,
@@ -2424,9 +2853,20 @@ def analyze_additional_images():
                 'observacoes': esp.get('observacoes', ''),
                 'cobertura': esp['cobertura'],
                 'altura': esp['altura'],
-                'forma_vida': esp['forma_vida']
+                'forma_vida': esp['forma_vida'],
+                # BUGFIX: numero_individuos ja vem correto de
+                # validate_and_filter_results (soma/fallback por poligono),
+                # mas nunca era copiado pra este dict - a contagem se perdia
+                # aqui e a tabela sempre mostrava o default de exibicao (1).
+                'numero_individuos': esp.get('numero_individuos', 1),
+                # Campos de paisagem
+                'tipo_entidade': esp.get('tipo_entidade'),
+                'altura_m': esp.get('altura_m'),
+                # Poligonos de area (para importacao no editor)
+                'areas': esp.get('areas'),
+                'species_shapes': esp.get('species_shapes'),
             })
-        
+
         # Converter caminho absoluto para URL relativa
         if filepath.startswith('/static/uploads/'):
             # Já é URL relativa
@@ -2438,21 +2878,38 @@ def analyze_additional_images():
         else:
             image_url = filepath
 
-        # Adicionar subparcela aos resultados
+        # Adicionar subparcela aos resultados (estado canonico do backend)
         parcela_info['subparcelas'][subparcela_id] = {
             'image': img_info['filename'],
             'image_path': image_url,
-            'especies': especies_encontradas
+            'especies': especies_encontradas,
+            'area_shape': analysis.get('area_shape'),
+            'species_shapes': analysis.get('species_shapes'),
+            'modo_paisagem': analysis.get('modo_paisagem', False),
         }
 
+        # BUGFIX: a chave aqui era 'subparcela_id', mas todo o resto do
+        # frontend (CoverageDrawer, saveManualSpecies, PDF export, etc) le
+        # `result.subparcela`. Com a chave errada, subparcelas adicionadas por
+        # este endpoint tinham `result.subparcela === undefined` no frontend,
+        # o que fazia `/api/species/area` e `/api/subparcela/area` sempre
+        # devolverem 400 "Dados insuficientes" (subparcela_id ausente) assim
+        # que o usuario tentava editar poligonos numa subparcela adicionada
+        # via "Adicionar Fotos". Tambem faltavam area_shape/species_shapes/
+        # modo_paisagem/metadata, que o resto do app espera em cada resultado.
         novas_subparcelas.append({
-            'subparcela_id': subparcela_id,
+            'subparcela': subparcela_id,
+            'image': img_info['filename'],
             'image_path': image_url,
             'especies': especies_encontradas,
+            'area_shape': analysis.get('area_shape'),
+            'species_shapes': analysis.get('species_shapes'),
+            'modo_paisagem': analysis.get('modo_paisagem', False),
+            'metadata': img_info.get('metadata') if isinstance(img_info, dict) else None,
             'analise_completa': True
         })
-    
-    print(f"✓ {len(novas_subparcelas)} novas subparcelas analisadas")
+
+    print(f"✓ {len(novas_subparcelas)} subparcelas analisadas")
     
     # Retornar espécies da parcela para compatibilidade
     especies_retorno = analysis_data['especies_unificadas'].get(parcela_nome, {})
@@ -3099,6 +3556,133 @@ def get_especies_unificadas(parcela):
         'especies': analysis_data['especies_unificadas']
     })
 
+def _find_subparcela_key(parcela_data, subparcela_id):
+    """Resolve a chave de uma subparcela (pode ser int ou str no dict)."""
+    subs = parcela_data.get('subparcelas', {})
+    if subparcela_id in subs:
+        return subparcela_id
+    if str(subparcela_id) in subs:
+        return str(subparcela_id)
+    return None
+
+
+@app.route('/api/parcela/<parcela>/subparcela/<int:subparcela>', methods=['DELETE'])
+def delete_subparcela(parcela, subparcela):
+    """Remove uma subparcela inteira (imagem + espécies + polígonos).
+
+    Não renumera as demais: os ids continuam estáveis, para não invalidar
+    polígonos/coberturas já salvos das outras subparcelas.
+    """
+    if parcela not in analysis_data['parcelas']:
+        return jsonify({'error': 'Parcela não encontrada'}), 404
+
+    parcela_info = analysis_data['parcelas'][parcela]
+    sub_key = _find_subparcela_key(parcela_info, subparcela)
+    if sub_key is None:
+        return jsonify({'error': 'Subparcela não encontrada'}), 404
+
+    # Descontar ocorrências das espécies desta subparcela
+    especies_removidas = parcela_info['subparcelas'][sub_key].get('especies', []) or []
+    unificadas = analysis_data['especies_unificadas'].get(parcela, {})
+    for esp in especies_removidas:
+        ap = esp.get('apelido')
+        if ap in unificadas:
+            unificadas[ap]['ocorrencias'] = max(0, unificadas[ap].get('ocorrencias', 0) - 1)
+            if unificadas[ap]['ocorrencias'] == 0:
+                del unificadas[ap]
+
+    del parcela_info['subparcelas'][sub_key]
+    parcela_info['images'] = [
+        img for img in parcela_info.get('images', [])
+        if img.get('subparcela') != subparcela
+    ]
+
+    try:
+        recalculate_analysis_data_global(analysis_data)
+    except Exception as e:
+        print(f"Aviso: falha ao recalcular agregados apos exclusao: {e}")
+
+    print(f"🗑️ Subparcela {sub_key} removida da parcela {parcela}")
+    return jsonify({
+        'success': True,
+        'subparcela': subparcela,
+        'especies_unificadas': analysis_data['especies_unificadas'].get(parcela, {}),
+    })
+
+
+@app.route('/api/parcela/<parcela>/subparcela/<int:subparcela>/duplicate', methods=['POST'])
+def duplicate_subparcela(parcela, subparcela):
+    """Duplica uma subparcela (mesma imagem, espécies e polígonos) com um id novo.
+
+    Útil para registrar uma segunda leitura/interpretação da mesma foto sem
+    perder a original, ou como ponto de partida de uma edição manual.
+    """
+    if parcela not in analysis_data['parcelas']:
+        return jsonify({'error': 'Parcela não encontrada'}), 404
+
+    parcela_info = analysis_data['parcelas'][parcela]
+    sub_key = _find_subparcela_key(parcela_info, subparcela)
+    if sub_key is None:
+        return jsonify({'error': 'Subparcela não encontrada'}), 404
+
+    origem = parcela_info['subparcelas'][sub_key]
+
+    # Novo id = maior existente + 1 (nunca reaproveita ids removidos)
+    existing_ids = []
+    for k in parcela_info['subparcelas'].keys():
+        try:
+            existing_ids.append(int(k))
+        except (TypeError, ValueError):
+            continue
+    novo_id = (max(existing_ids) + 1) if existing_ids else 1
+
+    novo = copy.deepcopy(origem)
+    parcela_info['subparcelas'][novo_id] = novo
+
+    # Duplicar também a entrada em 'images' (mesmo arquivo no disco)
+    img_origem = next((img for img in parcela_info.get('images', [])
+                       if img.get('subparcela') == subparcela), None)
+    novo_img = None
+    if img_origem:
+        novo_img = copy.deepcopy(img_origem)
+        novo_img['subparcela'] = novo_id
+        meta = dict(novo_img.get('metadata') or {})
+        if meta.get('nome'):
+            meta['nome'] = f"{meta['nome']} (cópia)"
+        novo_img['metadata'] = meta
+        parcela_info.setdefault('images', []).append(novo_img)
+
+    # Recontar ocorrências das espécies duplicadas
+    unificadas = analysis_data['especies_unificadas'].setdefault(parcela, {})
+    for esp in novo.get('especies', []) or []:
+        ap = esp.get('apelido')
+        if ap in unificadas:
+            unificadas[ap]['ocorrencias'] = unificadas[ap].get('ocorrencias', 0) + 1
+
+    try:
+        recalculate_analysis_data_global(analysis_data)
+    except Exception as e:
+        print(f"Aviso: falha ao recalcular agregados apos duplicacao: {e}")
+
+    print(f"⧉ Subparcela {sub_key} duplicada como {novo_id} na parcela {parcela}")
+    return jsonify({
+        'success': True,
+        'subparcela': novo_id,
+        'origem': subparcela,
+        'nova_subparcela': {
+            'subparcela': novo_id,
+            'image': novo.get('image'),
+            'image_path': novo.get('image_path'),
+            'especies': novo.get('especies', []),
+            'area_shape': novo.get('area_shape'),
+            'species_shapes': novo.get('species_shapes'),
+            'modo_paisagem': novo.get('modo_paisagem', False),
+            'metadata': (novo_img or {}).get('metadata'),
+        },
+        'especies_unificadas': unificadas,
+    })
+
+
 @app.route('/api/parcela/<parcela>/subparcela/<int:subparcela>/reanalyze', methods=['POST'])
 def reanalyze_subparcela(parcela, subparcela):
     """Reanalisar uma subparcela específica"""
@@ -3136,13 +3720,16 @@ def reanalyze_subparcela(parcela, subparcela):
     template_config['params']['existing_species'] = existing_apelidos
     
     # Obter versão do Gemini
-    gemini_version = request.headers.get('X-Gemini-Version', 'gemini-flash-latest')
+    gemini_version = request.headers.get('X-Gemini-Version', 'gemini-3.1-flash-lite')
 
     # Obter versão do Claude
-    claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-4-5-20250929')
+    claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-5')
 
     # Obter versão do GPT
-    gpt_version = request.headers.get('X-GPT-Version', 'gpt-4o')
+    gpt_version = request.headers.get('X-GPT-Version', 'gpt-5.6-terra')
+    deepseek_version = request.headers.get('X-DeepSeek-Version', 'deepseek-v4-flash-vision-exp')
+    qwen_version = request.headers.get('X-Qwen-Version', 'qwen3-vl-plus')
+    huggingface_version = request.headers.get('X-HuggingFace-Version', 'meta-llama/Llama-3.2-11B-Vision-Instruct')
     
     # Obter API key (decodificar de Base64)
     api_key = None
@@ -3181,7 +3768,7 @@ def reanalyze_subparcela(parcela, subparcela):
             elif ai_model == 'gpt4':
                 analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, gpt_version, template_config)
             else:
-                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config)
+                analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config, deepseek_version, qwen_version, huggingface_version)
             
             # Validar espécies
             especies_validas = []
@@ -3248,6 +3835,10 @@ def reanalyze_subparcela(parcela, subparcela):
             
             analysis_data['especies_unificadas'][apelido]['ocorrencias'] += 1
             
+            # BUGFIX: 'areas'/'species_shapes' eram descartados aqui, entao
+            # depois de "Reanalisar" a subparcela ficava com especies mas SEM
+            # nenhum poligono - nem os da especie, nem a area 100%. Mesmos
+            # campos que o loop principal de analise ja devolvia.
             especies_encontradas.append({
                 'indice': esp_idx,
                 'apelido': apelido,
@@ -3256,15 +3847,27 @@ def reanalyze_subparcela(parcela, subparcela):
                 'observacoes': esp.get('observacoes', ''),
                 'cobertura': esp['cobertura'],
                 'altura': esp['altura'],
-                'forma_vida': esp['forma_vida']
+                'forma_vida': esp['forma_vida'],
+                'numero_individuos': esp.get('numero_individuos', 1),
+                'tipo_entidade': esp.get('tipo_entidade'),
+                'altura_m': esp.get('altura_m'),
+                'areas': esp.get('areas'),
+                'species_shapes': esp.get('species_shapes'),
             })
-        
-        # Atualizar subparcela
+
+        # Atualizar subparcela (preservando image_path e os poligonos da IA -
+        # antes esse dict era reescrito so com image+especies, o que apagava
+        # image_path e area_shape do estado canonico do backend)
+        _prev_sub = parcela_info['subparcelas'].get(subparcela, {}) or {}
         parcela_info['subparcelas'][subparcela] = {
             'image': img_info['filename'],
-            'especies': especies_encontradas
+            'image_path': _prev_sub.get('image_path'),
+            'especies': especies_encontradas,
+            'area_shape': analysis.get('area_shape'),
+            'species_shapes': analysis.get('species_shapes'),
+            'modo_paisagem': analysis.get('modo_paisagem', False),
         }
-        
+
         print(f"✓ Reanálise concluída: {len(especies_encontradas)} espécies")
         
         # Retornar apenas espécies da parcela atual (aninhadas por parcela se existir)
@@ -3291,6 +3894,11 @@ def reanalyze_subparcela(parcela, subparcela):
             'success': True,
             'subparcela': subparcela,
             'especies': especies_encontradas,
+            # BUGFIX: sem estes campos o frontend nao tinha como redesenhar os
+            # poligonos recem-detectados apos a reanalise.
+            'area_shape': analysis.get('area_shape'),
+            'species_shapes': analysis.get('species_shapes'),
+            'modo_paisagem': analysis.get('modo_paisagem', False),
             'especies_unificadas': especies_para_retornar
         })
         
@@ -3298,6 +3906,158 @@ def reanalyze_subparcela(parcela, subparcela):
         error_msg = str(e)
         print(f"ERRO na reanálise: {error_msg}")
         return jsonify({'error': error_msg}), 500
+
+
+@app.route('/api/species/detect-specific', methods=['POST'])
+def detect_specific_species():
+    """Pede pra IA localizar/marcar UMA espécie específica na imagem, de duas formas:
+
+      - mode='description': usuário descreve a espécie (apelido/genero/familia/
+        observacoes, todos opcionais) e a IA procura instâncias que combinem.
+      - mode='example_region': usuário desenhou um polígono ao redor de uma
+        planta de exemplo (example_points, 0..100%); a IA identifica essa
+        espécie pela região e procura outras instâncias semelhantes na imagem.
+
+    Retorna polígonos (0..100%, já sanitizados) prontos pra importar no
+    editor - não passa pelo pipeline normal de 'especies' (ver raw_mode em
+    validate_and_filter_results).
+    """
+    data = request.json or {}
+    parcela = data.get('parcela')
+    subparcela = data.get('subparcela')
+    ai_model = data.get('ai_model', app.config['DEFAULT_AI'])
+    mode = data.get('mode')
+
+    if not parcela or subparcela is None or mode not in ('description', 'example_region'):
+        return jsonify({'error': 'Dados insuficientes (parcela/subparcela/mode)'}), 400
+
+    if parcela not in analysis_data['parcelas']:
+        return jsonify({'error': 'Parcela não encontrada'}), 404
+
+    img_info = next((img for img in analysis_data['parcelas'][parcela]['images'] if img['subparcela'] == subparcela), None)
+    if not img_info:
+        return jsonify({'error': 'Subparcela não encontrada'}), 404
+    filepath = img_info['path']
+
+    # Montar o prompt customizado conforme o modo
+    if mode == 'example_region':
+        ok, err, example_points = validate_polygon_pct(data.get('example_points'), name='example_points')
+        if not ok:
+            return jsonify({'error': f'Região de exemplo inválida: {err}'}), 400
+
+        prompt = f"""Você é um botânico especialista em identificação de vegetação rasteira e arbustiva.
+
+Na imagem fornecida, o usuário destacou uma área com um polígono (coordenadas 0-100%, x: 0=esquerda a 100=direita, y: 0=topo a 100=base):
+{json.dumps(example_points)}
+
+Essa área contém uma planta de referência. Primeiro, observe as características visuais (forma/cor/textura das folhas, hábito de crescimento) SOMENTE dentro dessa região.
+
+Depois, procure em TODA a imagem por outras instâncias da MESMA espécie/morfotipo (mesmas características visuais observadas na região de referência).
+
+Retorne APENAS um JSON válido, sem markdown, neste formato exato:
+{{
+  "apelido": "nome descritivo baseado nas características observadas na região de referência",
+  "genero": "gênero se identificável, ou string vazia",
+  "familia": "família se identificável, ou string vazia",
+  "observacoes": "descrição detalhada das características visuais observadas",
+  "areas": [[{{"x": 0, "y": 0}}, {{"x": 10, "y": 0}}, {{"x": 10, "y": 10}}], ...]
+}}
+
+O campo "areas" é uma lista de polígonos (cada um uma lista de pontos {{x,y}} em 0-100%) - UM POR INSTÂNCIA encontrada, incluindo a própria região de referência original. Se não encontrar nenhuma outra instância, retorne areas com apenas a região de referência.
+⚠️ A escala das coordenadas é SEMPRE 0-100, nunca outra coisa."""
+    else:
+        desc_parts = []
+        if data.get('apelido'):
+            desc_parts.append(f"Nome/apelido: {data['apelido']}")
+        if data.get('genero'):
+            desc_parts.append(f"Gênero: {data['genero']}")
+        if data.get('familia'):
+            desc_parts.append(f"Família: {data['familia']}")
+        if data.get('observacoes'):
+            desc_parts.append(f"Características: {data['observacoes']}")
+        descricao = "\n".join(desc_parts) if desc_parts else "planta descrita pelo usuário, sem detalhes adicionais - use seu melhor julgamento"
+
+        prompt = f"""Você é um botânico especialista em identificação de vegetação rasteira e arbustiva.
+
+O usuário está procurando por uma planta específica nesta imagem, com as seguintes características:
+{descricao}
+
+Procure em TODA a imagem por instâncias dessa planta específica.
+
+Retorne APENAS um JSON válido, sem markdown, neste formato exato:
+{{
+  "encontrada": true ou false,
+  "areas": [[{{"x": 0, "y": 0}}, {{"x": 10, "y": 0}}, {{"x": 10, "y": 10}}], ...]
+}}
+
+O campo "areas" é uma lista de polígonos (cada um uma lista de pontos {{x,y}} em 0-100%) - UM POR INSTÂNCIA encontrada. Se não encontrar nenhuma instância clara e confiável, retorne "encontrada": false e "areas": [].
+⚠️ A escala das coordenadas é SEMPRE 0-100, nunca outra coisa."""
+
+    template_config = {'customPrompt': prompt, 'params': {}, 'raw_mode': True}
+
+    # Mesmo padrão de versao/API key de header usado em reanalyze_subparcela
+    gemini_version = request.headers.get('X-Gemini-Version', 'gemini-3.1-flash-lite')
+    claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-5')
+    gpt_version = request.headers.get('X-GPT-Version', 'gpt-5.6-terra')
+    deepseek_version = request.headers.get('X-DeepSeek-Version', 'deepseek-v4-flash-vision-exp')
+    qwen_version = request.headers.get('X-Qwen-Version', 'qwen3-vl-plus')
+    huggingface_version = request.headers.get('X-HuggingFace-Version', 'meta-llama/Llama-3.2-11B-Vision-Instruct')
+
+    api_key = None
+    if ai_model == 'claude':
+        api_key = decode_api_key(request.headers.get('X-API-Key-Claude'))
+    elif ai_model == 'gpt4':
+        api_key = decode_api_key(request.headers.get('X-API-Key-GPT4'))
+    elif ai_model == 'gemini':
+        api_key = decode_api_key(request.headers.get('X-API-Key-Gemini'))
+    elif ai_model == 'deepseek':
+        api_key = decode_api_key(request.headers.get('X-API-Key-DeepSeek'))
+    elif ai_model == 'qwen':
+        api_key = decode_api_key(request.headers.get('X-API-Key-Qwen'))
+    elif ai_model == 'huggingface':
+        api_key = decode_api_key(request.headers.get('X-API-Key-HuggingFace'))
+
+    if not api_key:
+        return jsonify({'error': f'API key não configurada para {ai_model}'}), 400
+
+    try:
+        if ai_model == 'gemini':
+            result = analyze_image_with_ai(filepath, ai_model, api_key, gemini_version, None, None, template_config)
+        elif ai_model == 'claude':
+            result = analyze_image_with_ai(filepath, ai_model, api_key, None, claude_version, None, template_config)
+        elif ai_model == 'gpt4':
+            result = analyze_image_with_ai(filepath, ai_model, api_key, None, None, gpt_version, template_config)
+        else:
+            result = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config, deepseek_version, qwen_version, huggingface_version)
+    except Exception as e:
+        print(f"ERRO ao detectar espécie específica: {e}")
+        return jsonify({'error': str(e)}), 500
+
+    if not isinstance(result, dict):
+        return jsonify({'error': 'Resposta da IA em formato inesperado'}), 502
+
+    # Sanitizar cada polígono retornado (mesma protecao contra escala/coords
+    # malucas usada no resto do pipeline - nunca descarta, so corrige)
+    raw_areas = result.get('areas') or []
+    clean_areas = []
+    for poly in raw_areas:
+        pts = _sanitize_ai_points(poly)
+        if pts:
+            clean_areas.append(pts)
+
+    response = {
+        'success': True,
+        'areas': clean_areas,
+        'encontrada': len(clean_areas) > 0,
+    }
+    if mode == 'example_region':
+        response['apelido'] = result.get('apelido', '')
+        response['genero'] = result.get('genero', '')
+        response['familia'] = result.get('familia', '')
+        response['observacoes'] = result.get('observacoes', '')
+
+    return jsonify(response)
+
 
 @app.route('/api/especies/<parcela>/<int:subparcela>/coverage', methods=['PUT'])
 def save_coverage_data(parcela, subparcela):
@@ -3576,23 +4336,69 @@ def recalculate_coverage_endpoint():
     species_list = subparcela_data.get('especies', []) or []
     parcela_area_shape = subparcela_data.get('area_shape')
 
+    # BUGFIX RAIZ do "Recalcular zera a cobertura de todas as especies":
+    # polygon_utils le APENAS esp['area_shapes'], que so e preenchido quando
+    # /api/species/area grava um desenho (edicao manual ou importacao ja
+    # persistida). Logo apos uma analise, porem, os poligonos da IA vivem em
+    # esp['species_shapes'] (formato canonico {points:[...]}) e/ou em
+    # esp['areas'] (lista crua de listas de pontos) - nunca em 'area_shapes'.
+    # Resultado: uniao vazia -> 0% para TODA especie, apagando a estimativa
+    # que estava na tela. Agora o recalculo resolve a fonte dos poligonos por
+    # prioridade: desenho do usuario > poligonos da IA. Se nao houver
+    # poligono nenhum para a especie, a cobertura atual e PRESERVADA (nao faz
+    # sentido zerar uma estimativa textual da IA so porque ninguem desenhou).
+    species_for_calc = []
+    has_polygons = []
+    for esp in species_list:
+        shapes = _resolve_species_polygons(esp)
+        has_polygons.append(bool(shapes))
+        species_for_calc.append({'apelido': esp.get('apelido'), 'area_shapes': shapes})
+
     coverages = calculate_all_coverages(
-        species_list,
+        species_for_calc,
         parcela_area_shape=parcela_area_shape,
         mode=mode,
     )
 
     # Persistir as novas coberturas no backend (estado canonico) e devolver
     # info detalhada para o frontend atualizar os cards.
+    # BUGFIX: o casamento era por apelido (next(...)), o que embaralhava
+    # resultados quando duas especies tinham o mesmo apelido. `coverages` sai
+    # de calculate_all_coverages na MESMA ordem de species_for_calc, que por
+    # sua vez segue species_list - entao o indice e o vinculo confiavel.
     out = []
+    preservadas = 0
     for idx, esp in enumerate(species_list):
-        cov_entry = next((c for c in coverages if c['apelido'] == esp.get('apelido')), None)
-        cov = cov_entry['cobertura'] if cov_entry else 0.0
-        esp['cobertura'] = cov
+        if not has_polygons[idx]:
+            # Sem nenhum poligono (nem desenhado, nem da IA): manter a
+            # estimativa textual atual em vez de zerar o card do usuario.
+            cov = esp.get('cobertura', 0) or 0
+            preservadas += 1
+        else:
+            cov = coverages[idx]['cobertura'] if idx < len(coverages) else 0.0
+            esp['cobertura'] = cov
+
+        # BUGFIX: "Recalcular" só tocava em cobertura - numero_individuos
+        # nunca era revisto, entao poligonos adicionados/removidos no editor
+        # (desenho manual, importacao da IA, "IA: Achar Similares" etc) depois
+        # da analise inicial nunca refletiam na contagem de individuos da
+        # tabela. Ressincroniza com a quantidade REAL de poligonos atuais da
+        # especie (species_for_calc[idx] = o mesmo `shapes` resolvido acima,
+        # a mesma fonte usada pra calcular a cobertura) - exceto quando o
+        # numero ja registrado for MAIOR (ex: a IA documentou um individuo
+        # fragmentado em 2 poligonos por oclusao, ver prompt) para nao reduzir
+        # incorretamente uma contagem que a IA/usuario já ajustou de propósito.
+        n_shapes = len(species_for_calc[idx].get('area_shapes') or [])
+        if n_shapes > 0:
+            atual = int(esp.get('numero_individuos') or 0)
+            esp['numero_individuos'] = atual if atual > n_shapes else n_shapes
+
         out.append({
             'indice': idx,
             'apelido': esp.get('apelido'),
             'cobertura': cov,
+            'from_polygons': has_polygons[idx],
+            'numero_individuos': esp.get('numero_individuos', 1),
         })
 
     # Disparar recalculo das analises agregadas (Camada 6 vai amplificar isso)
@@ -3635,9 +4441,12 @@ def add_species_with_ai(parcela, subparcela):
 
     # Obter API keys
     api_key = None
-    gemini_version = request.headers.get('X-Gemini-Version', 'gemini-flash-latest')
-    claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-4-5-20250929')
-    gpt_version = request.headers.get('X-GPT-Version', 'gpt-4o')
+    gemini_version = request.headers.get('X-Gemini-Version', 'gemini-3.1-flash-lite')
+    claude_version = request.headers.get('X-Claude-Version', 'claude-sonnet-5')
+    gpt_version = request.headers.get('X-GPT-Version', 'gpt-5.6-terra')
+    deepseek_version = request.headers.get('X-DeepSeek-Version', 'deepseek-v4-flash-vision-exp')
+    qwen_version = request.headers.get('X-Qwen-Version', 'qwen3-vl-plus')
+    huggingface_version = request.headers.get('X-HuggingFace-Version', 'meta-llama/Llama-3.2-11B-Vision-Instruct')
 
     if ai_model == 'claude':
         api_key = decode_api_key(request.headers.get('X-API-Key-Claude'))
@@ -3678,7 +4487,7 @@ def add_species_with_ai(parcela, subparcela):
         elif ai_model == 'gpt4':
             analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, gpt_version, template_config)
         else:
-            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config)
+            analysis = analyze_image_with_ai(filepath, ai_model, api_key, None, None, None, template_config, deepseek_version, qwen_version, huggingface_version)
 
         # Filtrar apenas espécies novas (não detectadas anteriormente)
         new_species = []
@@ -3727,7 +4536,8 @@ def add_species_with_ai(parcela, subparcela):
                 'cobertura': esp.get('cobertura', 5),
                 'altura': esp.get('altura', 10),
                 'forma_vida': esp.get('forma_vida', 'Erva'),
-                'areas': esp.get('areas', [])  # Coordenadas da IA
+                'areas': esp.get('areas', []),  # Coordenadas da IA
+                'species_shapes': esp.get('species_shapes', [])
             }
 
             subparcela_data['especies'].append(nova_especie)
@@ -5514,7 +6324,14 @@ def import_complete_analysis():
                     'image_path': subparcela_data.get('image_path', ''),
                     'especies': subparcela_data.get('especies', []),
                     'cobertura_total': subparcela_data.get('cobertura_total', 0),
-                    'area_descoberta': subparcela_data.get('area_descoberta', 0)
+                    'area_descoberta': subparcela_data.get('area_descoberta', 0),
+                    # BUGFIX: faltava aqui - mesmo quando o JSON importado tinha
+                    # area_shape/species_shapes salvos, essa resposta descartava
+                    # os dois antes de mandar pro frontend, entao a Area 100% e
+                    # os poligonos de especie (via area_shapes) desapareciam de
+                    # analises restauradas de backup ZIP.
+                    'area_shape': subparcela_data.get('area_shape'),
+                    'species_shapes': subparcela_data.get('species_shapes'),
                 }
                 analysis_results.append(result_data)
                 print(f"   {result_data['subparcela']}: {result_data['image_path']}")

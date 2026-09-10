@@ -363,7 +363,13 @@ PROMPT_TEMPLATES = {
             "estimate_dbh": True,
             "estimate_crown": True,
             "include_water": False,
-            "count_individuals": False
+            # BUGFIX RAIZ: com False (default antigo), o schema de JSON pedido
+            # pra IA nem incluia o campo "numero_individuos" - a contagem de
+            # individuos ficava sempre 0/ausente e o backend caia no default
+            # de "1 individuo", mesmo quando a IA desenhava varios poligonos
+            # pro mesmo morfotipo (ex: "Dois indivíduos com coloração distinta"
+            # nas observações, mas indivíduos=1 na tabela). Ligado por padrão.
+            "count_individuals": True
         }
     }
 }
@@ -400,6 +406,20 @@ def build_prompt(template_name="default", custom_params=None):
 OBJETIVO DA ANÁLISE: {template['description']}
 
 Analise esta imagem de um quadrado de 1x1 metro de vegetação rasteira.
+
+📏 **DELIMITADOR FÍSICO DA SUBPARCELA (LEIA COM ATENÇÃO):**
+A subparcela normalmente é marcada no campo por um delimitador físico visível na
+foto (cano de PVC, estacas de madeira/bambu, barbante/corda esticada, vergalhão,
+ou moldura metálica formando um quadrado/retângulo de ~1x1m).
+- Se esse delimitador estiver visível: TODA a análise (identificação de espécies,
+  desenho dos polígonos de área e cálculo de cobertura em %) deve considerar
+  APENAS o trecho da imagem DENTRO do delimitador. Ignore vegetação visível do
+  lado de fora dele (ela não faz parte da subparcela amostrada).
+- Se NÃO houver delimitador visível na foto: considere a imagem inteira como a
+  área da subparcela (comportamento padrão).
+- NUNCA assuma que a subparcela é a imagem inteira só porque é mais fácil -
+  primeiro procure ativamente pelo delimitador (cantos, linhas retas, hastes)
+  antes de decidir.
 
 INSTRUÇÕES CRÍTICAS:
 1. **SEJA {'MUITO CONSERVADOR' if params['taxonomic_precision'] == 'conservative' else 'MODERADO' if params['taxonomic_precision'] == 'moderate' else 'DETALHISTA'}** - Identifique {'APENAS o que você vê claramente' if params['taxonomic_precision'] == 'conservative' else 'o máximo de detalhes possível'}
@@ -788,10 +808,13 @@ Para cada morfotipo CLARAMENTE visível, forneça:
 
     prompt += """
 
-7. **numero_individuos** - Conte o número aproximado de indivíduos distintos (touceiras, rosetas ou plantas isoladas) visíveis no quadrado
+7. **numero_individuos** - Conte o número de indivíduos distintos (touceiras, rosetas ou plantas isoladas) visíveis no quadrado
    - ⚠️ **NÃO confunda com índice/ID!** Queremos a QUANTIDADE (ex: 5, 12, 1).
    - Se for uma touceira grande, conte como 1
    - Se for um tapete contínuo impossível de separar, estime 1 ou use 0 se não aplicável
+   - 🎯 Quando você também fornecer "areas" (coordenadas) para essa espécie e os
+     indivíduos forem visualmente separáveis, "numero_individuos" DEVE bater com
+     a quantidade de polígonos em "areas" (um polígono por indivíduo - ver item 8)
 
 6. **altura** - Altura média em cm (considere o quadrado de 1x1m como referência)
 
@@ -809,21 +832,36 @@ Para cada morfotipo CLARAMENTE visível, forneça:
    - y: 0 (topo) a 100 (fundo)
 
    **Formato:** array de polígonos, onde cada polígono é uma lista de pontos [x, y]
-   - Mínimo 3-4 pontos para formar um polígono fechado
-   - Para áreas simples, use 4 pontos (retângulo/quadrilátero)
-   - Para áreas irregulares, use 5+ pontos seguindo o contorno
-   - Você pode fornecer MÚLTIPLOS polígonos se a espécie ocorre em áreas separadas
+   - Siga o contorno real da planta/touceira - evite retângulos genéricos sempre
+     que a forma da vegetação for claramente irregular (use 5+ pontos nesse caso)
+   - 4 pontos (retângulo/quadrilátero) só para indivíduos realmente pequenos/
+     simples onde o contorno exato não muda o resultado
+   - 🎯 **UM POLÍGONO POR INDIVÍDUO**: se a espécie tem vários indivíduos separáveis
+     no quadrado (ex: 3 touceiras distintas), forneça 3 polígonos - um por touceira,
+     seguindo o contorno de cada uma - em vez de um único polígono cobrindo todas.
+     "numero_individuos" (item 7) deve bater com essa contagem.
+   - Exceção: se os indivíduos formam um tapete/aglomerado contínuo impossível de
+     separar visualmente, um único polígono cobrindo a mancha é aceitável - nesse
+     caso "numero_individuos" reflete sua melhor estimativa, não a quantidade de polígonos
 
    **Quando fornecer coordenadas:**
    ✅ SEMPRE tente quando a espécie tem uma região distinta e visível
-   ✅ Use múltiplos polígonos para espécies em áreas descontínuas
+   ✅ Use múltiplos polígonos para indivíduos separados da mesma espécie (ver acima)
    ✅ Aproximações são aceitáveis - não precisa ser pixel-perfect
-   ✅ Para espécies dominantes, marque as principais manchas/agregações
+   ⚠️ **Mesmo espécie dominante/dispersa de fundo (ex: gramínea cobrindo a maior
+     parte do quadrado): NÃO deixe "areas" vazio.** Forneça um polígono aproximado
+     da extensão geral que ela ocupa (pode ser um único polígono grande e simples,
+     seguindo aproximadamente o contorno externo da mancha principal - não precisa
+     recortar cada folha). O sistema já resolve sobreposição entre espécies
+     automaticamente (a espécie mais específica/em primeiro plano "rouba" a área
+     onde se sobrepõe à espécie de fundo no recálculo). Um polígono aproximado é
+     SEMPRE melhor que nenhum: sem "areas", a cobertura dessa espécie vira apenas
+     um palpite de texto em vez de uma medição geométrica real.
 
-   **Quando deixar vazio []:**
-   ❌ Espécie muito dispersa/uniforme por toda imagem (ex: gramínea homogênea)
-   ❌ Impossível determinar limites claros da área
-   ❌ Solo Exposto ou Serapilheira (geralmente dispersos)
+   **Quando é aceitável deixar vazio []** (só nestes casos, e mesmo assim tente primeiro):
+   ❌ Impossível determinar QUALQUER limite, nem aproximado (ex: neblina/sombra total)
+   ❌ Solo Exposto ou Serapilheira cobrindo múltiplos pontos minúsculos e desconexos
+     pela imagem toda, sem nenhuma mancha principal identificável
 
    **Exemplos de boas coordenadas:**
    - Touceira de gramínea no canto: [[10, 15], [30, 15], [30, 40], [10, 40]]
@@ -845,19 +883,48 @@ Para cada morfotipo CLARAMENTE visível, forneça:
 Além do array de espécies, você DEVE incluir dois campos adicionais no JSON:
 
 1. **area_shape** - Polígono representando a área total da subparcela (1x1m):
-   - Coordenadas em porcentagem (0-100) relativas à imagem
-   - Geralmente um quadrilátero representando os limites visíveis do quadrado
-   - Se não conseguir identificar os limites, use: {"points": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}]}
+   - Coordenadas em porcentagem (0-100) relativas à imagem - nunca 0-1000,
+     nunca pixels, nunca frações 0-1. Nenhum x ou y passa de 100.
+   - 🎯 **Use o delimitador físico real** (cano/estaca/barbante/moldura) para
+     traçar este quadrilátero - os 4 (ou mais) pontos devem seguir os CANTOS
+     REAIS do delimitador na foto, não um valor genérico
+   - ❌ **PROIBIDO** usar um quadrado pequeno arbitrário num canto da imagem
+     "só para preencher o campo" - se você não consegue localizar o
+     delimitador com confiança, é melhor usar a imagem inteira (fallback
+     abaixo) do que inventar um quadrado pequeno
+   - ⚠️ **ORDEM DOS PONTOS É CRÍTICA**: liste os cantos em ordem SEQUENCIAL
+     percorrendo o perímetro (sentido horário ou anti-horário, tanto faz,
+     mas sem pular de um canto para o canto OPOSTO). Errar a ordem cria um
+     polígono "borboleta" (auto-cruzado) com área quase zero, mesmo que os
+     4 pontos estejam tecnicamente corretos. Ex. correto para um quadrado
+     visto em perspectiva: canto superior-esquerdo → superior-direito →
+     inferior-direito → inferior-esquerdo (seguindo o contorno, nunca
+     diagonal-diagonal-diagonal-diagonal)
+   - Se NÃO houver delimitador visível, use a imagem inteira: {"points": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 100}, {"x": 0, "y": 100}]}
 
 2. **species_shapes** - Objeto mapeando índice de espécie → array de polígonos:
    - Chave = índice da espécie no array (0, 1, 2...)
    - Valor = array de polígonos onde a espécie ocorre
    - Cada polígono: {"points": [{"x": X, "y": Y}, ...]}
    - Use [] se a espécie estiver muito dispersa/uniforme
+   - 🎯 Todo polígono de espécie deve ficar DENTRO (ou cortado pelos limites)
+     de "area_shape" acima - nunca fora dele
+   - ❌ Não copie literalmente as coordenadas de exemplo deste prompt; cada
+     polígono deve seguir o contorno real da planta na imagem, não um
+     retângulo genérico repetido para várias espécies/subparcelas
+
+3. **cobertura** de cada espécie (campo já descrito acima) deve ser a
+   porcentagem ocupada DENTRO da área do delimitador (area_shape), não da
+   imagem inteira, quando o delimitador estiver visível.
 
    **Coordenadas:**
    - x: 0 (esquerda) a 100 (direita)
    - y: 0 (topo) a 100 (fundo)
+   - ⚠️ **A ESCALA É SEMPRE 0-100, NUNCA outra coisa.** Não use 0-1000,
+     não use pixels reais da imagem, não use frações 0-1. Se a área
+     ocupa metade da largura da imagem, o x vai de 0 a 50 (não 0 a 500,
+     não 0 a 0.5). Confira cada coordenada antes de responder: nenhum
+     valor de x ou y deve passar de 100.
    - Mínimo 3-4 pontos por polígono
    - Múltiplos polígonos se espécie em áreas não-contíguas
 
@@ -1139,22 +1206,38 @@ Analise esta imagem aérea/drone de uma área de paisagem para identificar e map
 
     if params.get('count_individuals', False):
         prompt += """
-🔢 **CONTAGEM DE INDIVÍDUOS**
-   - Para cada entidade biológica (árvores, animais, mudas), forneça uma CONTAGEM ESTIMADA
-   - Se for um indivíduo isolado: contagem = 1
-   - Se for um grupo/mancha: estime o número de indivíduos visíveis
-   - Adicione o campo "contagem" (número inteiro) no JSON para cada entidade
+🔢 **CONTAGEM DE INDIVÍDUOS (CRÍTICO)**
+   - Para cada entidade biológica (árvores, animais, mudas), identifique CADA espécime
+     individual distinto visível na imagem - não uma mancha vaga.
+   - Adicione o campo "numero_individuos" (número inteiro) no JSON de cada entidade.
+     ⚠️ Use exatamente este nome de campo - NÃO use "contagem" nem outro nome.
+   - 🎯 **REGRA DE OURO**: "numero_individuos" DEVE ser igual à quantidade de polígonos
+     em "areas" (um polígono por espécime). Se você identificou 5 árvores do mesmo
+     morfotipo, "areas" deve ter 5 polígonos e "numero_individuos" deve ser 5.
+   - Exceção (rara): se UM ÚNICO espécime aparece fragmentado na imagem por oclusão
+     (ex: copa parcialmente escondida atrás de outra árvore, formando 2 manchas
+     visuais separadas), você pode usar 2 polígonos para esse espécime - mas
+     "numero_individuos" continua contando esse caso como 1 (não 2), e a fragmentação
+     deve ficar registrada em "observacoes".
+   - Se for um indivíduo isolado: numero_individuos = 1
+   - Se for um tapete/grupo contínuo impossível de separar em espécimes distintos:
+     estime numero_individuos pela sua melhor contagem visual (não deixe em 0 ou vazio)
 """
 
     # Instruções de Geometria (CRÍTICO)
     prompt += """
 📐 **INSTRUÇÕES DE GEOMETRIA E FORMAS (CRÍTICO):**
 
-1. **Polígonos de Entidades ("areas"):**
+1. **Polígonos de Entidades ("areas") - UM POLÍGONO POR ESPÉCIME:**
    - ❌ **PROIBIDO** usar retângulos simples ou quadrados de 4 pontos (exceto para casas/estruturas).
    - ✅ **OBRIGATÓRIO** usar polígonos irregulares e detalhados (Mínimo 8-10 pontos).
-   - 🎯 Siga o contorno exato da vegetação/entidade. Não faça caixas delimitadoras.
-   - Se a entidade for fragmentada, use múltiplos polígonos.
+   - 🎯 Siga o contorno exato da copa/silhueta de CADA espécime individual. Não faça
+     caixas delimitadoras, e não desenhe UM polígono grande tentando cobrir vários
+     indivíduos de uma vez - cada árvore/planta distinta tem SEU PRÓPRIO polígono.
+   - Se o morfotipo tem 5 árvores visíveis, "areas" deve conter 5 polígonos separados,
+     cada um seguindo o contorno da copa daquela árvore específica.
+   - Só use múltiplos polígonos para o MESMO espécime no caso raro de fragmentação
+     visual por oclusão (copa parcialmente escondida atrás de outra árvore).
 
 2. **Polígono de Área Total ("area_shape"):**
    - ❌ NÃO desenhe um quadrado pequeno num canto.
@@ -1257,8 +1340,13 @@ Exemplo de estrutura esperada:
   - ❌ NÃO crie entradas separadas por localização (ex: "ipe norte", "ipe sul")
   - ✅ CRIE APENAS UMA entrada JSON para essa espécie (ex: "Ipe Amarelo")
   - ✅ SOME todos os indivíduos em "numero_individuos"
-  - ✅ Inclua TODOS os polígonos na lista "areas" dessa única entrada
-  - Exemplo correto: Uma entrada "Ipe", numero_individuos=5, areas=[5 polígonos]
+  - ✅ Inclua um polígono POR INDIVÍDUO na lista "areas" dessa única entrada -
+    NUNCA um polígono só cobrindo vários indivíduos juntos
+  - Exemplo correto: Uma entrada "Ipe", numero_individuos=5, areas=[5 polígonos,
+    um por árvore, cada um seguindo o contorno da copa daquela árvore]
+  - Exemplo ERRADO: Uma entrada "Ipe", numero_individuos=5, areas=[1 polígono
+    grande abrangendo as 5 árvores] - isso é contagem incorreta e mancha vaga,
+    não uma delimitação real de cada espécime
 - Use "area_shape": {{"points":[{{"x":0,"y":0}},{{"x":100,"y":0}},{{"x":100,"y":100}},{{"x":0,"y":100}}]}}
 - Limite as coordenadas a 1 casa decimal (ex: 55.5) ou inteiros
 - Mantenha o JSON compacto e válido

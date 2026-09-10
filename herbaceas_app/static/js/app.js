@@ -2,6 +2,10 @@
 const appState = {
     parcelaNome: 'Parcela_9',
     uploadedFiles: [],
+    // Metadados de campo OPCIONAIS por subparcela (município, UF, bioma,
+    // coordenadas, data) - preenchidos na tela de upload, enviados à IA como
+    // contexto e exibidos nos relatórios exportados (PDF/planilha).
+    subparcelaMetadata: [],
     analysisResults: [],
     especies: {},
     especiesUnificadas: {},
@@ -114,6 +118,22 @@ const appState = {
         }
     }
 };
+
+// ⚠️ BUGFIX RAIZ (causa de boa parte das falhas de persistência de polígono
+// desta versão): `const appState` em script clássico vive no *script scope*,
+// NÃO em `window`. Referências bare (`appState.x`) funcionam de qualquer
+// arquivo .js clássico, mas `window.appState` era SEMPRE `undefined`.
+// svg-coverage-drawer.js lia `window.appState?.parcelaNome` ao montar o
+// payload de /api/species/area e /api/subparcela/area - o campo `parcela`
+// saía undefined, JSON.stringify o omitia, e o backend respondia
+// 400 "Dados insuficientes" em TODA tentativa de salvar polígono. Sintomas
+// que isso explica: polígonos da IA importados que somem ao reabrir, edições
+// manuais que não persistem, "erro ao editar área 100%: Dados insuficientes
+// (parcela/subparcela)" e "Recalcular zera a cobertura" (o backend nunca
+// recebeu polígono nenhum, então area_shapes ficava vazio -> 0%).
+// Por contraste, /api/species/coverage sempre funcionou: é o único desses
+// endpoints que não exige `parcela` no corpo.
+window.appState = appState;
 
 // Limpar chaves inválidas (com emojis ou caracteres estranhos de erro)
 Object.keys(appState.apiKeys).forEach(key => {
@@ -311,6 +331,8 @@ async function loadAvailableAIs() {
         const response = await fetch('/api/ai/available');
         const data = await response.json();
 
+        // data.ais agora traz o catálogo completo por provedor: {id, name,
+        // provider, tier, default_model, models: [{id, label, recommended}], ...}
         appState.availableAIs = data.ais;
 
         // Garantir que sempre há um AI selecionado válido
@@ -326,13 +348,14 @@ async function loadAvailableAIs() {
 
         console.log(`✓ AI selecionada: ${appState.selectedAI}`);
 
-        // Preencher select com opções
+        // Manter o <select id="ai-model"> oculto em sincronia (compatibilidade)
         elements.aiModel.innerHTML = '';
 
         if (data.ais.length === 0) {
             elements.aiModel.innerHTML = '<option value="">Nenhuma IA configurada</option>';
             elements.aiInfo.innerHTML = '<strong>⚠️ Nenhuma IA disponível!</strong> Configure pelo menos uma API key clicando no botão ao lado.';
             elements.analyzeBtn.disabled = true;
+            AIModelModal.render();
             return;
         }
 
@@ -346,8 +369,11 @@ async function loadAvailableAIs() {
             elements.aiModel.appendChild(option);
         });
 
+        // Construir o modal de seleção de modelo com o catálogo recém-carregado
+        AIModelModal.render();
+
         updateAIInfo();
-        handleAIModelChange(); // Mostrar dropdown do modelo selecionado
+        handleAIModelChange(); // Atualizar resumo/estado do modelo selecionado
 
     } catch (error) {
         console.error('Erro ao carregar IAs:', error);
@@ -378,30 +404,8 @@ function handleAIModelChange() {
     }
 
     updateAIInfo();
-
-    // Mostrar/ocultar seletor de versão do Gemini
-    const geminiModelGroup = document.getElementById('gemini-model-group');
-    if (appState.selectedAI === 'gemini') {
-        geminiModelGroup.style.display = 'block';
-    } else {
-        geminiModelGroup.style.display = 'none';
-    }
-
-    // Mostrar/ocultar seletor de versão do Claude
-    const claudeModelGroup = document.getElementById('claude-model-group');
-    if (appState.selectedAI === 'claude') {
-        claudeModelGroup.style.display = 'block';
-    } else {
-        claudeModelGroup.style.display = 'none';
-    }
-
-    // Mostrar/ocultar seletor de versão do GPT
-    const gptModelGroup = document.getElementById('gpt-model-group');
-    if (appState.selectedAI === 'gpt4') {
-        gptModelGroup.style.display = 'block';
-    } else {
-        gptModelGroup.style.display = 'none';
-    }
+    AIModelModal.updateSummary();
+    AIModelModal.highlightSelected();
 
     // Verificar se tem API key para este modelo
     const keyName = getAPIKeyName(appState.selectedAI);
@@ -409,6 +413,138 @@ function handleAIModelChange() {
         showAlert('warning', `API key não configurada para ${keyName}. Configure antes de analisar.`);
     }
 }
+
+// ============================================================
+// Modal de seleção de modelo de IA - substitui os antigos <select>
+// gemini-model-group/claude-model-group/gpt-model-group fixos no HTML.
+// Renderiza um cartão por provedor (dados vindos de /api/ai/available,
+// ver AI_MODELS_CATALOG em app.py) com o <select> de versão daquele
+// provedor (ids gemini-version/claude-version/gpt-version/etc, lidos
+// diretamente pelo restante do app na hora de montar a requisição).
+// ============================================================
+const AIModelModal = {
+    render() {
+        const grid = document.getElementById('ai-provider-grid');
+        if (!grid) return;
+
+        if (!appState.availableAIs || appState.availableAIs.length === 0) {
+            grid.innerHTML = '<p>Nenhuma IA disponível. Configure uma API key primeiro.</p>';
+            return;
+        }
+
+        grid.innerHTML = appState.availableAIs.map(ai => this._cardHTML(ai)).join('');
+        this.highlightSelected();
+    },
+
+    _cardHTML(ai) {
+        const isPremium = ai.tier === 'premium';
+        const tierBadge = isPremium
+            ? '<span class="badge badge-primary">Premium</span>'
+            : '<span class="badge badge-success">Grátis</span>';
+        const expBadge = ai.experimental ? '<span class="badge badge-warning">Experimental</span>' : '';
+        const hasKey = !!appState.apiKeys[ai.id];
+        const keyStatus = hasKey ? '✅ Configurada' : '❌ Não configurada';
+
+        const options = (ai.models || []).map(m => {
+            const isDefault = m.id === ai.default_model;
+            const star = m.recommended ? ' ⭐' : '';
+            return `<option value="${m.id}" ${isDefault ? 'selected' : ''}>${m.label}${star}</option>`;
+        }).join('');
+
+        const versionSelect = options
+            ? `<select id="${ai.id}-version" class="ai-select" onchange="AIModelModal.onVersionChange('${ai.id}')">${options}</select>`
+            : '<p class="ai-info-small">Modelo único disponível.</p>';
+
+        return `
+            <div class="ai-provider-card" id="ai-card-${ai.id}" data-ai-id="${ai.id}">
+                <div class="ai-provider-card-header">
+                    <span class="ai-provider-name">${ai.name}</span>
+                    ${tierBadge}${expBadge}
+                </div>
+                <div class="ai-provider-sub">${ai.provider}</div>
+                ${versionSelect}
+                <div class="ai-provider-key-row">
+                    <span class="ai-provider-key-status">${keyStatus}</span>
+                    <button type="button" class="btn btn-small btn-secondary"
+                        onclick="event.stopPropagation(); configureAPIKey('${ai.id}')">${hasKey ? 'Alterar' : 'Configurar'} chave</button>
+                </div>
+                <button type="button" class="btn btn-success ai-provider-select-btn"
+                    onclick="AIModelModal.selectProvider('${ai.id}')">
+                    ${ai.id === appState.selectedAI ? '✓ Selecionado' : 'Usar este modelo'}
+                </button>
+            </div>`;
+    },
+
+    selectProvider(aiId) {
+        elements.aiModel.value = aiId;
+        handleAIModelChange();
+        this.close();
+    },
+
+    onVersionChange(aiId) {
+        // Só o resumo do provedor atualmente selecionado precisa refletir a troca
+        if (aiId === appState.selectedAI) {
+            this.updateSummary();
+        }
+    },
+
+    highlightSelected() {
+        document.querySelectorAll('.ai-provider-card').forEach(card => {
+            const isSelected = card.dataset.aiId === appState.selectedAI;
+            card.classList.toggle('selected', isSelected);
+            const btn = card.querySelector('.ai-provider-select-btn');
+            if (btn) btn.textContent = isSelected ? '✓ Selecionado' : 'Usar este modelo';
+        });
+    },
+
+    updateSummary() {
+        const summaryText = document.getElementById('ai-model-summary-text');
+        if (!summaryText) return;
+
+        const ai = (appState.availableAIs || []).find(a => a.id === appState.selectedAI);
+        if (!ai) {
+            summaryText.textContent = 'Nenhuma IA configurada';
+            return;
+        }
+
+        const versionSelect = document.getElementById(`${ai.id}-version`);
+        const modelLabel = versionSelect && versionSelect.selectedIndex >= 0
+            ? versionSelect.options[versionSelect.selectedIndex].text
+            : '';
+        summaryText.textContent = modelLabel ? `${ai.name} — ${modelLabel}` : `${ai.name} (${ai.provider})`;
+    },
+
+    open() {
+        this.render();
+        const modal = document.getElementById('ai-model-modal');
+        if (!modal) return;
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    },
+
+    close() {
+        const modal = document.getElementById('ai-model-modal');
+        if (!modal) return;
+        modal.style.display = 'none';
+        document.body.style.overflow = 'auto';
+    }
+};
+
+// Fechar ao clicar fora do conteúdo / tecla ESC (mesmo padrão do help-modal)
+(function initAIModelModalControls() {
+    const modal = document.getElementById('ai-model-modal');
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) AIModelModal.close();
+        });
+    }
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const m = document.getElementById('ai-model-modal');
+            if (m && m.style.display === 'flex') AIModelModal.close();
+        }
+    });
+})();
 
 function updateAIInfo() {
     const selectedAI = appState.availableAIs.find(ai => ai.id === appState.selectedAI);
@@ -468,28 +604,28 @@ function configureAPIKey(aiId) {
             text: 'Obter chave da Anthropic',
             placeholder: 'sk-ant-api03-...',
             tier: 'premium',
-            note: 'US$ 3.00 por milhão de tokens de entrada'
+            note: 'A partir de US$ 2,00 por milhão de tokens de entrada (Claude Sonnet 5) - ver anthropic.com/pricing'
         },
         'gpt4': {
             url: 'https://platform.openai.com/api-keys',
             text: 'Obter chave da OpenAI',
             placeholder: 'sk-proj-...',
             tier: 'premium',
-            note: 'US$ 10.00 por milhão de tokens de entrada'
+            note: 'Modelo pago (GPT-5.6) - ver preços atualizados em platform.openai.com/pricing'
         },
         'gemini': {
             url: 'https://aistudio.google.com/app/apikey',
             text: 'Obter chave do Google AI Studio',
             placeholder: 'AIzaSy...',
             tier: 'free',
-            note: '✓ Grátis até 60 requisições/min'
+            note: '✓ Grátis com cota diária - ver limites atuais em ai.google.dev'
         },
         'deepseek': {
             url: 'https://platform.deepseek.com/api_keys',
             text: 'Obter chave do DeepSeek (Grátis)',
             placeholder: 'sk-...',
             tier: 'free',
-            note: '✓ Totalmente gratuito! US$ 0.14 por milhão de tokens'
+            note: '✓ Custo muito baixo por token. Visão ainda experimental (modelo -exp)'
         },
         'qwen': {
             url: 'https://dashscope.console.aliyun.com/apiKey',
@@ -833,6 +969,11 @@ function handleImageSelection(e) {
     elements.uploadBtn.disabled = false;
     appState.uploadedFiles = files;
 
+    // PEDIDO: metadados de campo opcionais por subparcela (município, UF,
+    // bioma, coordenadas, data), inline como legenda de cada preview - sem
+    // modal. Reseta a cada nova seleção de arquivos.
+    appState.subparcelaMetadata = files.map(() => ({}));
+
     // Criar previews
     elements.previewContainer.innerHTML = '';
     files.forEach((file, idx) => {
@@ -841,13 +982,69 @@ function handleImageSelection(e) {
             const previewItem = document.createElement('div');
             previewItem.className = 'preview-item';
             previewItem.innerHTML = `
-                <img src="${e.target.result}" alt="Preview">
-                <div class="label">Subparcela ${idx + 1}</div>
+                <div class="preview-image-wrap">
+                    <img src="${e.target.result}" alt="Preview">
+                    <div class="label" data-default-label="Subparcela ${idx + 1}">Subparcela ${idx + 1}</div>
+                </div>
+                <div class="preview-metadata" title="Opcional - ajuda a IA a identificar espécies típicas da região e aparece nos relatórios exportados">
+                    <input type="text" class="meta-nome" placeholder="Nome/código (ex: sub3)" data-idx="${idx}" data-field="nome">
+                    <input type="text" class="meta-municipio" placeholder="Município" data-idx="${idx}" data-field="municipio">
+                    <input type="text" class="meta-uf" placeholder="UF" maxlength="2" data-idx="${idx}" data-field="uf">
+                    <input type="text" class="meta-bioma" placeholder="Bioma" data-idx="${idx}" data-field="bioma">
+                    <input type="text" class="meta-coordenadas" placeholder="Coordenadas (lat, long)" data-idx="${idx}" data-field="coordenadas">
+                    <input type="date" class="meta-data" data-idx="${idx}" data-field="data">
+                </div>
             `;
             elements.previewContainer.appendChild(previewItem);
+
+            // Se for a primeira subparcela, oferecer replicar município/UF/bioma
+            // (geralmente iguais para toda a parcela) pras demais com um clique
+            if (idx === 0) {
+                const applyAllBtn = document.createElement('button');
+                applyAllBtn.type = 'button';
+                applyAllBtn.className = 'btn btn-small btn-secondary meta-apply-all';
+                applyAllBtn.textContent = '📋 Aplicar município/UF/bioma a todas';
+                applyAllBtn.onclick = () => applyMetadataToAll();
+                previewItem.querySelector('.preview-metadata').appendChild(applyAllBtn);
+            }
         };
         reader.readAsDataURL(file);
     });
+
+    // Ler os campos ao digitar (delegação - os inputs são recriados a cada
+    // seleção de arquivos, então um listener direto neles seria perdido)
+    elements.previewContainer.oninput = (e) => {
+        const idx = e.target.dataset.idx;
+        const field = e.target.dataset.field;
+        if (idx === undefined || !field) return;
+        if (!appState.subparcelaMetadata[idx]) appState.subparcelaMetadata[idx] = {};
+        appState.subparcelaMetadata[idx][field] = e.target.value;
+
+        // Nome/código digitado atualiza a legenda sobre a foto ao vivo
+        // (volta pro padrão "Subparcela N" se o campo for esvaziado)
+        if (field === 'nome') {
+            const labelEl = e.target.closest('.preview-item')?.querySelector('.label');
+            if (labelEl) {
+                labelEl.textContent = e.target.value.trim() || labelEl.dataset.defaultLabel;
+            }
+        }
+    };
+}
+
+function applyMetadataToAll() {
+    const first = appState.subparcelaMetadata[0] || {};
+    document.querySelectorAll('.preview-item').forEach((item, idx) => {
+        if (idx === 0) return;
+        ['municipio', 'uf', 'bioma'].forEach(field => {
+            const input = item.querySelector(`[data-field="${field}"]`);
+            if (input && first[field]) {
+                input.value = first[field];
+                if (!appState.subparcelaMetadata[idx]) appState.subparcelaMetadata[idx] = {};
+                appState.subparcelaMetadata[idx][field] = first[field];
+            }
+        });
+    });
+    showAlert('success', '✅ Município/UF/Bioma aplicados a todas as subparcelas. Ajuste individualmente se necessário.');
 }
 
 async function uploadImages() {
@@ -860,6 +1057,10 @@ async function uploadImages() {
     appState.uploadedFiles.forEach(file => {
         formData.append('images', file);
     });
+
+    // Metadados de campo opcionais por subparcela (município/UF/bioma/
+    // coordenadas/data) - mesma ordem dos arquivos enviados acima
+    formData.append('metadata', JSON.stringify(appState.subparcelaMetadata || []));
 
     try {
         elements.uploadBtn.disabled = true;
@@ -947,117 +1148,252 @@ async function startManualMode() {
     }
 }
 
+// BUGFIX: a versão anterior sempre forçava a abertura do modal de
+// configuração de prompt e dependia do usuário achar e clicar o botão certo
+// lá dentro (saveAndClose()) pra realmente disparar o upload+análise - na
+// prática isso quebrava o fluxo (usuário fechava o modal de outro jeito, ou
+// nem entendia que precisava interagir com ele) e a foto nova nunca aparecia
+// nem era analisada. Agora: usa direto a última configuração de prompt
+// salva (mesma lógica do botão "Analisar Imagens" principal) e já dispara a
+// análise - "Configurar Prompt" continua disponível separadamente pra quem
+// quiser mudar algo antes.
 async function handleAddImages(event) {
     const files = Array.from(event.target.files);
+    event.target.value = ''; // permite selecionar os mesmos arquivos de novo depois
 
     if (files.length === 0) {
         return;
     }
 
-    console.log(`📸 Adicionando ${files.length} novas imagens à análise existente`);
+    console.log(`📸 ${files.length} nova(s) foto(s) selecionada(s) - aguardando confirmação do usuário`);
 
-    // Armazenar arquivos temporariamente no appState
-    appState.pendingNewImages = files;
-
-    // Abrir modal de configuração de prompt
-    showAlert('info', `${files.length} imagens selecionadas. Configure os parâmetros de análise.`);
-
-    // Abrir o modal de configuração de prompt
-    const configButton = document.getElementById('config-prompt-btn');
-    if (configButton) {
-        configButton.click();
+    // BUGFIX: sem try/catch aqui, qualquer exceção (ex: elemento do DOM não
+    // encontrado, appState.parcelaNome vazio, etc) morria silenciosamente -
+    // "nada acontece" ao selecionar arquivo é exatamente esse sintoma. Agora
+    // qualquer erro aparece no console E como alerta visível.
+    try {
+        // PEDIDO: a nova foto NÃO deve ser analisada automaticamente - o
+        // usuário precisa ver a miniatura, opcionalmente preencher metadados
+        // (mesmo padrão da tela de upload inicial) e confirmar antes de
+        // qualquer chamada à IA, podendo escolher analisar só a foto nova ou
+        // reanalisar tudo com o novo contexto.
+        showAddImagesConfirm(files);
+    } catch (error) {
+        console.error('❌ Erro ao preparar novas fotos:', error);
+        showAlert('error', 'Erro ao preparar novas fotos: ' + error.message);
     }
-
-    // Limpar o input para permitir selecionar as mesmas imagens novamente se necessário
-    event.target.value = '';
 }
 
-async function addImagesToExistingAnalysis(files, promptConfig) {
-    try {
-        // Preparar FormData para upload das novas imagens
-        const formData = new FormData();
-        formData.append('parcela_nome', appState.parcelaNome);
+// Miniaturas + metadados das fotos recém-selecionadas, com confirmação
+// explícita ANTES de disparar upload/análise. Removido ao confirmar
+// (displayResults() reconstrói a grid com os cards reais) ou ao cancelar.
+function showAddImagesConfirm(files) {
+    const existing = document.getElementById('add-images-preview');
+    if (existing) existing.remove();
 
-        files.forEach(file => {
-            formData.append('images', file);
-        });
+    appState.pendingNewImages = files;
+    appState.pendingNewImagesMetadata = files.map(() => ({}));
 
-        // Upload das novas imagens
-        showAlert('info', 'Enviando novas imagens...');
-        const uploadResponse = await fetch('/api/upload-additional-images', {
-            method: 'POST',
-            body: formData
-        });
+    const panel = document.createElement('div');
+    panel.id = 'add-images-preview';
+    panel.className = 'add-images-confirm-panel';
 
-        if (!uploadResponse.ok) {
-            const errorData = await uploadResponse.json();
-            throw new Error(errorData.error || 'Erro ao fazer upload das imagens');
+    const grid = document.createElement('div');
+    grid.className = 'preview-grid';
+    panel.appendChild(grid);
+
+    files.forEach((file, idx) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const item = document.createElement('div');
+            item.className = 'preview-item';
+            item.innerHTML = `
+                <div class="preview-image-wrap">
+                    <img src="${e.target.result}" alt="Nova subparcela">
+                    <div class="label" data-default-label="Nova subparcela ${idx + 1}">Nova subparcela ${idx + 1}</div>
+                </div>
+                <div class="preview-metadata" title="Opcional - ajuda a IA a identificar espécies típicas da região e aparece nos relatórios exportados">
+                    <input type="text" class="meta-nome" placeholder="Nome/código (ex: sub3)" data-idx="${idx}" data-field="nome">
+                    <input type="text" class="meta-municipio" placeholder="Município" data-idx="${idx}" data-field="municipio">
+                    <input type="text" class="meta-uf" placeholder="UF" maxlength="2" data-idx="${idx}" data-field="uf">
+                    <input type="text" class="meta-bioma" placeholder="Bioma" data-idx="${idx}" data-field="bioma">
+                    <input type="text" class="meta-coordenadas" placeholder="Coordenadas (lat, long)" data-idx="${idx}" data-field="coordenadas">
+                    <input type="date" class="meta-data" data-idx="${idx}" data-field="data">
+                </div>
+            `;
+            grid.appendChild(item);
+        };
+        reader.readAsDataURL(file);
+    });
+
+    // Delegação: os inputs são recriados a cada seleção de arquivos
+    grid.oninput = (e) => {
+        const idx = e.target.dataset.idx;
+        const field = e.target.dataset.field;
+        if (idx === undefined || !field) return;
+        if (!appState.pendingNewImagesMetadata[idx]) appState.pendingNewImagesMetadata[idx] = {};
+        appState.pendingNewImagesMetadata[idx][field] = e.target.value;
+
+        // Nome/código digitado atualiza a legenda sobre a foto ao vivo
+        if (field === 'nome') {
+            const labelEl = e.target.closest('.preview-item')?.querySelector('.label');
+            if (labelEl) {
+                labelEl.textContent = e.target.value.trim() || labelEl.dataset.defaultLabel;
+            }
         }
+    };
 
-        const uploadData = await uploadResponse.json();
-        const newSubparcelaIds = uploadData.subparcela_ids;
+    const actions = document.createElement('div');
+    actions.className = 'add-images-confirm-actions';
+    actions.innerHTML = `
+        <div class="add-images-scope">
+            <label><input type="radio" name="add-images-scope" value="new" checked> Analisar apenas a(s) foto(s) nova(s)</label>
+            <label><input type="radio" name="add-images-scope" value="all"> Reanalisar todas as fotos (considerando a nova no contexto)</label>
+        </div>
+        <div class="add-images-buttons">
+            <button type="button" class="btn btn-secondary" id="add-images-cancel-btn">Cancelar</button>
+            <button type="button" class="btn btn-success" id="add-images-confirm-btn">✓ Confirmar e Analisar</button>
+        </div>
+    `;
+    panel.appendChild(actions);
 
-        console.log(`✓ ${newSubparcelaIds.length} novas imagens enviadas`);
-
-        // Analisar as novas imagens
-        showAlert('info', 'Analisando novas imagens...');
-
-        const analyzeResponse = await fetch('/api/analyze-additional-images', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                parcela_nome: appState.parcelaNome,
-                subparcela_ids: newSubparcelaIds,
-                ai_model: appState.selectedAI,
-                api_key: appState.apiKeys[appState.selectedAI],
-                prompt_config: promptConfig
-            })
-        });
-
-        if (!analyzeResponse.ok) {
-            const errorData = await analyzeResponse.json();
-            throw new Error(errorData.error || 'Erro ao analisar novas imagens');
-        }
-
-        const analyzeData = await analyzeResponse.json();
-
-        // Atualizar o estado com os novos resultados
-        analyzeData.novas_subparcelas.forEach(novaSub => {
-            appState.analysisResults.push(novaSub);
-        });
-
-        // Atualizar espécies unificadas (agora já vem no formato correto do backend)
-        if (analyzeData.especies_atualizadas) {
-            appState.especiesUnificadas = analyzeData.especies_atualizadas;
-
-            // Converter para formato da interface (especies_atualizadas já está flat)
-            appState.especies = {};
-            Object.entries(appState.especiesUnificadas).forEach(([apelido, espData]) => {
-                appState.especies[apelido] = {
-                    apelido_original: apelido,
-                    apelido_usuario: espData.apelido_usuario || apelido,
-                    genero: espData.genero || '',
-                    especie: espData.especie || '',
-                    familia: espData.familia || '',
-                    ocorrencias: espData.ocorrencias || 0
-                };
-            });
-        }
-
-        // Reexibir resultados
-        displayResults();
-
-        showAlert('success', `✓ ${newSubparcelaIds.length} novas subparcelas adicionadas com sucesso!`);
-
-        // Limpar arquivos pendentes
+    actions.querySelector('#add-images-cancel-btn').onclick = () => {
+        panel.remove();
         delete appState.pendingNewImages;
+        delete appState.pendingNewImagesMetadata;
+    };
 
-    } catch (error) {
-        console.error('Erro ao adicionar novas imagens:', error);
-        showAlert('error', `Erro: ${error.message}`);
+    actions.querySelector('#add-images-confirm-btn').onclick = async () => {
+        const scope = actions.querySelector('input[name="add-images-scope"]:checked')?.value || 'new';
+        const confirmBtn = actions.querySelector('#add-images-confirm-btn');
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Analisando...';
+        try {
+            const promptConfig = (typeof PromptConfig !== 'undefined') ? PromptConfig.getSavedConfig() : { template: 'default', params: null };
+            await addImagesToExistingAnalysis(files, appState.pendingNewImagesMetadata, promptConfig, scope);
+        } catch (error) {
+            console.error('❌ Erro ao adicionar novas fotos:', error);
+            showAlert('error', 'Erro ao adicionar fotos: ' + error.message);
+        } finally {
+            panel.remove();
+            delete appState.pendingNewImages;
+            delete appState.pendingNewImagesMetadata;
+        }
+    };
+
+    // PEDIDO: os campos de metadados das fotos adicionadas depois devem
+    // aparecer na Seção 1 (Upload de Imagens), junto do resto do fluxo de
+    // upload - não no meio da Seção 4 (Resultados), onde ficavam antes.
+    const anchor = document.getElementById('add-images-anchor');
+    if (anchor) {
+        anchor.appendChild(panel);
+        const uploadSection = document.getElementById('upload-section');
+        if (uploadSection) uploadSection.style.display = '';
+    } else {
+        elements.subparcelasGrid.parentElement.insertBefore(panel, elements.subparcelasGrid);
     }
+    panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function addImagesToExistingAnalysis(files, metadata, promptConfig, scope = 'new') {
+    // Preparar FormData para upload das novas imagens
+    const formData = new FormData();
+    formData.append('parcela_nome', appState.parcelaNome);
+    formData.append('metadata', JSON.stringify(metadata || []));
+
+    files.forEach(file => {
+        formData.append('images', file);
+    });
+
+    // Upload das novas imagens
+    showAlert('info', 'Enviando novas imagens...');
+    const uploadResponse = await fetch('/api/upload-additional-images', {
+        method: 'POST',
+        body: formData
+    });
+
+    if (!uploadResponse.ok) {
+        const errorData = await uploadResponse.json();
+        throw new Error(errorData.error || 'Erro ao fazer upload das imagens');
+    }
+
+    const uploadData = await uploadResponse.json();
+    const newSubparcelaIds = uploadData.subparcela_ids;
+
+    console.log(`✓ ${newSubparcelaIds.length} novas imagens enviadas`);
+
+    // PEDIDO: escopo opcional - só a(s) foto(s) nova(s), ou reanalisar tudo
+    // considerando a nova no contexto (reenvia todos os ids existentes +
+    // os novos; o backend simplesmente analisa a lista de ids recebida).
+    let subparcelaIdsToAnalyze = newSubparcelaIds;
+    if (scope === 'all') {
+        const existingIds = appState.analysisResults
+            .map(r => r.subparcela)
+            .filter(id => id !== undefined && id !== null);
+        subparcelaIdsToAnalyze = Array.from(new Set([...existingIds, ...newSubparcelaIds]));
+    }
+
+    // Analisar as imagens
+    showAlert('info', scope === 'all' ? 'Reanalisando todas as subparcelas...' : 'Analisando novas imagens...');
+
+    // BUGFIX: sem os headers de versão (X-Gemini-Version etc) o backend
+    // chamava a IA sem nome de modelo e a análise falhava, devolvendo sempre
+    // o placeholder "Vegetação Não Detectada". buildAIRequestHeaders() já
+    // monta chave + versão do provedor ativo.
+    const analyzeResponse = await fetch('/api/analyze-additional-images', {
+        method: 'POST',
+        headers: buildAIRequestHeaders(),
+        body: JSON.stringify({
+            parcela_nome: appState.parcelaNome,
+            subparcela_ids: subparcelaIdsToAnalyze,
+            ai_model: appState.selectedAI,
+            api_key: appState.apiKeys[appState.selectedAI],
+            prompt_config: promptConfig
+        })
+    });
+
+    if (!analyzeResponse.ok) {
+        const errorData = await analyzeResponse.json();
+        throw new Error(errorData.error || 'Erro ao analisar novas imagens');
+    }
+
+    const analyzeData = await analyzeResponse.json();
+
+    // Atualizar o estado com os resultados: subparcelas já existentes que
+    // foram REanalisadas (escopo "all") substituem a entrada atual em vez de
+    // duplicar; as genuinamente novas são adicionadas ao final.
+    analyzeData.novas_subparcelas.forEach(novaSub => {
+        const existingIdx = appState.analysisResults.findIndex(r => r.subparcela === novaSub.subparcela);
+        if (existingIdx >= 0) {
+            appState.analysisResults[existingIdx] = novaSub;
+        } else {
+            appState.analysisResults.push(novaSub);
+        }
+    });
+
+    // Atualizar espécies unificadas (já vem no formato correto do backend)
+    if (analyzeData.especies_atualizadas) {
+        appState.especiesUnificadas = analyzeData.especies_atualizadas;
+
+        // Converter para formato da interface (especies_atualizadas já está flat)
+        appState.especies = {};
+        Object.entries(appState.especiesUnificadas).forEach(([apelido, espData]) => {
+            appState.especies[apelido] = {
+                apelido_original: apelido,
+                apelido_usuario: espData.apelido_usuario || apelido,
+                genero: espData.genero || '',
+                especie: espData.especie || '',
+                familia: espData.familia || '',
+                ocorrencias: espData.ocorrencias || 0
+            };
+        });
+    }
+
+    // Reexibir resultados: tabela de espécies, resumo, cards de subparcela e
+    // gráficos/analytics avançados - tudo já com a(s) nova(s) subparcela(s)
+    displayResults();
+
+    showAlert('success', `✓ ${newSubparcelaIds.length} nova(s) subparcela(s) adicionada(s) com sucesso!`);
 }
 
 async function analyzeImages() {
@@ -1109,29 +1445,29 @@ async function analyzeImages() {
 
         console.log('Iniciando análise com IA:', appState.selectedAI);
 
-        // Obter versão específica do Gemini, se aplicável
-        let geminiVersion = null;
-        if (appState.selectedAI === 'gemini') {
-            const geminiVersionSelect = document.getElementById('gemini-version');
-            geminiVersion = geminiVersionSelect ? geminiVersionSelect.value : 'gemini-2.5-flash';
-            console.log('Usando versão do Gemini:', geminiVersion);
+        // Obter a versão específica selecionada no modal para o provedor ativo
+        // (cada provedor tem seu próprio <select id="{id}-version">, ver AIModelModal)
+        const versionDefaults = {
+            gemini: 'gemini-3.1-flash-lite',
+            claude: 'claude-sonnet-5',
+            gpt4: 'gpt-5.6-terra',
+            deepseek: 'deepseek-v4-flash-vision-exp',
+            qwen: 'qwen3-vl-plus',
+            huggingface: 'meta-llama/Llama-3.2-11B-Vision-Instruct'
+        };
+        function selectedVersionFor(aiId, selectId) {
+            if (appState.selectedAI !== aiId) return null;
+            const select = document.getElementById(selectId);
+            const version = select ? select.value : versionDefaults[aiId];
+            console.log(`Usando versão de ${aiId}:`, version);
+            return version;
         }
-
-        // Obter versão específica do Claude, se aplicável
-        let claudeVersion = null;
-        if (appState.selectedAI === 'claude') {
-            const claudeVersionSelect = document.getElementById('claude-version');
-            claudeVersion = claudeVersionSelect ? claudeVersionSelect.value : 'claude-sonnet-4-5-20250929';
-            console.log('Usando versão do Claude:', claudeVersion);
-        }
-
-        // Obter versão específica do GPT, se aplicável
-        let gptVersion = null;
-        if (appState.selectedAI === 'gpt4') {
-            const gptVersionSelect = document.getElementById('gpt-version');
-            gptVersion = gptVersionSelect ? gptVersionSelect.value : 'gpt-4o';
-            console.log('Usando versão do GPT:', gptVersion);
-        }
+        const geminiVersion = selectedVersionFor('gemini', 'gemini-version');
+        const claudeVersion = selectedVersionFor('claude', 'claude-version');
+        const gptVersion = selectedVersionFor('gpt4', 'gpt-version');
+        const deepseekVersion = selectedVersionFor('deepseek', 'deepseek-version');
+        const qwenVersion = selectedVersionFor('qwen', 'qwen-version');
+        const huggingfaceVersion = selectedVersionFor('huggingface', 'huggingface-version');
 
         // Obter configuração de prompt salva
         const promptConfig = PromptConfig.getSavedConfig();
@@ -1153,7 +1489,10 @@ async function analyzeImages() {
             'Content-Type': 'application/json',
             'X-Gemini-Version': geminiVersion || '',
             'X-Claude-Version': claudeVersion || '',
-            'X-GPT-Version': gptVersion || ''
+            'X-GPT-Version': gptVersion || '',
+            'X-DeepSeek-Version': deepseekVersion || '',
+            'X-Qwen-Version': qwenVersion || '',
+            'X-HuggingFace-Version': huggingfaceVersion || ''
         };
 
         // Adicionar chaves API apenas se existirem (codificadas em Base64 com suporte UTF-8)
@@ -1597,9 +1936,25 @@ function displaySubparcelas() {
             </div>
         ` : '';
 
+        // PEDIDO: nome/código customizado da subparcela (ex: "sub3" em vez de
+        // "Subparcela 2") + legenda com metadados de campo opcionais
+        // (município/UF/bioma/coordenadas/data), definidos na tela de upload.
+        const meta = result.metadata || {};
+        const displayTitle = meta.nome
+            ? `${meta.nome} <span class="subparcela-header-sub">(Subparcela ${result.subparcela || result.subparcela_id})</span>`
+            : `Subparcela ${result.subparcela || result.subparcela_id}`;
+        const metaParts = [
+            meta.municipio && meta.uf ? `${meta.municipio}/${meta.uf}` : (meta.municipio || meta.uf),
+            meta.bioma, meta.coordenadas,
+            meta.data ? new Date(meta.data + 'T00:00:00').toLocaleDateString('pt-BR') : null,
+        ].filter(Boolean);
+        const metadataHTML = metaParts.length
+            ? `<div class="subparcela-metadata">📍 ${metaParts.join(' · ')}</div>`
+            : '';
+
         card.innerHTML = `
             <div class="subparcela-header">
-                <span>Subparcela ${result.subparcela || result.subparcela_id}</span>
+                <span>${displayTitle}</span>
                 <div class="subparcela-header-actions">
                     <button class="btn btn-xs btn-glass" onclick="openImageViewer(${result.subparcela || result.subparcela_id}, '${result.image || result.filename}')" title="Ver e Editar">
                         🖼️ Ver e Editar
@@ -1607,9 +1962,16 @@ function displaySubparcelas() {
                     <button class="btn btn-xs btn-glass-orange" onclick="reanalyzeSubparcela(event, ${result.subparcela || result.subparcela_id})" title="Reanalisar com IA">
                         🔄 Reanalisar
                     </button>
+                    <button class="btn btn-xs btn-glass" onclick="duplicateSubparcela(${result.subparcela || result.subparcela_id})" title="Duplicar esta subparcela (mesma foto, espécies e polígonos)">
+                        ⧉ Duplicar
+                    </button>
+                    <button class="btn btn-xs btn-glass-red" onclick="deleteSubparcela(${result.subparcela || result.subparcela_id})" title="Excluir esta subparcela">
+                        🗑️ Excluir
+                    </button>
                 </div>
             </div>
             <img src="${result.image_path || '/static/uploads/' + appState.parcelaNome + '/' + (result.image || result.filename)}" class="subparcela-image" alt="Subparcela ${result.subparcela}" onclick="openImageViewer(${result.subparcela}, '${result.image || result.filename}')" style="cursor: pointer;">
+            ${metadataHTML}
             <div class="subparcela-content">
                 ${errorBanner}
                 ${especiesHTML}
@@ -1679,19 +2041,86 @@ async function reanalyzeSubparcela(event, subparcela) {
     showAlert('info', `Configure ou refine o prompt e clique em "Aplicar e Reanalisar" para prosseguir com a reanálise da subparcela ${subparcela}`);
 }
 
+// ============================================================
+// Excluir / duplicar subparcelas analisadas
+// Os ids NÃO são renumerados ao excluir: polígonos e coberturas já salvos
+// das outras subparcelas continuam válidos.
+// ============================================================
+async function deleteSubparcela(subparcela) {
+    const result = appState.analysisResults.find(r => r.subparcela === subparcela);
+    const nome = result?.metadata?.nome ? `"${result.metadata.nome}"` : `Subparcela ${subparcela}`;
+
+    if (!confirm(`Excluir ${nome}?\n\nA foto, as espécies e todos os polígonos desenhados nela serão removidos. Esta ação não pode ser desfeita.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/parcela/${appState.parcelaNome}/subparcela/${subparcela}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Erro ao excluir subparcela');
+
+        appState.analysisResults = appState.analysisResults.filter(r => r.subparcela !== subparcela);
+
+        displayResults();
+        showAlert('success', `${nome} excluída.`);
+    } catch (error) {
+        console.error('Erro ao excluir subparcela:', error);
+        showAlert('error', 'Erro ao excluir: ' + error.message);
+    }
+}
+
+async function duplicateSubparcela(subparcela) {
+    try {
+        const response = await fetch(`/api/parcela/${appState.parcelaNome}/subparcela/${subparcela}/duplicate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Erro ao duplicar subparcela');
+
+        if (data.nova_subparcela) {
+            appState.analysisResults.push(data.nova_subparcela);
+        }
+
+        displayResults();
+        showAlert('success', `Subparcela ${subparcela} duplicada como ${data.subparcela}.`);
+    } catch (error) {
+        console.error('Erro ao duplicar subparcela:', error);
+        showAlert('error', 'Erro ao duplicar: ' + error.message);
+    }
+}
+
+window.deleteSubparcela = deleteSubparcela;
+window.duplicateSubparcela = duplicateSubparcela;
+
 // Executar reanálise após configuração do prompt (chamada pelo PromptConfig)
 async function executeReanalysis(subparcela, promptConfig) {
     console.log('▶️ Executando reanálise da subparcela:', subparcela);
     console.log('📝 Configuração do prompt:', promptConfig);
 
-    const geminiVersion = localStorage.getItem('geminiVersion') || 'gemini-flash-latest';
-
-    // Obter versão do Claude se aplicável
-    let claudeVersion = null;
-    if (appState.selectedAI === 'claude') {
-        const claudeVersionSelect = document.getElementById('claude-version');
-        claudeVersion = claudeVersionSelect ? claudeVersionSelect.value : 'claude-sonnet-4-5-20250929';
+    // Ler a versão do <select> do provedor ativo (ver AIModelModal), com
+    // fallback para o modelo recomendado atual caso o select não exista.
+    // BUGFIX: gptVersion nunca era declarada aqui antes, embora fosse usada
+    // mais abaixo ao montar os headers - causava ReferenceError e quebrava
+    // a reanálise sempre que o provedor selecionado era GPT.
+    const versionDefaults = {
+        gemini: 'gemini-3.1-flash-lite',
+        claude: 'claude-sonnet-5',
+        gpt4: 'gpt-5.6-terra',
+        deepseek: 'deepseek-v4-flash-vision-exp',
+        qwen: 'qwen3-vl-plus',
+        huggingface: 'meta-llama/Llama-3.2-11B-Vision-Instruct'
+    };
+    function reanalysisVersionFor(aiId, selectId) {
+        if (appState.selectedAI !== aiId) return null;
+        const select = document.getElementById(selectId);
+        return select ? select.value : versionDefaults[aiId];
     }
+    const geminiVersion = reanalysisVersionFor('gemini', 'gemini-version') || versionDefaults.gemini;
+    const claudeVersion = reanalysisVersionFor('claude', 'claude-version');
+    const gptVersion = reanalysisVersionFor('gpt4', 'gpt-version');
 
     // Obter API key
     const apiKey = appState.apiKeys[appState.selectedAI];
@@ -1776,9 +2205,16 @@ async function executeReanalysis(subparcela, promptConfig) {
         }
 
         // Atualizar dados locais
+        // BUGFIX: só as espécies eram copiadas de volta - os polígonos
+        // recém-detectados (area_shape da área 100% e species_shapes por
+        // espécie) eram ignorados, então depois de "Reanalisar" a subparcela
+        // aparecia com espécies mas sem nenhum polígono no editor.
         const idx = appState.analysisResults.findIndex(r => r.subparcela === subparcela);
         if (idx !== -1) {
             appState.analysisResults[idx].especies = result.especies;
+            appState.analysisResults[idx].area_shape = result.area_shape;
+            appState.analysisResults[idx].species_shapes = result.species_shapes;
+            appState.analysisResults[idx].modo_paisagem = result.modo_paisagem || false;
         }
 
         // Recalcular espécies unificadas com base em TODAS as subparcelas
@@ -3284,6 +3720,8 @@ function loadViewerSpecies() {
                     <button class="viewer-edit-btn" onclick="startEditSpeciesInViewer(${index})">✏️ Editar</button>
                     <button class="viewer-split-btn" onclick="splitSpeciesInViewer(${index})">✂️ Dividir</button>
                     <button class="viewer-delete-btn" onclick="deleteSpeciesInViewer(${index})">🗑️ Remover</button>
+                    <button class="viewer-ai-detect-btn" onclick="detectSpecificSpeciesByDescription(${index})" title="Pede pra IA localizar e marcar esta espécie na imagem, usando apelido/gênero/família/observações como descrição" style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);">🔍 IA: Marcar Espécie</button>
+                    <button class="viewer-ai-detect-btn" onclick="detectSimilarToFirstPolygon(${index})" title="Usa o primeiro polígono desenhado como exemplo e pede pra IA encontrar plantas semelhantes no resto da imagem" style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);">🔍 IA: Achar Similares</button>
                 </div>
             </div>
             
@@ -4282,6 +4720,154 @@ async function analyzeMoreSpecies() {
     }
 }
 
+// ============================================================
+// Detecção de espécie específica assistida por IA (dois modos, ver botões
+// "🔍 IA: Marcar Espécie" e "🔍 IA: Achar Similares" na lista de espécies):
+//   1) description: usuário descreve a espécie (apelido/gênero/família/
+//      observações já cadastrados) e a IA procura instâncias que combinem.
+//   2) example_region: usa o PRIMEIRO polígono já desenhado da espécie como
+//      referência visual; a IA identifica a espécie por ali e procura
+//      outras instâncias semelhantes no resto da imagem.
+// Ambos chamam /api/species/detect-specific e mesclam os polígonos
+// retornados no editor (CoverageDrawer), com a mesma persistência usada em
+// qualquer outro fluxo de desenho/importação manual.
+// ============================================================
+function buildAIRequestHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (appState.selectedAI === 'claude') {
+        headers['X-API-Key-Claude'] = utf8ToBase64(appState.apiKeys.claude);
+        const v = document.getElementById('claude-version')?.value;
+        if (v) headers['X-Claude-Version'] = v;
+    } else if (appState.selectedAI === 'gpt4') {
+        headers['X-API-Key-GPT4'] = utf8ToBase64(appState.apiKeys.gpt4);
+        const v = document.getElementById('gpt-version')?.value;
+        if (v) headers['X-GPT-Version'] = v;
+    } else if (appState.selectedAI === 'gemini') {
+        headers['X-API-Key-Gemini'] = utf8ToBase64(appState.apiKeys.gemini);
+        const v = document.getElementById('gemini-version')?.value;
+        if (v) headers['X-Gemini-Version'] = v;
+    } else if (appState.selectedAI === 'deepseek') {
+        headers['X-API-Key-DeepSeek'] = utf8ToBase64(appState.apiKeys.deepseek);
+    } else if (appState.selectedAI === 'qwen') {
+        headers['X-API-Key-Qwen'] = utf8ToBase64(appState.apiKeys.qwen);
+    } else if (appState.selectedAI === 'huggingface') {
+        headers['X-API-Key-HuggingFace'] = utf8ToBase64(appState.apiKeys.huggingface);
+    }
+    return headers;
+}
+
+async function callDetectSpecificSpecies(payload) {
+    if (!appState.selectedAI || !appState.apiKeys[appState.selectedAI]) {
+        showAlert('error', 'Configure a API key para o modelo de IA antes de usar essa função');
+        return null;
+    }
+    const result = appState.analysisResults[currentViewerIndex];
+    const response = await fetch('/api/species/detect-specific', {
+        method: 'POST',
+        headers: buildAIRequestHeaders(),
+        body: JSON.stringify({
+            parcela: appState.parcelaNome,
+            subparcela: result.subparcela,
+            ai_model: appState.selectedAI,
+            ...payload
+        })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Erro na detecção');
+    return data;
+}
+
+async function detectSpecificSpeciesByDescription(speciesIndex) {
+    const result = appState.analysisResults[currentViewerIndex];
+    const esp = result?.especies[speciesIndex];
+    if (!esp) return;
+
+    if (!confirm(`Pedir pra IA localizar e marcar "${esp.apelido}" na imagem, usando o apelido/gênero/família/observações cadastrados? Isso consome uma chamada de IA.`)) {
+        return;
+    }
+
+    showAlert('info', '🔍 IA procurando pela espécie na imagem...');
+    try {
+        const data = await callDetectSpecificSpecies({
+            mode: 'description',
+            apelido: esp.apelido,
+            genero: esp.genero || '',
+            familia: esp.familia || '',
+            observacoes: esp.observacoes || ''
+        });
+        if (!data) return;
+
+        if (!data.encontrada) {
+            showAlert('warning', 'A IA não encontrou instâncias confiáveis dessa espécie na imagem.');
+            return;
+        }
+
+        if (typeof CoverageDrawer === 'undefined' || !CoverageDrawer.svg) {
+            showAlert('warning', 'Abra a imagem no editor (Ver e Editar) para visualizar as áreas encontradas.');
+            return;
+        }
+        if (!CoverageDrawer.speciesPolygons[speciesIndex]) CoverageDrawer.speciesPolygons[speciesIndex] = [];
+        data.areas.forEach(points => {
+            CoverageDrawer.speciesPolygons[speciesIndex].push({ points: CoverageDrawer._pctToPx(points) });
+        });
+        CoverageDrawer.renderSpecies();
+        CoverageDrawer.svg.style.display = 'block';
+        CoverageDrawer.persistSpeciesArea(speciesIndex, CoverageDrawer.speciesPolygons[speciesIndex]);
+        CoverageDrawer.updateIndividualCount(speciesIndex);
+        CoverageDrawer.updateCoverageDisplay(speciesIndex);
+
+        showAlert('success', `✅ ${data.areas.length} área(s) marcada(s) para "${esp.apelido}".`);
+    } catch (error) {
+        console.error('Erro ao detectar espécie por descrição:', error);
+        showAlert('error', 'Erro: ' + error.message);
+    }
+}
+
+async function detectSimilarToFirstPolygon(speciesIndex) {
+    const result = appState.analysisResults[currentViewerIndex];
+    const esp = result?.especies[speciesIndex];
+    if (!esp) return;
+
+    if (typeof CoverageDrawer === 'undefined' || !CoverageDrawer.speciesPolygons[speciesIndex]?.length) {
+        showAlert('warning', '⚠️ Desenhe pelo menos um polígono de exemplo nesta espécie primeiro (botão "Desenhar Área").');
+        return;
+    }
+
+    const examplePoints = CoverageDrawer._pxToPct(CoverageDrawer.speciesPolygons[speciesIndex][0].points);
+
+    if (!confirm('Pedir pra IA encontrar plantas semelhantes ao polígono de exemplo já desenhado? Isso consome uma chamada de IA.')) {
+        return;
+    }
+
+    showAlert('info', '🔍 IA procurando plantas semelhantes...');
+    try {
+        const data = await callDetectSpecificSpecies({
+            mode: 'example_region',
+            example_points: examplePoints
+        });
+        if (!data) return;
+
+        if (!data.encontrada) {
+            showAlert('warning', 'A IA não encontrou outras instâncias semelhantes.');
+            return;
+        }
+
+        // Substitui pela lista completa retornada (a IA inclui de volta o
+        // próprio polígono de referência) em vez de acrescentar, pra não duplicar
+        CoverageDrawer.speciesPolygons[speciesIndex] = data.areas.map(points => ({ points: CoverageDrawer._pctToPx(points) }));
+        CoverageDrawer.renderSpecies();
+        CoverageDrawer.svg.style.display = 'block';
+        CoverageDrawer.persistSpeciesArea(speciesIndex, CoverageDrawer.speciesPolygons[speciesIndex]);
+        CoverageDrawer.updateIndividualCount(speciesIndex);
+        CoverageDrawer.updateCoverageDisplay(speciesIndex);
+
+        showAlert('success', `✅ ${data.areas.length} área(s) semelhante(s) encontrada(s) (incluindo a de referência).`);
+    } catch (error) {
+        console.error('Erro ao detectar espécies semelhantes:', error);
+        showAlert('error', 'Erro: ' + error.message);
+    }
+}
+
 async function saveManualSpecies() {
     console.log('='.repeat(60));
     console.log('🌿 saveManualSpecies() INICIO');
@@ -4650,14 +5236,74 @@ function startNewAnalysis() {
     }
 }
 
+// BUGFIX RAIZ: esta função é chamada de MUITOS lugares (100+), inclusive de
+// dentro do editor de polígonos (#image-viewer-modal - modal em tela cheia,
+// position:fixed, z-index:10000, fundo quase opaco - ver .image-viewer-modal
+// no CSS). O alerta antes era inserido dentro de .container, que fica no
+// fluxo NORMAL da página - ou seja, sempre atrás do modal. Qualquer ação
+// disparada de dentro do visualizador (detectar espécie por IA, salvar
+// polígono, erros de validação etc) "funcionava" (a requisição rodava, o
+// erro/sucesso era real), mas o aviso ficava invisível atrás do modal -
+// exatamente o padrão por trás de vários relatos de "botão X não responde"
+// quando o botão estava dentro do editor. Também não existia NENHUM CSS pra
+// .alert/.alert-* (nem cor, nem borda) - mesmo fora do modal, a mensagem
+// aparecia como texto puro sem destaque, fácil de não notar.
+// Agora é sempre position:fixed, centralizado no topo, acima de QUALQUER
+// modal do app (inclusive acima do #image-viewer-modal), empilhando vários
+// alertas se disparados em sequência.
 function showAlert(type, message) {
+    const colors = { success: '#2e7d32', error: '#c62828', warning: '#ef6c00', info: '#1565c0' };
+    const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
+
+    let stack = document.getElementById('alert-stack');
+    if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'alert-stack';
+        stack.style.cssText = `
+            position: fixed;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100001;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: center;
+            max-width: 90vw;
+            pointer-events: none;
+        `;
+        document.body.appendChild(stack);
+    }
+
     const alert = document.createElement('div');
     alert.className = `alert alert-${type}`;
-    alert.textContent = message;
+    alert.textContent = `${icons[type] || ''} ${message}`;
+    alert.style.cssText = `
+        background: ${colors[type] || '#333'};
+        color: white;
+        padding: 12px 22px;
+        border-radius: 8px;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+        font-size: 14px;
+        max-width: 600px;
+        text-align: center;
+        pointer-events: auto;
+        opacity: 0;
+        transform: translateY(-8px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+    `;
+    stack.appendChild(alert);
 
-    document.querySelector('.container').insertBefore(alert, document.querySelector('.container').firstChild);
+    requestAnimationFrame(() => {
+        alert.style.opacity = '1';
+        alert.style.transform = 'translateY(0)';
+    });
 
-    setTimeout(() => alert.remove(), 5000);
+    setTimeout(() => {
+        alert.style.opacity = '0';
+        alert.style.transform = 'translateY(-8px)';
+        setTimeout(() => alert.remove(), 200);
+    }, 5000);
 }
 
 // ====== INTEGRAÇÃO COM COVERAGE DRAWER ======
@@ -4668,20 +5314,23 @@ function initializeCoverageDrawer() {
     const result = appState.analysisResults[currentViewerIndex];
 
     if (img && result) {
-        // Preparar dados da subparcela para o drawer
-        const subparcelaData = {
-            id: result.subparcela,
-            subparcela: result.subparcela,
-            especies: result.especies || [],
-            area_shape: result.area_shape || null
-        };
-
-        // Aguardar imagem carregar
+        // BUGFIX: antes construía um objeto novo {id, subparcela, especies,
+        // area_shape} copiando os VALORES de `result`. `especies` sendo um
+        // array sobrevivia por ser passado por referência (mutar especies[i]
+        // dentro do drawer também mutava o de `result`), mas `area_shape` é
+        // um campo escalar - reatribuí-lo (this.currentSubparcela.area_shape
+        // = {...}, em persistSubparcelaArea) só alterava a CÓPIA descartável,
+        // nunca `result.area_shape` de verdade. Resultado: a Área 100% salva
+        // corretamente no backend, mas ao reabrir o modal o frontend relia
+        // de novo em `result.area_shape` (nunca atualizado) e ela sumia.
+        // Passar `result` diretamente elimina essa cópia: `result` já tem
+        // exatamente os campos que o drawer precisa (subparcela/especies/
+        // area_shape), então toda mutação feita nele é a fonte real.
         if (img.complete) {
-            CoverageDrawer.init(img, subparcelaData);
+            CoverageDrawer.init(img, result);
         } else {
             img.onload = () => {
-                CoverageDrawer.init(img, subparcelaData);
+                CoverageDrawer.init(img, result);
             };
         }
     }
@@ -4979,84 +5628,468 @@ window.selectShape = selectShape;
 
 // === FUNÇÕES DE EXPORTAÇÃO AVANÇADA ===
 
+// Monta uma foto de subparcela em resolução PLENA (não recortada pelo
+// object-fit:cover de 220px do card na tela) com os polígonos (Área 100% +
+// espécies) desenhados por cima, especificamente para o PDF - o card normal
+// da tela nunca teve overlay de polígono (isso só existe dentro do editor/
+// viewer interativo), e capturá-lo direto deixava a foto "achatada"
+// (cortada numa faixa fina) e sem nenhum polígono no PDF.
+async function buildSubparcelaPhotoWithPolygons(result) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed; left:-99999px; top:0; background:#fff; display:inline-block;';
+    document.body.appendChild(wrap);
+
+    try {
+        const img = document.createElement('img');
+        img.crossOrigin = 'anonymous';
+        img.style.cssText = 'display:block; max-width:900px; width:auto; height:auto;';
+        img.src = result.image_path || `/static/uploads/${appState.parcelaNome}/${result.image || result.filename}`;
+        wrap.appendChild(img);
+
+        await new Promise((resolve) => {
+            if (img.complete && img.naturalWidth) return resolve();
+            img.onload = resolve;
+            img.onerror = resolve; // não travar o export inteiro por uma foto que falhou
+        });
+
+        if (img.naturalWidth && img.naturalHeight) {
+            wrap.style.position = 'relative';
+            const ns = 'http://www.w3.org/2000/svg';
+            const svg = document.createElementNS(ns, 'svg');
+            svg.setAttribute('viewBox', `0 0 ${img.naturalWidth} ${img.naturalHeight}`);
+            svg.style.cssText = `position:absolute; top:0; left:0; width:${img.clientWidth}px; height:${img.clientHeight}px;`;
+            wrap.appendChild(svg);
+
+            const pctToPx = (points) => (points || []).map(p => ({
+                x: (Number(p.x) / 100) * img.naturalWidth,
+                y: (Number(p.y) / 100) * img.naturalHeight,
+            }));
+
+            const drawPolygon = (points, color, label) => {
+                if (!points || points.length < 3) return;
+                const poly = document.createElementNS(ns, 'polygon');
+                poly.setAttribute('points', points.map(p => `${p.x},${p.y}`).join(' '));
+                poly.setAttribute('fill', color);
+                poly.setAttribute('fill-opacity', 0.15);
+                poly.setAttribute('stroke', color);
+                poly.setAttribute('stroke-width', 5);
+                svg.appendChild(poly);
+
+                if (label) {
+                    const minX = Math.min(...points.map(p => p.x));
+                    const maxX = Math.max(...points.map(p => p.x));
+                    const minY = Math.min(...points.map(p => p.y));
+                    const text = document.createElementNS(ns, 'text');
+                    text.setAttribute('x', (minX + maxX) / 2);
+                    text.setAttribute('y', minY + 26);
+                    text.setAttribute('text-anchor', 'middle');
+                    text.setAttribute('fill', '#ffffff');
+                    text.setAttribute('font-size', '30');
+                    text.setAttribute('font-weight', 'bold');
+                    text.setAttribute('stroke', color);
+                    text.setAttribute('stroke-width', '7');
+                    text.setAttribute('paint-order', 'stroke');
+                    text.textContent = label;
+                    svg.appendChild(text);
+                }
+            };
+
+            // Área 100% (mesma cor usada no editor interativo)
+            if (typeof CoverageDrawer !== 'undefined' && result.area_shape?.points) {
+                drawPolygon(pctToPx(result.area_shape.points), CoverageDrawer.colors.subparcela, null);
+            }
+
+            // Polígonos por espécie - prioriza area_shapes (versão persistida/
+            // editada manualmente, mesma que o editor mostraria), com
+            // fallback pros dados crus da IA se a subparcela nunca foi aberta
+            // no editor (nada persistido ainda)
+            (result.especies || []).forEach((esp, index) => {
+                const shapes = (esp.area_shapes && esp.area_shapes.length ? esp.area_shapes : esp.species_shapes) || [];
+                const color = (typeof CoverageDrawer !== 'undefined')
+                    ? CoverageDrawer.colors.species[index % CoverageDrawer.colors.species.length]
+                    : '#48bb78';
+                shapes.forEach(shape => drawPolygon(pctToPx(shape.points), color, esp.apelido));
+            });
+        }
+
+        const canvas = await html2canvas(wrap, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
+        return canvas;
+    } finally {
+        wrap.remove();
+    }
+}
+
+// ============================================================
+// Exportação de PDF - REESCRITO 2026-09
+// Versão anterior mandava só números/tabelas para o backend montar um PDF
+// com reportlab: sem fotos, gráficos ilegíveis, layout nada a ver com a
+// tela. Agora o PDF é montado 100% no cliente tirando um "screenshot" real
+// de cada seção (html2canvas), na mesma ordem/aparência da tela, e
+// colando essas imagens em páginas A4 via jsPDF. Fotos, cores, gráficos
+// (canvas do Chart.js) e layout saem idênticos ao que o usuário está vendo.
+// ============================================================
 async function exportToPDF() {
     const btn = elements.exportPdfBtn;
     const originalText = btn.textContent;
 
     try {
         btn.disabled = true;
-        btn.textContent = '🔄 Gerando PDF profissional...';
+        showNotification('📄 Gerando PDF a partir da tela de análise...', 'info');
 
-        showNotification('📄 Gerando relatório PDF otimizado...', 'info');
+        if (typeof html2canvas !== 'function' || !window.jspdf) {
+            throw new Error('Bibliotecas de exportação (html2canvas/jsPDF) não carregaram.');
+        }
 
-        // Coletar dados de análises avançadas e gráficos
-        let analises_avancadas = {};
-        let chart_images = {};
+        const { jsPDF } = window.jspdf;
+        // PEDIDO: relatório em modo paisagem (A4 297x210mm). Toda a métrica
+        // de layout abaixo é derivada de getWidth()/getHeight(), então
+        // fotos, gráficos e tabelas se ajustam sozinhos à nova proporção -
+        // e os gráficos, que são largos, param de ser espremidos.
+        const pdf = new jsPDF('l', 'mm', 'a4');
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const margin = 10;
+        const contentWidth = pageWidth - margin * 2;
+        const usablePageHeight = pageHeight - margin * 2;
 
-        if (typeof AdvancedAnalytics !== 'undefined') {
-            // Coletar dados de análise
-            if (typeof AdvancedAnalytics.getExportData === 'function') {
-                try {
-                    analises_avancadas = AdvancedAnalytics.getExportData();
-                    console.log('✅ Dados de análises avançadas coletados para PDF');
-                } catch (e) {
-                    console.warn('⚠️ Não foi possível coletar análises avançadas:', e.message);
-                }
-            }
+        let cursorY = margin;
+        let pageHasContent = false;
 
-            // Coletar imagens dos gráficos
-            if (typeof AdvancedAnalytics.getChartsImages === 'function') {
-                try {
-                    chart_images = AdvancedAnalytics.getChartsImages();
-                    console.log('✅ Imagens dos gráficos coletadas para PDF');
-                } catch (e) {
-                    console.warn('⚠️ Não foi possível coletar imagens dos gráficos:', e.message);
-                }
+        // Fatiar um canvas alto em múltiplas páginas (uma imagem só não cabe numa página A4)
+        function addSlicedCanvas(canvas, imgWidthMm) {
+            const pxPerMm = canvas.width / imgWidthMm;
+            const sliceHeightPx = Math.floor(usablePageHeight * pxPerMm);
+            let renderedPx = 0;
+
+            while (renderedPx < canvas.height) {
+                const currentSlicePx = Math.min(sliceHeightPx, canvas.height - renderedPx);
+                const sliceCanvas = document.createElement('canvas');
+                sliceCanvas.width = canvas.width;
+                sliceCanvas.height = currentSlicePx;
+                sliceCanvas.getContext('2d').drawImage(
+                    canvas, 0, renderedPx, canvas.width, currentSlicePx,
+                    0, 0, canvas.width, currentSlicePx
+                );
+
+                if (pageHasContent) pdf.addPage();
+                const sliceHeightMm = (currentSlicePx * imgWidthMm) / canvas.width;
+                pdf.addImage(sliceCanvas.toDataURL('image/jpeg', 0.92), 'JPEG', margin, margin, imgWidthMm, sliceHeightMm);
+                cursorY = margin + sliceHeightMm + 6;
+                pageHasContent = true;
+                renderedPx += currentSlicePx;
             }
         }
 
-        // Preparar dados para enviar ao backend
-        const pdfData = {
-            parcela: appState.parcelaNome,
-            especies: appState.especies || {},
-            analytics: {
-                diversity: analises_avancadas.diversity?.shannon || 0,
-                richness: analises_avancadas.diversity?.richness || 0,
-                eveness: analises_avancadas.diversity?.evenness || 0,
-                simpson: analises_avancadas.diversity?.simpson || 0
-            },
-            analises_avancadas: analises_avancadas,
-            chart_images: chart_images,
-            analysisResults: appState.analysisResults || [] // Já deve incluir area_shapes se foram carregados/salvos
-        };
+        // Captura um elemento do DOM e cola no PDF, quebrando página quando necessário
+        // fitToOnePage: para blocos "unidade" (ex: card de subparcela) que não
+        // devem nunca ser cortados ao meio - em vez de fatiar entre páginas
+        // (o que sobrava com a maior parte da 2ª página em branco), encolhe o
+        // bloco inteiro (largura E altura) até caber numa página só.
+        // Coloca um canvas JÁ PRONTO no PDF (extraído de addElementToPdf pra
+        // poder ser reusado com canvas que não vêm de um html2canvas direto
+        // sobre um elemento da tela - ver buildSubparcelaPhotoWithPolygons)
+        function addCanvasToPdf(canvas, { forceNewPage = false, fitToOnePage = false } = {}) {
+            let imgWidthMm = contentWidth;
+            let imgHeight = (canvas.height * imgWidthMm) / canvas.width;
 
-        console.log('📦 Enviando dados para gerar PDF:', pdfData);
+            if (fitToOnePage && imgHeight > usablePageHeight) {
+                // Reduzir a largura também, mantendo proporção, até a altura caber
+                const scaleFactor = usablePageHeight / imgHeight;
+                imgWidthMm = imgWidthMm * scaleFactor;
+                imgHeight = usablePageHeight;
+            }
 
-        // Enviar para backend
-        const response = await fetch('/export_pdf', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(pdfData)
-        });
+            if (!fitToOnePage && imgHeight > usablePageHeight) {
+                if (forceNewPage && pageHasContent) pdf.addPage();
+                addSlicedCanvas(canvas, contentWidth);
+                return;
+            }
 
-        if (!response.ok) {
-            throw new Error(`Erro HTTP ${response.status}: ${await response.text()}`);
+            if (forceNewPage || cursorY + imgHeight > pageHeight - margin) {
+                if (pageHasContent) pdf.addPage();
+                cursorY = margin;
+            }
+
+            // Centralizar horizontalmente quando a largura foi reduzida (fitToOnePage)
+            const xOffset = margin + (contentWidth - imgWidthMm) / 2;
+            pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', xOffset, cursorY, imgWidthMm, imgHeight);
+            cursorY += imgHeight + 6;
+            pageHasContent = true;
         }
 
-        // Download do arquivo
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${appState.parcelaNome}_relatorio_profissional.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+        // Captura um elemento do DOM e cola no PDF, quebrando página quando necessário
+        async function addElementToPdf(el, opts = {}) {
+            if (!el || el.offsetParent === null) return; // pular elementos ocultos (display:none)
 
-        showNotification('✅ PDF profissional exportado com sucesso!', 'success');
+            const canvas = await html2canvas(el, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: '#ffffff',
+                logging: false
+            });
+
+            // BUGFIX: resize()+update('none') deixa o <canvas> vivo do Chart.js
+            // com o desenho correto, mas html2canvas NÃO copia o conteúdo real
+            // de elementos <canvas> de forma confiável (ele clona o DOM, e um
+            // canvas clonado via cloneNode nasce em branco - só o pixel buffer
+            // do canvas ORIGINAL tem o desenho). Resultado: html2canvas captura
+            // certinho os rótulos/bordas/legendas (DOM normal) ao redor, mas o
+            // gráfico em si sai como moldura vazia. Corrigido desenhando o
+            // bitmap de cada <canvas> do Chart.js diretamente por cima da
+            // screenshot, na posição exata onde ele aparece na tela.
+            overlayLiveCanvasesOntoScreenshot(canvas, el);
+
+            addCanvasToPdf(canvas, opts);
+        }
+
+        // Sobrepõe o conteúdo real de qualquer <canvas> vivo (ex: gráficos
+        // Chart.js) dentro de `sourceEl` sobre a screenshot `capturedCanvas`
+        // gerada pelo html2canvas, na posição/escala correspondente.
+        function overlayLiveCanvasesOntoScreenshot(capturedCanvas, sourceEl) {
+            const liveCanvases = sourceEl.querySelectorAll ? sourceEl.querySelectorAll('canvas') : [];
+            if (!liveCanvases || liveCanvases.length === 0) return;
+
+            const containerRect = sourceEl.getBoundingClientRect();
+            if (containerRect.width === 0 || containerRect.height === 0) return;
+            const scaleX = capturedCanvas.width / containerRect.width;
+            const scaleY = capturedCanvas.height / containerRect.height;
+            const ctx = capturedCanvas.getContext('2d');
+
+            liveCanvases.forEach(liveCanvas => {
+                try {
+                    const rect = liveCanvas.getBoundingClientRect();
+                    if (rect.width === 0 || rect.height === 0) return;
+                    const dx = (rect.left - containerRect.left) * scaleX;
+                    const dy = (rect.top - containerRect.top) * scaleY;
+                    const dw = rect.width * scaleX;
+                    const dh = rect.height * scaleY;
+                    ctx.drawImage(liveCanvas, dx, dy, dw, dh);
+                } catch (e) {
+                    console.warn('Não foi possível sobrepor canvas no PDF:', e);
+                }
+            });
+        }
+
+        // Título de seção em texto nítido (jsPDF nativo, não é screenshot -
+        // fica legível mesmo comprimido, diferente de texto dentro de imagem)
+        function addSectionHeading(text, { newPage = false } = {}) {
+            // Sanitizar: a fonte nativa do jsPDF (Helvetica/os 14 fonts padrão
+            // do PDF) não tem glifos de emoji - imprimir um gerava lixo/
+            // mojibake no lugar do caractere. Mantém letras (com acento),
+            // números, espaço e pontuação comum; remove o resto.
+            const safeText = text.replace(/[^\p{L}\p{N}\s.,!?()°%/-]/gu, '').replace(/\s+/g, ' ').trim();
+
+            const headingHeight = 12;
+            if (newPage || cursorY + headingHeight > pageHeight - margin) {
+                if (pageHasContent) pdf.addPage();
+                cursorY = margin;
+            }
+            pdf.setFontSize(14);
+            pdf.setTextColor(46, 89, 66);
+            pdf.setFont(undefined, 'bold');
+            pdf.text(safeText, margin, cursorY + 6);
+            pdf.setDrawColor(46, 89, 66);
+            pdf.setLineWidth(0.5);
+            pdf.line(margin, cursorY + 8, pageWidth - margin, cursorY + 8);
+            pdf.setFont(undefined, 'normal');
+            cursorY += headingHeight;
+            pageHasContent = true;
+        }
+
+        // Capa (texto simples, não precisa ser screenshot)
+        const totalSubparcelas = (appState.analysisResults || []).length;
+        const totalEspecies = Object.keys(appState.especies || {}).length;
+
+        pdf.setFontSize(22);
+        pdf.setTextColor(46, 89, 66);
+        pdf.setFont(undefined, 'bold');
+        pdf.text('HerbalScan', margin, 22);
+        pdf.setFont(undefined, 'normal');
+        pdf.setFontSize(14);
+        pdf.setTextColor(60, 60, 60);
+        pdf.text('Relatório de Análise de Cobertura Vegetal', margin, 31);
+
+        pdf.setDrawColor(46, 89, 66);
+        pdf.setLineWidth(0.8);
+        pdf.line(margin, 37, pageWidth - margin, 37);
+
+        pdf.setFontSize(11);
+        pdf.setTextColor(90, 90, 90);
+        pdf.text(`Parcela: ${appState.parcelaNome}`, margin, 47);
+        pdf.text(`Subparcelas analisadas: ${totalSubparcelas}`, margin, 54);
+        pdf.text(`Espécies/morfotipos identificados: ${totalEspecies}`, margin, 61);
+        pdf.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, margin, 68);
+        cursorY = 78;
+        pageHasContent = true;
+
+        // 1. Resumo geral (cards de Shannon/Riqueza/Cobertura no topo da tela)
+        btn.textContent = '🔄 Capturando resumo...';
+        addSectionHeading('Resumo Geral');
+        await addElementToPdf(elements.resultsSummary);
+
+        // 2. Cada subparcela em bloco próprio: foto em resolução PLENA com os
+        // polígonos desenhados por cima (não o card recortado da tela, que
+        // nunca teve overlay de polígono e cortava fotos em modo retrato
+        // numa faixa fina de 220px) + lista de espécies igual à tela.
+        const cards = document.querySelectorAll('#subparcelas-grid .subparcela-card');
+        let cardIdx = 0;
+        for (const card of cards) {
+            cardIdx++;
+            const result = appState.analysisResults[cardIdx - 1];
+            btn.textContent = `🔄 Capturando subparcela ${cardIdx}/${cards.length}...`;
+
+            // BUGFIX: o título usava só o índice do loop ("Subparcela N de M"),
+            // ignorando o nome/código customizado que o usuário definiu para a
+            // subparcela (result.metadata.nome) - por isso nunca aparecia no
+            // PDF. Mesmo formato usado no card da tela (ver displayResults()),
+            // só que em texto puro (addSectionHeading usa pdf.text(), não HTML).
+            const pdfMeta = result?.metadata || {};
+            const pdfSubId = result?.subparcela ?? result?.subparcela_id ?? cardIdx;
+            const pdfTitle = pdfMeta.nome
+                ? `${pdfMeta.nome} (Subparcela ${pdfSubId})`
+                : `Subparcela ${pdfSubId} de ${cards.length}`;
+            addSectionHeading(pdfTitle, { newPage: true });
+
+            if (result) {
+                const photoCanvas = await buildSubparcelaPhotoWithPolygons(result);
+                addCanvasToPdf(photoCanvas, { fitToOnePage: true });
+            }
+
+            // Metadados de campo (se houver) + lista de espécies - mesmo
+            // trecho do card que já funcionava bem, só pulando a <img> (já
+            // coberta acima em resolução melhor)
+            const metaEl = card.querySelector('.subparcela-metadata');
+            if (metaEl) await addElementToPdf(metaEl);
+            const contentEl = card.querySelector('.subparcela-content');
+            if (contentEl) await addElementToPdf(contentEl);
+        }
+
+        // 3. Tabela de gerenciamento de espécies (Seção 3), se visível
+        btn.textContent = '🔄 Capturando espécies...';
+        addSectionHeading('Gerenciamento de Espécies', { newPage: true });
+        await addElementToPdf(elements.speciesSection);
+
+        // 4. Análises avançadas (Seção 5): TODAS as abas, não só a ativa no
+        // momento do export. #tab-* são apenas mostradas/escondidas via CSS
+        // (todas já renderizadas no DOM, ver AdvancedAnalytics.render()), então
+        // dá pra alternar sem re-renderizar nada.
+        // BUGFIX: capturar logo após ativar uma aba pegava a screenshot no
+        // meio da animação CSS "fadeIn" (300ms) daquela aba, saindo esmaecida/
+        // deslocada no PDF - por isso desligamos a animação (via inline style)
+        // só durante a captura de cada aba.
+        if (elements.analyticsSection && elements.analyticsSection.style.display !== 'none') {
+            const tabButtons = Array.from(document.querySelectorAll('.analytics-tab'));
+            if (tabButtons.length > 0) {
+                const originalActiveBtn = document.querySelector('.analytics-tab.active');
+                const originalActiveId = originalActiveBtn?.getAttribute('data-tab');
+                let tabIdx = 0;
+
+                for (const tabBtn of tabButtons) {
+                    tabIdx++;
+                    const tabId = tabBtn.getAttribute('data-tab');
+                    const content = document.getElementById(`tab-${tabId}`);
+                    if (!content) continue;
+
+                    btn.textContent = `🔄 Capturando análises (${tabIdx}/${tabButtons.length})...`;
+
+                    tabButtons.forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.analytics-tab-content').forEach(c => c.classList.remove('active'));
+                    tabBtn.classList.add('active');
+                    content.style.animation = 'none'; // pular o fadeIn para a captura
+                    content.classList.add('active');
+                    // Força reflow para o navegador aplicar display:block +
+                    // animation:none antes do html2canvas ler o elemento
+                    void content.offsetHeight;
+
+                    // BUGFIX: os 14 gráficos são todos criados de uma vez em
+                    // AdvancedAnalytics.generateCharts(), mas só a aba
+                    // "ecological" está visível nesse momento - Chart.js lê o
+                    // tamanho do canvas na criação, então os gráficos das
+                    // outras 4 abas nascem com container display:none (0x0) e
+                    // ficam com o desenho interno quebrado/vazio para sempre,
+                    // mesmo depois da aba virar visível (Chart.js não
+                    // redesenha sozinho em mudança de visibilidade). Forçar
+                    // resize() agora, com a aba já visível, corrige isso antes
+                    // da captura.
+                    // BUGFIX 2: resize() sozinho reativa a animação de entrada
+                    // do Chart.js (barras/linhas crescendo do zero, ~1s) - a
+                    // captura rodava no meio dela e saía com gráfico pela
+                    // metade. update('none') força um redesenho completo e
+                    // IMEDIATO, sem animação, então o gráfico já nasce pronto
+                    // pra foto.
+                    // BUGFIX 3 (definitivo): update('none') pula a animação
+                    // DAQUELA atualização, mas o gráfico continua com
+                    // options.animation ligado - e o resize()/mudança de
+                    // visibilidade logo antes podia reiniciar a animação de
+                    // entrada, então a captura pegava o canvas no meio dela
+                    // (ou ainda vazio, no frame 0). Agora a animação é
+                    // DESLIGADA de verdade nas options antes de redesenhar, e
+                    // restaurada depois da captura. Somado ao desenho direto
+                    // do bitmap (overlayLiveCanvasesOntoScreenshot), o gráfico
+                    // vai pro PDF sempre completo.
+                    const animBackup = [];
+                    if (typeof AdvancedAnalytics !== 'undefined' && AdvancedAnalytics.charts) {
+                        Object.values(AdvancedAnalytics.charts).forEach(chart => {
+                            try {
+                                animBackup.push([chart, chart.options.animation, chart.options.animations]);
+                                chart.options.animation = false;
+                                chart.options.animations = false;
+                                chart.resize();
+                                chart.update('none');
+                            } catch (e) { /* gráfico já destruído, ignorar */ }
+                        });
+                    }
+
+                    // Garantir que o navegador concluiu layout + pintura do
+                    // redesenho acima antes de tirar a foto
+                    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+                    // Rótulo da aba (ex: "Análises Ecológicas") sem o emoji do
+                    // botão nem outros símbolos fora do alfabeto padrão do
+                    // PDF - a fonte nativa do jsPDF (Helvetica) não tem
+                    // glifos de emoji e imprimia lixo/mojibake no lugar deles.
+                    const tabLabel = tabBtn.textContent.replace(/[^\p{L}\p{N}\s]/gu, '').trim();
+                    addSectionHeading(`Análises Avançadas - ${tabLabel}`, { newPage: true });
+                    await addElementToPdf(content);
+
+                    // Restaurar as options de animação de cada gráfico
+                    animBackup.forEach(([chart, anim, anims]) => {
+                        try {
+                            chart.options.animation = anim;
+                            chart.options.animations = anims;
+                        } catch (e) { /* ignorar */ }
+                    });
+
+                    content.style.animation = '';
+                }
+
+                // Restaurar a aba que o usuário estava vendo antes do export
+                tabButtons.forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.analytics-tab-content').forEach(c => c.classList.remove('active'));
+                const restoreId = originalActiveId || tabButtons[0].getAttribute('data-tab');
+                document.querySelector(`.analytics-tab[data-tab="${restoreId}"]`)?.classList.add('active');
+                document.getElementById(`tab-${restoreId}`)?.classList.add('active');
+            } else {
+                // Sem abas (layout antigo) - captura a seção inteira como fallback
+                btn.textContent = '🔄 Capturando gráficos...';
+                await addElementToPdf(elements.analyticsSection, { forceNewPage: true });
+            }
+        }
+
+        // Rodapé (parcela + nº de página) em todas as páginas já geradas -
+        // só dá pra fazer no final, depois que sabemos o total de páginas
+        const pageCount = pdf.internal.getNumberOfPages();
+        for (let p = 1; p <= pageCount; p++) {
+            pdf.setPage(p);
+            pdf.setFontSize(8);
+            pdf.setTextColor(150, 150, 150);
+            pdf.setFont(undefined, 'normal');
+            pdf.text(`HerbalScan · ${appState.parcelaNome}`, margin, pageHeight - 6);
+            pdf.text(`Página ${p} de ${pageCount}`, pageWidth - margin, pageHeight - 6, { align: 'right' });
+        }
+
+        pdf.save(`${appState.parcelaNome}_relatorio.pdf`);
+        showNotification('✅ PDF exportado com sucesso!', 'success');
 
     } catch (error) {
         console.error('Erro ao exportar PDF:', error);
@@ -5248,10 +6281,18 @@ async function recalculateCoverageWrapper() {
         console.log(`✅ Cobertura recalculada (${data.mode}):`, data.coverages);
 
         // Atualizar in-memory
+        // BUGFIX: "Recalcular" só atualizava cobertura - numero_individuos
+        // nunca era ressincronizado com os polígonos atuais da espécie
+        // (desenhados manualmente ou importados da IA depois da análise
+        // inicial). O backend agora também recalcula e devolve
+        // numero_individuos por espécie (ver /api/recalculate-coverage).
         if (Array.isArray(data.coverages) && result.especies) {
             data.coverages.forEach((c) => {
                 const esp = result.especies.find(e => e.apelido === c.apelido);
-                if (esp) esp.cobertura = c.cobertura;
+                if (esp) {
+                    esp.cobertura = c.cobertura;
+                    if (c.numero_individuos !== undefined) esp.numero_individuos = c.numero_individuos;
+                }
             });
         }
 

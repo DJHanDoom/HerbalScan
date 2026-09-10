@@ -37,13 +37,37 @@ a = Analysis(
         'tkinter',
         'webbrowser',
         'threading',
+        # Adicionados: usados por app.py (import local dentro de função) mas
+        # nao detectados de forma confiavel pela analise estatica do PyInstaller.
+        'polygon_utils',
+        'shapely',
+        'shapely.geometry',
+        'shapely.geos',
+        'PIL',
+        'PIL.Image',
+        'PIL.ImageDraw',
+        'PIL.ImageFont',
+        'reportlab',
+        'reportlab.pdfgen',
+        'reportlab.pdfgen.canvas',
+        'reportlab.lib',
+        'reportlab.lib.pagesizes',
+        'reportlab.lib.styles',
+        'reportlab.lib.units',
+        'reportlab.lib.enums',
+        'reportlab.lib.utils',
+        'reportlab.platypus',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
         'matplotlib',
-        'numpy',
+        # numpy NAO pode ser excluido: shapely (Camada 3 - calculo de
+        # cobertura) depende dele internamente. Excluir causava
+        # "ModuleNotFoundError: No module named 'numpy'" ao chamar
+        # /api/recalculate-coverage no .exe empacotado (confirmado em teste
+        # real do build 2026-09-03).
         'pandas',
         'pytest',
         'jupyter',
@@ -76,7 +100,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # Adicione um ícone aqui se desejar: icon='icon.ico'
+    icon='icon.ico',
 )
 
 coll = COLLECT(

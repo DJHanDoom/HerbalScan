@@ -68,8 +68,29 @@ const SVGCoverageDrawer = {
         // se canvas-stage nao existir (compatibilidade).
         this.imageContainer = document.getElementById('canvas-stage')
             || document.getElementById('viewer-img-container');
-        // Resetar visibilidade ao reabrir (estado e por subparcela)
+
+        // BUGFIX: este objeto é um singleton reutilizado para TODAS as
+        // subparcelas (não é recriado por subparcela). init() é chamado a
+        // cada troca de foto no viewer (ver o wrap de updateViewerContent em
+        // app.js), mas loadSavedData() só SOBRESCREVE subparcelaPolygon/
+        // speciesPolygons quando a subparcela atual tem dados - se ela não
+        // tiver (ex: usuário ainda não desenhou nada aqui), os polígonos da
+        // subparcela ANTERIOR ficavam presos em memória e reapareciam
+        // desenhados por cima da foto nova. Resetar tudo aqui, sempre, antes
+        // de loadSavedData() popular de novo a partir da subparcela atual.
+        this.subparcelaPolygon = null;
+        this.speciesPolygons = {};
         this.hiddenSpecies = {};
+        this.drawMode = null;
+        this.currentSpeciesIndex = null;
+        this.isDrawing = false;
+        this.startPoint = null;
+        this.currentPath = null;
+        this.polygonPoints = [];
+        this.currentPreviewShape = null;
+        this.viewportTransform = { zoom: 1, panX: 0, panY: 0, rotation: 0 };
+        this._editingVertices = null;
+        this._draggingVertex = null;
 
         if (!this.imageContainer) {
             console.error('❌ Container não encontrado');
@@ -261,11 +282,24 @@ const SVGCoverageDrawer = {
     // ========================================
 
     setupEventListeners() {
+        // mousedown/move/up/dblclick vao no this.svg, que e recriado do zero
+        // em createSVG() a cada init() (o elemento antigo e removido, entao
+        // seus listeners somem junto). O keydown, porem, vai no `document`,
+        // que NUNCA e recriado - sem remover o listener antigo antes,
+        // cada troca de subparcela empilhava mais um handler de keydown
+        // (bug real: depois de navegar por varias subparcelas, Enter/Esc no
+        // modo de desenho disparavam a acao varias vezes de uma vez). Guarda
+        // a referencia vinculada para poder remove-la aqui e em destroy().
+        if (this._keydownHandler) {
+            document.removeEventListener('keydown', this._keydownHandler);
+        }
+        this._keydownHandler = (e) => this.onKeyDown(e);
+
         this.svg.addEventListener('mousedown', (e) => this.onMouseDown(e));
         this.svg.addEventListener('mousemove', (e) => this.onMouseMove(e));
         this.svg.addEventListener('mouseup', (e) => this.onMouseUp(e));
         this.svg.addEventListener('dblclick', (e) => this.onDoubleClick(e));
-        document.addEventListener('keydown', (e) => this.onKeyDown(e));
+        document.addEventListener('keydown', this._keydownHandler);
     },
 
     getSVGPoint(e) {
@@ -280,6 +314,13 @@ const SVGCoverageDrawer = {
     },
 
     onMouseDown(e) {
+        // Edição de vértices: clique no fundo (fora de uma alça, que já parou
+        // a propagação no próprio mousedown dela) conclui e salva a edição.
+        if (this._editingVertices) {
+            this.finishVertexEditing();
+            return;
+        }
+
         if (!this.drawMode) return;
 
         // Verificar se ferramenta foi selecionada
@@ -324,6 +365,12 @@ const SVGCoverageDrawer = {
     },
 
     onMouseMove(e) {
+        if (this._draggingVertex) {
+            e.preventDefault();
+            this.dragVertexTo(this.getSVGPoint(e));
+            return;
+        }
+
         if (!this.isDrawing) return;
         e.preventDefault();
 
@@ -338,6 +385,12 @@ const SVGCoverageDrawer = {
     },
 
     onMouseUp(e) {
+        if (this._draggingVertex) {
+            e.preventDefault();
+            this._draggingVertex = null;
+            return;
+        }
+
         if (!this.isDrawing || this.currentTool === 'polygon') return;
         e.preventDefault();
 
@@ -648,6 +701,22 @@ const SVGCoverageDrawer = {
     },
 
     savePolygonWithMode(points, drawMode, speciesIndex) {
+        // BUGFIX: um polígono degenerado (área ~0 - ex: retângulo desenhado
+        // sem arraste real, ou pontos quase colineares) era salvo do mesmo
+        // jeito. Se isso acontecesse com a Área 100%, calculatePolygonArea()
+        // retornava 0 e TODAS as espécies passavam a calcular 0% de cobertura
+        // (divisão por área total praticamente zero), sem nenhum aviso claro
+        // do motivo. Recusar aqui, cedo, com uma mensagem que explica o que
+        // aconteceu.
+        const area = this.calculatePolygonArea(points);
+        if (area < 4) { // ~2x2px: tolera imprecisão de clique, rejeita clique acidental
+            console.warn(`⚠️ Polígono descartado: área ${area.toFixed(2)}px² (degenerado/sem arraste real)`);
+            if (typeof showAlert === 'function') {
+                showAlert('warning', '⚠️ Polígono não salvo: área quase zero. Arraste/clique para formar uma área real antes de finalizar.');
+            }
+            return;
+        }
+
         const color = drawMode === 'subparcela'
             ? this.colors.subparcela
             : this.colors.species[speciesIndex % this.colors.species.length];
@@ -663,6 +732,10 @@ const SVGCoverageDrawer = {
             this.speciesPolygons[speciesIndex].push({ points });
             this.renderSpecies();
             this.persistSpeciesArea(speciesIndex, this.speciesPolygons[speciesIndex]);
+
+            // Cada polígono desenhado representa um indivíduo/touceira - contagem
+            // sobe junto (mesma regra que "Recalcular" já aplicava em lote)
+            this.updateIndividualCount(speciesIndex);
 
             // Calcular e atualizar cobertura
             this.updateCoverageDisplay();
@@ -691,6 +764,47 @@ const SVGCoverageDrawer = {
         polygon.setAttribute('stroke-width', this.strokeWidth);
 
         subparcelaGroup.appendChild(polygon);
+
+        // Rótulo clicável (duplo-clique edita os vértices) - mesmo padrão
+        // usado nos polígonos de espécie em renderSpecies()
+        const bounds = this.getPolygonBounds(this.subparcelaPolygon.points);
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        label.classList.add('polygon-label');
+        label.style.pointerEvents = 'all';
+        label.style.cursor = 'pointer';
+
+        const labelBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        labelBg.setAttribute('fill', this.colors.subparcela);
+        labelBg.setAttribute('fill-opacity', '0.9');
+        labelBg.setAttribute('rx', '4');
+
+        const labelText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        labelText.setAttribute('x', (bounds.minX + bounds.maxX) / 2);
+        labelText.setAttribute('y', bounds.minY + 20);
+        labelText.setAttribute('text-anchor', 'middle');
+        labelText.setAttribute('dominant-baseline', 'middle');
+        labelText.setAttribute('fill', '#ffffff');
+        labelText.setAttribute('font-size', '28');
+        labelText.setAttribute('font-weight', 'bold');
+        labelText.textContent = 'Área 100%';
+
+        label.appendChild(labelBg);
+        label.appendChild(labelText);
+
+        setTimeout(() => {
+            const bbox = labelText.getBBox();
+            labelBg.setAttribute('x', bbox.x - 4);
+            labelBg.setAttribute('y', bbox.y - 2);
+            labelBg.setAttribute('width', bbox.width + 8);
+            labelBg.setAttribute('height', bbox.height + 4);
+        }, 0);
+
+        label.addEventListener('dblclick', (e) => {
+            e.preventDefault();
+            this.editSubparcelaVertices();
+        });
+
+        subparcelaGroup.appendChild(label);
     },
 
     renderSpecies() {
@@ -814,8 +928,10 @@ const SVGCoverageDrawer = {
             // Re-renderizar
             this.renderSpecies();
 
-            // Atualizar cobertura
-            this.updateCoverageDisplay();
+            // Atualizar cobertura e contagem de indivíduos (índice explícito -
+            // pode não ser o mesmo da espécie ativa no modo de desenho)
+            this.updateCoverageDisplay(speciesIndex);
+            this.updateIndividualCount(speciesIndex);
 
             // Persistir
             if (this.speciesPolygons[speciesIndex]) {
@@ -830,15 +946,162 @@ const SVGCoverageDrawer = {
         }
     },
 
+    // ========================================
+    // EDIÇÃO DE VÉRTICES (ajuste manual de polígonos - desenhados à mão OU
+    // importados da IA, ambos guardados no mesmo formato this.speciesPolygons)
+    // ========================================
+
     editPolygonVertices(speciesIndex, polygonIndex) {
         const speciesName = this.currentSubparcela?.especies[speciesIndex]?.apelido || `Espécie ${parseInt(speciesIndex) + 1}`;
+        const polyData = this.speciesPolygons[speciesIndex]?.[polygonIndex];
 
-        if (typeof showAlert === 'function') {
-            showAlert('info', `🔧 Edição de vértices para "${speciesName}" - Em desenvolvimento`);
+        if (!polyData) {
+            console.error('❌ Polígono não encontrado para edição', speciesIndex, polygonIndex);
+            if (typeof showAlert === 'function') {
+                showAlert('error', 'Polígono não encontrado.');
+            }
+            return;
         }
 
-        // TODO: Implementar edição de vértices
-        console.log('TODO: Editar vértices do polígono', speciesIndex, polygonIndex);
+        this._startVertexEditing({ type: 'species', speciesIndex, polygonIndex });
+
+        if (typeof showAlert === 'function') {
+            showAlert('info', `✏️ Editando "${speciesName}" - arraste os pontos (círculos azuis) para ajustar o contorno. Clique fora do polígono para concluir e salvar.`);
+        }
+    },
+
+    // PEDIDO: Área 100% também precisa ser editável manualmente (antes só
+    // dava para redesenhar do zero com "Definir Área 100%", perdendo
+    // qualquer ajuste fino já feito). Mesmo mecanismo de arrastar vértices
+    // usado nas espécies, só que mirando this.subparcelaPolygon.
+    editSubparcelaVertices() {
+        if (!this.subparcelaPolygon) {
+            if (typeof showAlert === 'function') {
+                showAlert('warning', '⚠️ Defina a Área 100% primeiro (botão "Definir Área 100%").');
+            }
+            return;
+        }
+
+        this._startVertexEditing({ type: 'subparcela' });
+
+        if (typeof showAlert === 'function') {
+            showAlert('info', '✏️ Editando Área 100% - arraste os pontos (círculos azuis) para ajustar o contorno. Clique fora do polígono para concluir e salvar.');
+        }
+    },
+
+    // Helper compartilhado por editPolygonVertices/editSubparcelaVertices
+    _startVertexEditing(target) {
+        // Sair de qualquer modo de desenho ativo antes de editar
+        this.drawMode = null;
+        this.isDrawing = false;
+        this.polygonPoints = [];
+        if (this.toolbar) this.toolbar.style.display = 'none';
+
+        this._editingVertices = target;
+        this.renderVertexHandles();
+        this.svg.style.display = 'block';
+        this.svg.style.pointerEvents = 'auto';
+    },
+
+    // Resolve this._editingVertices para o array de pontos que está sendo
+    // editado no momento (da espécie+polígono, ou da área 100% da subparcela)
+    _getEditingPolyData() {
+        if (!this._editingVertices) return null;
+        if (this._editingVertices.type === 'subparcela') {
+            return this.subparcelaPolygon;
+        }
+        const { speciesIndex, polygonIndex } = this._editingVertices;
+        return this.speciesPolygons[speciesIndex]?.[polygonIndex];
+    },
+
+    renderVertexHandles() {
+        this.clearVertexHandles();
+        const polyData = this._getEditingPolyData();
+        if (!polyData) return;
+
+        const handleGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        handleGroup.id = 'vertex-handle-group';
+        handleGroup.style.pointerEvents = 'all';
+
+        // Área 100% em azul-arroxeado (this.colors.subparcela) para distinguir
+        // visualmente das alças de espécie (azul padrão)
+        const handleColor = this._editingVertices.type === 'subparcela' ? this.colors.subparcela : '#2196F3';
+
+        polyData.points.forEach((pt, ptIdx) => {
+            const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            handle.setAttribute('cx', pt.x);
+            handle.setAttribute('cy', pt.y);
+            handle.setAttribute('r', 12);
+            handle.setAttribute('fill', '#ffffff');
+            handle.setAttribute('stroke', handleColor);
+            handle.setAttribute('stroke-width', 4);
+            handle.style.cursor = 'move';
+
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation(); // não deixar o mousedown "vazar" pro fundo (que conclui a edição)
+                this._draggingVertex = { pointIndex: ptIdx };
+            });
+
+            handleGroup.appendChild(handle);
+        });
+
+        this.svg.appendChild(handleGroup);
+    },
+
+    clearVertexHandles() {
+        const old = this.svg?.querySelector('#vertex-handle-group');
+        if (old) old.remove();
+    },
+
+    dragVertexTo(point) {
+        if (!this._editingVertices || !this._draggingVertex) return;
+        const polyData = this._getEditingPolyData();
+        if (!polyData) return;
+
+        polyData.points[this._draggingVertex.pointIndex] = point;
+
+        // Redesenha o polígono em tempo real + reposiciona as alças
+        if (this._editingVertices.type === 'subparcela') {
+            this.renderSubparcela();
+        } else {
+            this.renderSpecies();
+        }
+        this.renderVertexHandles();
+    },
+
+    async finishVertexEditing() {
+        if (!this._editingVertices) return;
+        const target = this._editingVertices;
+
+        this.clearVertexHandles();
+        this._editingVertices = null;
+        this._draggingVertex = null;
+        this.svg.style.pointerEvents = 'none';
+
+        // BUGFIX: antes chamava persistX() sem esperar e mostrava "salvo com
+        // sucesso" de qualquer jeito - se o backend rejeitasse (400) ou a
+        // rede falhasse, o usuário via uma confirmação falsa e achava que
+        // tinha salvo quando não tinha. Agora aguarda o resultado real.
+        let result = { ok: true };
+        if (target.type === 'subparcela') {
+            if (this.subparcelaPolygon) {
+                result = await this.persistSubparcelaArea(this.subparcelaPolygon.points);
+            }
+        } else if (this.speciesPolygons[target.speciesIndex]) {
+            // Mesma persistência usada por desenho manual e importação da IA -
+            // a edição de um polígono importado passa a ser salva igual
+            result = await this.persistSpeciesArea(target.speciesIndex, this.speciesPolygons[target.speciesIndex]);
+            this.updateCoverageDisplay(target.speciesIndex);
+        }
+
+        if (typeof showAlert === 'function') {
+            if (result && result.ok === false) {
+                showAlert('error', `❌ Não foi possível salvar a edição: ${result.error || 'erro desconhecido'}. Tente novamente.`);
+            } else {
+                showAlert('success', '✅ Edição concluída e salva.');
+            }
+        }
     },
 
     render() {
@@ -974,6 +1237,11 @@ const SVGCoverageDrawer = {
             area_shape: { type: 'polygon', points: pointsPct }
         };
 
+        // BUGFIX: essa função nunca informava quem chamou se o salvamento
+        // realmente funcionou - finishVertexEditing() mostrava "salvo com
+        // sucesso" incondicionalmente, mesmo quando o backend rejeitava
+        // (400) ou a rede falhava. Agora retorna {ok, error} pra quem chamar
+        // poder mostrar a mensagem certa.
         try {
             const response = await fetch('/api/subparcela/area', {
                 method: 'POST',
@@ -984,12 +1252,14 @@ const SVGCoverageDrawer = {
             if (response.ok) {
                 console.log('✅ Área da subparcela salva (0..100)');
                 this.currentSubparcela.area_shape = { type: 'polygon', points: pointsPct };
-            } else {
-                const err = await response.json().catch(() => ({}));
-                console.error('❌ Backend rejeitou area_shape:', response.status, err);
+                return { ok: true };
             }
+            const err = await response.json().catch(() => ({}));
+            console.error('❌ Backend rejeitou area_shape:', response.status, err);
+            return { ok: false, error: err.error || `HTTP ${response.status}` };
         } catch (error) {
             console.error('❌ Erro ao salvar:', error);
+            return { ok: false, error: error.message };
         }
     },
 
@@ -1014,6 +1284,9 @@ const SVGCoverageDrawer = {
 
         console.log('📤 Enviando para backend (0..100):', data);
 
+        // BUGFIX: mesmo problema de persistSubparcelaArea() - retornar
+        // {ok, error} pra quem chamar (finishVertexEditing etc) poder
+        // confirmar de verdade em vez de assumir sucesso sempre.
         try {
             const response = await fetch('/api/species/area', {
                 method: 'POST',
@@ -1024,12 +1297,14 @@ const SVGCoverageDrawer = {
             if (response.ok) {
                 console.log(`✅ Áreas da espécie ${speciesIndex} salvas no backend`);
                 especie.area_shapes = data.area_shapes;
-            } else {
-                const error = await response.json();
-                console.error(`❌ Erro do backend (${response.status}):`, error);
+                return { ok: true };
             }
+            const error = await response.json().catch(() => ({}));
+            console.error(`❌ Erro do backend (${response.status}):`, error);
+            return { ok: false, error: error.error || `HTTP ${response.status}` };
         } catch (error) {
             console.error('❌ Erro ao salvar:', error);
+            return { ok: false, error: error.message };
         }
     },
 
@@ -1061,25 +1336,34 @@ const SVGCoverageDrawer = {
     _pxToPct(points) {
         if (!points || points.length === 0) return points;
         const { w, h } = this._imageDims();
+        // Clipar em [0,100]: desenhar perto da borda (comum com zoom) pode
+        // gerar 1-2px além do natural width/height da imagem: sem isso, o
+        // backend (validate_polygon_pct, tolerância de 0.5) rejeitava o
+        // polígono inteiro com 400 em vez de aceitar clipado na borda.
+        const clip = (v) => Math.max(0, Math.min(100, v));
         return points.map(p => ({
-            x: +((Number(p.x) / w) * 100).toFixed(4),
-            y: +((Number(p.y) / h) * 100).toFixed(4)
+            x: +clip((Number(p.x) / w) * 100).toFixed(4),
+            y: +clip((Number(p.y) / h) * 100).toFixed(4)
         }));
     },
 
     loadSavedData() {
         console.log('💾 Carregando dados salvos (formato canonico 0..100 -> px)...');
 
-        // Carregar área da subparcela (sempre interpretado como 0..100)
+        // Carregar área da subparcela (sempre interpretado como 0..100).
+        // area_shapes (persistido via edição manual/import anterior) tem
+        // prioridade - é sempre a "última versão". Só se NADA foi salvo
+        // ainda é que caímos no fallback abaixo (importar da IA automaticamente).
         if (this.currentSubparcela.area_shape) {
             const points = this.currentSubparcela.area_shape.points;
             if (points && points.length) {
                 this.subparcelaPolygon = { points: this._pctToPx(points) };
-                console.log('  ✅ Área da subparcela carregada');
+                console.log('  ✅ Área da subparcela carregada (salva/editada anteriormente)');
             }
         }
 
-        // Carregar áreas das espécies
+        // Carregar áreas das espécies já salvas (desenhadas/editadas manualmente
+        // ou importadas e persistidas em uma visita anterior ao editor)
         if (this.currentSubparcela.especies) {
             this.currentSubparcela.especies.forEach((esp, index) => {
                 if (esp.area_shapes && Array.isArray(esp.area_shapes)) {
@@ -1089,19 +1373,29 @@ const SVGCoverageDrawer = {
 
                     if (processedShapes.length) {
                         this.speciesPolygons[index] = processedShapes;
-                        console.log(`  ✅ Áreas da espécie ${index} "${esp.apelido}" carregadas (${processedShapes.length} pol)`);
+                        console.log(`  ✅ Áreas da espécie ${index} "${esp.apelido}" carregadas (${processedShapes.length} pol, salva anteriormente)`);
                     }
                 }
             });
         }
 
-        // Renderizar polígonos salvos
+        // BUGFIX/PEDIDO: polígonos da IA não devem depender de clique num
+        // botão - aparecem automaticamente ao abrir o editor. Mas só
+        // importamos aqui o que AINDA NÃO tem uma versão salva (acima): uma
+        // vez que o usuário edita manualmente (o que persiste em
+        // area_shapes via persistSpeciesArea/persistSubparcelaArea), essa
+        // versão editada sempre tem prioridade e a IA não a sobrescreve mais
+        // - "mostrar sempre a última versão" significa a mais recentemente
+        // salva, seja ela da IA ou de uma edição manual.
+        this.importAIDetectedAreas({ silent: true, onlyMissing: true });
+
+        // Renderizar polígonos (salvos e/ou recém-importados da IA acima)
         this.render();
 
         // Mostrar SVG se houver polígonos
         if (this.subparcelaPolygon || Object.keys(this.speciesPolygons).length > 0) {
             this.svg.style.display = 'block';
-            console.log('  📐 SVG mostrado com polígonos salvos');
+            console.log('  📐 SVG mostrado com polígonos');
         }
     },
 
@@ -1182,7 +1476,17 @@ const SVGCoverageDrawer = {
         }
 
         const totalArea = this.calculatePolygonArea(this.subparcelaPolygon.points);
-        if (totalArea === 0) return 0;
+        if (totalArea < 4) {
+            // Área 100% degenerada (salva antes do bugfix em savePolygonWithMode,
+            // ou importada de um area_shape ruim) - toda espécie daria 0% aqui
+            // silenciosamente. Avisar em vez de deixar o usuário achar que o
+            // desenho da espécie que está errado.
+            console.error(`❌ Área 100% degenerada (${totalArea.toFixed(2)}px²) - redesenhe com "Definir Área 100%"`);
+            if (typeof showAlert === 'function') {
+                showAlert('error', '❌ A Área 100% salva está inválida (praticamente sem área). Clique em "Definir Área 100%" e desenhe novamente antes de recalcular.');
+            }
+            return 0;
+        }
 
         const polygons = this.speciesPolygons[speciesIndex];
         if (!polygons || polygons.length === 0) return 0;
@@ -1232,11 +1536,29 @@ const SVGCoverageDrawer = {
         return Math.min(100, Math.max(0, percentage));
     },
 
-    updateCoverageDisplay() {
-        if (this.drawMode !== 'species' || this.currentSpeciesIndex === null) return;
+    updateIndividualCount(speciesIndex) {
+        if (!this.currentSubparcela?.especies || !this.currentSubparcela.especies[speciesIndex]) return;
 
-        const percentage = this.calculateCoveragePercentage(this.currentSpeciesIndex);
-        const speciesIndex = this.currentSpeciesIndex;
+        const count = this.speciesPolygons[speciesIndex]?.length || 0;
+        this.currentSubparcela.especies[speciesIndex].numero_individuos = count;
+
+        const speciesCard = document.getElementById(`viewer-species-${speciesIndex}`);
+        if (speciesCard) {
+            const detail = Array.from(speciesCard.querySelectorAll('.viewer-species-detail'))
+                .find(d => d.querySelector('.viewer-species-detail-label')?.textContent === 'Indivíduos');
+            const valueElement = detail?.querySelector('.viewer-species-detail-value');
+            if (valueElement) valueElement.textContent = count;
+        }
+    },
+
+    updateCoverageDisplay(speciesIndex = this.currentSpeciesIndex) {
+        // BUGFIX: antes ignorava o parâmetro e sempre usava this.currentSpeciesIndex
+        // + exigia drawMode === 'species' - chamadas fora do modo de desenho ativo
+        // (ex: deletePolygon apagando uma área de OUTRA espécie) viravam no-op ou
+        // atualizavam a espécie errada. Aceita explicitamente qual espécie recalcular.
+        if (speciesIndex === null || speciesIndex === undefined) return;
+
+        const percentage = this.calculateCoveragePercentage(speciesIndex);
 
         console.log(`📊 Atualizando cobertura da espécie ${speciesIndex}: ${percentage.toFixed(1)}%`);
 
@@ -1316,12 +1638,43 @@ const SVGCoverageDrawer = {
     // IMPORTAÇÃO DE ÁREAS DA IA
     // ========================================
 
-    importAIDetectedAreas() {
+    // options.silent: nao mostrar alerts (usado na chamada automatica ao
+    // abrir o editor - so faz sentido alertar quando o usuario clica o botao
+    // "Importar Areas IA" de proposito).
+    // options.onlyMissing: so importar espécies/área que AINDA NAO tem
+    // polígono carregado (this.speciesPolygons[i]/this.subparcelaPolygon
+    // vazios) - usado na chamada automática para nunca sobrescrever uma
+    // versão já salva/editada manualmente (essa sempre "vence"). O botão
+    // manual continua sem essa restrição (permite reimportar/adicionar).
+    importAIDetectedAreas(options = {}) {
+        const { silent = false, onlyMissing = false } = options;
+        const notify = (type, msg) => {
+            if (!silent && typeof showAlert === 'function') showAlert(type, msg);
+        };
+
         if (!this.currentSubparcela) {
             console.error('❌ Dados da subparcela não disponíveis');
-            if (typeof showAlert === 'function') {
-                showAlert('error', 'Erro: Dados da subparcela não carregados. Reabra o modal.');
-            }
+            notify('error', 'Erro: Dados da subparcela não carregados. Reabra o modal.');
+            return;
+        }
+
+        // BUGFIX (reescrito 2026-09): a versão anterior "adivinhava" se cada
+        // polígono estava em % ou em pixels checando se max(x,y) <= 100, e
+        // convertia inline (duplicado 5x) com fallback silencioso para uma
+        // "imagem" de 100x100 quando this.image não tinha dimensões prontas.
+        // Isso é ambíguo por natureza (um polígono pixel pequeno, perto da
+        // origem, passa no mesmo teste que um polígono percentual real) e
+        // causava tanto conversão dupla quanto perda de escala - os sintomas
+        // relatados ("polígonos da IA viram quadradinhos agrupados fora da
+        // área da imagem") batem exatamente com isso. TODOS os formatos que a
+        // IA/backend retornam aqui (species_shapes, area_shapes, areas,
+        // polygon_json, coordenadas/polygon, area_shape da subparcela) usam o
+        // mesmo contrato canônico 0..100% documentado no topo do arquivo, sem
+        // exceção - então a conversão correta é SEMPRE via this._pctToPx(),
+        // nunca uma decisão por heurística de magnitude.
+        if (!this.image || !this.image.naturalWidth || !this.image.naturalHeight) {
+            console.error('❌ Imagem ainda não carregada - não é possível converter coordenadas da IA');
+            notify('error', 'Aguarde a imagem carregar completamente antes de importar áreas da IA.');
             return;
         }
 
@@ -1330,144 +1683,103 @@ const SVGCoverageDrawer = {
         let areasImportadas = 0;
         let especiesComAreas = 0;
 
+        // Normaliza um ponto em qualquer formato aceito ({x,y} ou [x,y]) para {x,y}
+        const toXY = (p) => Array.isArray(p) ? { x: Number(p[0]) || 0, y: Number(p[1]) || 0 } : { x: Number(p?.x) || 0, y: Number(p?.y) || 0 };
+
         // Verificar se há dados de polígonos da IA nas espécies
         if (this.currentSubparcela.especies) {
             this.currentSubparcela.especies.forEach((esp, index) => {
+                // onlyMissing: espécie já tem polígono carregado (salvo/editado
+                // anteriormente) - não sobrescrever nem duplicar com o da IA.
+                if (onlyMissing && this.speciesPolygons[index] && this.speciesPolygons[index].length > 0) {
+                    return;
+                }
+
                 console.log(`🔍 Inspecionando espécie ${index} (${esp.apelido}):`, Object.keys(esp));
 
-                // Verificar diferentes formatos de dados de polígonos da IA
-                let polygonData = null;
+                // Lista de polígonos crus (ainda em %), cada um {points: [{x,y}%,...]}
+                let rawPolygons = null;
 
-                // Formato 1: species_shapes no resultado (polígonos por espécie)
-                if (esp.species_shapes && Array.isArray(esp.species_shapes)) {
-                    polygonData = esp.species_shapes;
+                // Formato 1: species_shapes no resultado (polígonos por espécie, já no formato canônico)
+                if (esp.species_shapes && Array.isArray(esp.species_shapes) && esp.species_shapes.length > 0) {
+                    rawPolygons = esp.species_shapes.map(shape => ({ points: (shape.points || []).map(toXY) }));
                 }
-                // Formato 2: area_shapes já processados
-                else if (esp.area_shapes && Array.isArray(esp.area_shapes)) {
-                    polygonData = esp.area_shapes;
+                // Formato 2: area_shapes (persistido anteriormente via persistSpeciesArea, também canônico %)
+                else if (esp.area_shapes && Array.isArray(esp.area_shapes) && esp.area_shapes.length > 0) {
+                    rawPolygons = esp.area_shapes.map(shape => ({ points: (shape.points || []).map(toXY) }));
                 }
                 // Formato 3: polygon_json com coordenadas percentuais
                 else if (esp.polygon_json && esp.polygon_json.points) {
-                    // Converter coordenadas percentuais para absolutas
-                    const imgWidth = this.image?.naturalWidth || 100;
-                    const imgHeight = this.image?.naturalHeight || 100;
-
-                    const convertedPoints = esp.polygon_json.points.map(p => ({
-                        x: (p.x / 100) * imgWidth,
-                        y: (p.y / 100) * imgHeight
-                    }));
-
-                    polygonData = [{ points: convertedPoints }];
+                    rawPolygons = [{ points: esp.polygon_json.points.map(toXY) }];
                 }
                 // Formato 4: coordenadas JSON diretas (x, y em %)
                 else if (esp.coordenadas || esp.polygon) {
                     const coords = esp.coordenadas || esp.polygon;
                     if (coords.points && Array.isArray(coords.points)) {
-                        const imgWidth = this.image?.naturalWidth || 100;
-                        const imgHeight = this.image?.naturalHeight || 100;
-
-                        const convertedPoints = coords.points.map(p => ({
-                            x: (p.x / 100) * imgWidth,
-                            y: (p.y / 100) * imgHeight
-                        }));
-
-                        polygonData = [{ points: convertedPoints }];
+                        rawPolygons = [{ points: coords.points.map(toXY) }];
                     }
                 }
                 // Formato 5: 'areas' como array de polígonos (multishape) ou array de pontos (single shape)
                 else if (esp.areas && Array.isArray(esp.areas) && esp.areas.length > 0) {
-                    const imgWidth = this.image?.naturalWidth || 100;
-                    const imgHeight = this.image?.naturalHeight || 100;
                     const firstItem = esp.areas[0];
 
-                    // Caso 5A: Array de Polígonos [[{x,y}...], [{x,y}...]]
-                    if (Array.isArray(firstItem) && firstItem.length > 0 && typeof firstItem[0] === 'object' && 'x' in firstItem[0]) {
-                        polygonData = esp.areas.map(polyPoints => ({
-                            points: polyPoints.map(p => ({
-                                x: ((p.x || 0) / 100) * imgWidth,
-                                y: ((p.y || 0) / 100) * imgHeight
-                            }))
-                        }));
-                        console.log(`  📐 Identificado 'areas' como lista de ${polygonData.length} polígonos`);
+                    // Caso 5A: Array de Polígonos [[{x,y}|[x,y], ...], [...]]
+                    if (Array.isArray(firstItem) && firstItem.length > 0 && typeof firstItem[0] === 'object') {
+                        rawPolygons = esp.areas.map(polyPoints => ({ points: polyPoints.map(toXY) }));
+                        console.log(`  📐 Identificado 'areas' como lista de ${rawPolygons.length} polígonos`);
                     }
-                    // Caso 5B: Único Polígono em formato de array de pontos [{x,y}, {x,y}...]
+                    // Caso 5B: Único polígono em formato de array de pontos [{x,y}, {x,y}...]
                     else if (typeof firstItem === 'object' && 'x' in firstItem) {
-                        const points = esp.areas.map(p => ({
-                            x: ((p.x || 0) / 100) * imgWidth,
-                            y: ((p.y || 0) / 100) * imgHeight
-                        }));
-                        polygonData = [{ points }];
-                        console.log(`  📐 Identificado 'areas' como único polígono de ${points.length} pontos`);
+                        rawPolygons = [{ points: esp.areas.map(toXY) }];
+                        console.log(`  📐 Identificado 'areas' como único polígono de ${rawPolygons[0].points.length} pontos`);
                     }
-                    // Caso 5C: Único polígono em formato array arrays [[x,y], [x,y]...]
+                    // Caso 5C: Único polígono em formato array de arrays [[x,y], [x,y]...]
                     else if (Array.isArray(firstItem) && firstItem.length >= 2 && typeof firstItem[0] === 'number') {
-                        const points = esp.areas.map(p => ({
-                            x: (p[0] / 100) * imgWidth,
-                            y: (p[1] / 100) * imgHeight
-                        }));
-                        polygonData = [{ points }];
-                        console.log(`  📐 Identificado 'areas' como único polígono (formato array) de ${points.length} pontos`);
+                        rawPolygons = [{ points: esp.areas.map(toXY) }];
+                        console.log(`  📐 Identificado 'areas' como único polígono (formato array) de ${rawPolygons[0].points.length} pontos`);
                     }
                 }
 
-                if (polygonData && polygonData.length > 0) {
-                    // Inicializar array se necessário
+                if (rawPolygons && rawPolygons.length > 0) {
                     if (!this.speciesPolygons[index]) {
                         this.speciesPolygons[index] = [];
                     }
 
-                    // Adicionar polígonos (convertendo formato se necessário)
-                    polygonData.forEach(poly => {
-                        let points = poly.points;
-
-                        // Se pontos estão em formato percentual (0-100), converter
-                        if (points && points.length > 0) {
-                            const maxX = Math.max(...points.map(p => p.x));
-                            const maxY = Math.max(...points.map(p => p.y));
-
-                            // Se todos os valores são <= 100, provavelmente são percentuais
-                            if (maxX <= 100 && maxY <= 100) {
-                                const imgWidth = this.image?.naturalWidth || 100;
-                                const imgHeight = this.image?.naturalHeight || 100;
-
-                                points = points.map(p => ({
-                                    x: (p.x / 100) * imgWidth,
-                                    y: (p.y / 100) * imgHeight
-                                }));
-                            }
-
-                            this.speciesPolygons[index].push({ points });
+                    rawPolygons.forEach(poly => {
+                        if (poly.points && poly.points.length >= 3) {
+                            // Única conversão %->px, canônica, sem adivinhação
+                            this.speciesPolygons[index].push({ points: this._pctToPx(poly.points) });
                             areasImportadas++;
                         }
                     });
 
+                    // BUGFIX: importar só atualizava o estado em memória
+                    // (this.speciesPolygons) - nunca persistia no backend nem
+                    // no objeto real da subparcela (this.currentSubparcela,
+                    // que agora É o dado real - ver fix em initializeCoverageDrawer).
+                    // Resultado: as áreas importadas ficavam visíveis só até
+                    // fechar o modal; ao reabrir, loadSavedData() lia
+                    // esp.area_shapes (nunca escrito pelo import) e sumiam.
+                    // Mesma persistência que o desenho manual já fazia.
+                    if (this.speciesPolygons[index].length > 0) {
+                        this.persistSpeciesArea(index, this.speciesPolygons[index]);
+                    }
+
                     especiesComAreas++;
-                    console.log(`  ✅ Espécie "${esp.apelido}": ${polygonData.length} polígono(s) importado(s)`);
+                    console.log(`  ✅ Espécie "${esp.apelido}": ${rawPolygons.length} polígono(s) importado(s)`);
                 }
             });
         }
 
         // Verificar área da subparcela (area_shape)
         if (this.currentSubparcela.area_shape && !this.subparcelaPolygon) {
-            let points = this.currentSubparcela.area_shape.points;
+            const points = (this.currentSubparcela.area_shape.points || []).map(toXY);
 
-            if (points && points.length > 0) {
-                // Converter se necessário
-                const maxX = Math.max(...points.map(p => p.x));
-                const maxY = Math.max(...points.map(p => p.y));
-
-                if (maxX <= 100 && maxY <= 100) {
-                    const imgWidth = this.image?.naturalWidth || 100;
-                    const imgHeight = this.image?.naturalHeight || 100;
-
-                    points = points.map(p => ({
-                        x: (p.x / 100) * imgWidth,
-                        y: (p.y / 100) * imgHeight
-                    }));
-                }
-
-                this.subparcelaPolygon = { points };
+            if (points.length >= 3) {
+                this.subparcelaPolygon = { points: this._pctToPx(points) };
                 console.log('  ✅ Área 100% da subparcela importada');
+                // Mesmo bugfix acima: persistir a área importada também
+                this.persistSubparcelaArea(this.subparcelaPolygon.points);
             }
         }
 
@@ -1479,13 +1791,12 @@ const SVGCoverageDrawer = {
             this.svg.style.display = 'block';
         }
 
-        // Feedback ao usuário
-        if (typeof showAlert === 'function') {
-            if (areasImportadas > 0) {
-                showAlert('success', `✅ Importadas ${areasImportadas} área(s) de ${especiesComAreas} espécie(s) da IA`);
-            } else {
-                showAlert('warning', '⚠️ Nenhuma área detectada pela IA foi encontrada. A IA pode não ter retornado polígonos ou os dados não estão no formato esperado.');
-            }
+        // Feedback ao usuário (notify() já é no-op quando silent=true - a
+        // chamada automática ao abrir o editor não deve interromper com alerts)
+        if (areasImportadas > 0) {
+            notify('success', `✅ Importadas ${areasImportadas} área(s) de ${especiesComAreas} espécie(s) da IA`);
+        } else {
+            notify('warning', '⚠️ Nenhuma área detectada pela IA foi encontrada. A IA pode não ter retornado polígonos ou os dados não estão no formato esperado.');
         }
 
         console.log(`🤖 Importação concluída: ${areasImportadas} áreas de ${especiesComAreas} espécies`);
@@ -1611,9 +1922,28 @@ const SVGCoverageDrawer = {
             this.toolbar.remove();
             this.toolbar = null;
         }
+        if (this._keydownHandler) {
+            document.removeEventListener('keydown', this._keydownHandler);
+            this._keydownHandler = null;
+        }
+        // Mesmo reset de estado por-subparcela feito em init() - destroy()
+        // é o outro ponto de entrada (fechar o viewer) e precisa deixar o
+        // singleton limpo para a próxima vez que for aberto, mesma razão
+        // do bugfix em init() (ver comentário lá).
+        this.currentSubparcela = null;
+        this.subparcelaPolygon = null;
+        this.speciesPolygons = {};
+        this.hiddenSpecies = {};
         this.drawMode = null;
+        this.currentSpeciesIndex = null;
         this.isDrawing = false;
+        this.startPoint = null;
+        this.currentPath = null;
         this.polygonPoints = [];
+        this.currentPreviewShape = null;
+        this.viewportTransform = { zoom: 1, panX: 0, panY: 0, rotation: 0 };
+        this._editingVertices = null;
+        this._draggingVertex = null;
         console.log('🗑️ SVGCoverageDrawer destruído');
     }
 };

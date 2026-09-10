@@ -69,6 +69,68 @@ def union_of_shapes(area_shapes: List[dict]) -> Optional[object]:
     return unary_union(polys)
 
 
+def clip_polygon_to_boundary(points: List[dict], boundary_points: Optional[List[dict]]) -> List[List[dict]]:
+    """Recorta um poligono pelos limites de boundary_points (ambos em 0..100).
+
+    Usado para garantir que poligonos retornados pela IA (que nem sempre
+    respeita o delimitador fisico da subparcela com precisao) nunca sejam
+    exibidos nem contados fora da area real da subparcela - a IA pode
+    errar a posicao exata do delimitador, mas o recorte geometrico garante
+    que o resultado final e sempre fisicamente consistente.
+
+    Retorna uma lista de poligonos (cada um lista de {x,y}) - normalmente 1,
+    mas pode ser >1 se o recorte partir o poligono original em pedacos
+    disjuntos, ou [] se o poligono ficar totalmente fora do limite.
+    Se shapely indisponivel ou nao ha boundary, retorna [points] inalterado
+    (fail-open: preferimos manter o poligono original a apaga-lo por erro
+    tecnico).
+    """
+    if not points:
+        return []
+    if not SHAPELY_OK or not boundary_points:
+        return [points]
+
+    poly = _make_polygon(points)
+    boundary = _make_polygon(boundary_points)
+    if poly is None or boundary is None or poly.is_empty or boundary.is_empty:
+        return [points]
+
+    try:
+        clipped = poly.intersection(boundary)
+    except Exception:
+        return [points]
+
+    # Salvaguarda: se o boundary vier malformado (ex: cantos do delimitador
+    # fora de ordem sequencial, formando um poligono "boca de laco"), a
+    # interseccao pode ficar vazia ou minuscula mesmo quando o poligono
+    # original claramente deveria estar (quase) todo dentro da subparcela.
+    # Preferimos manter o poligono original a fazer ele sumir do mapa por
+    # causa de uma geometria de delimitador ruim - so aceitamos o recorte se
+    # ele preservar uma fracao razoavel da area original.
+    original_area = poly.area
+    clipped_area = 0.0 if clipped.is_empty else clipped.area
+    if original_area > 0 and (clipped_area / original_area) < 0.10:
+        return [points]
+
+    if clipped.is_empty:
+        return []
+
+    if clipped.geom_type == 'Polygon':
+        geoms = [clipped]
+    elif clipped.geom_type in ('MultiPolygon', 'GeometryCollection'):
+        geoms = [g for g in clipped.geoms if g.geom_type == 'Polygon' and not g.is_empty]
+    else:
+        # Linha/ponto degenerado (tangencia a borda) - sem area util
+        return []
+
+    result = []
+    for g in geoms:
+        coords = list(g.exterior.coords)[:-1]  # remove ponto de fechamento duplicado
+        if len(coords) >= 3:
+            result.append([{'x': round(x, 4), 'y': round(y, 4)} for x, y in coords])
+    return result
+
+
 def calculate_coverage(species_area_shapes: List[dict],
                        parcela_area_shape: Optional[dict] = None,
                        total_image_area: float = 10000.0) -> float:

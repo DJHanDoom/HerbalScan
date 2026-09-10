@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/species-details-modal.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/advanced-analytics.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/help-modal.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/ai-model-modal.css') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -46,6 +47,11 @@
             </div>
             <div id="preview-container" class="preview-grid"></div>
             <button id="upload-btn" class="btn btn-primary" disabled>Enviar Imagens</button>
+
+            <!-- Painel de confirmação das fotos adicionadas depois, via
+                 "➕ Adicionar Fotos" (Seção 2). Fica AQUI, junto do restante
+                 do fluxo de upload/metadados, e não no meio dos resultados. -->
+            <div id="add-images-anchor"></div>
         </section>
 
         <!-- Seção 2: Análise -->
@@ -53,53 +59,22 @@
             <h2>2. Análise das Subparcelas</h2>
             <p class="info-text">Selecione o modelo de IA e inicie a análise automática das imagens.</p>
 
+            <!-- Resumo do modelo de IA selecionado (abre o modal de seleção) -->
             <div class="form-group">
-                <label for="ai-model">Modelo de IA:</label>
-                <select id="ai-model" class="ai-select">
-                    <option value="claude">Carregando modelos disponíveis...</option>
-                </select>
+                <label>Modelo de IA:</label>
+                <button type="button" id="ai-model-summary-btn" class="ai-model-summary-btn"
+                    onclick="AIModelModal.open()">
+                    <span id="ai-model-summary-text">Carregando modelos disponíveis...</span>
+                    <span class="ai-model-summary-edit">Trocar ✎</span>
+                </button>
                 <p class="ai-info" id="ai-info"></p>
             </div>
 
-            <!-- Seletor de versão do modelo Gemini -->
-            <div class="form-group" id="gemini-model-group" style="display: none;">
-                <label for="gemini-version">Versão do Gemini:</label>
-                <select id="gemini-version" class="ai-select">
-                    <option value="gemini-3.0-pro">Gemini 3.0 Pro (New!) 🚀</option>
-                    <option value="gemini-3.0-flash">Gemini 3.0 Flash (New!) ⚡</option>
-                    <option value="gemini-2.5-pro">Gemini 2.5 Pro (Mais Poderoso) 🔥</option>
-                    <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (Recomendado/Rápido) ⚡</option>
-                    <option value="gemini-2.0-pro">Gemini 2.0 Pro (Estável)</option>
-                    <option value="gemini-2.0-flash">Gemini 2.0 Flash (Estável)</option>
-                </select>
-                <p class="ai-info-small">💡 Modelos "Pro" são mais precisos mas mais lentos</p>
-            </div>
-
-            <!-- Seletor de versão do modelo Claude -->
-            <div class="form-group" id="claude-model-group" style="display: none;">
-                <label for="claude-version">Versão do Claude:</label>
-                <select id="claude-version" class="ai-select">
-                    <option value="claude-3-7-sonnet-20251201">Claude 3.7 Sonnet (Dez/2025) 🚀</option>
-                    <option value="claude-3-5-sonnet-latest" selected>Claude 3.5 Sonnet (Latest) 🔥</option>
-                    <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (Rápido) ⚡</option>
-                    <option value="claude-3-opus-20240229">Claude 3 Opus (Robusto) 💎</option>
-                </select>
-                <p class="ai-info-small">💡 Sonnet 4.5 é o melhor custo-benefício! Opus 4.1 é o mais preciso. Haiku 4.5
-                    é o mais rápido.</p>
-            </div>
-
-            <!-- Seletor de versão do modelo GPT -->
-            <div class="form-group" id="gpt-model-group" style="display: none;">
-                <label for="gpt-version">Versão do GPT:</label>
-                <select id="gpt-version" class="ai-select">
-                    <option value="gpt-4o" selected>GPT-4o (Mais Recente - Recomendado) 🔥</option>
-                    <option value="gpt-4o-mini">GPT-4o Mini (Econômico e Rápido) ⚡</option>
-                    <option value="gpt-4-turbo-2024-04-09">GPT-4 Turbo (Abr/2024)</option>
-                    <option value="gpt-4-turbo">GPT-4 Turbo (Latest)</option>
-                    <option value="gpt-4">GPT-4 (Clássico)</option>
-                </select>
-                <p class="ai-info-small">💡 GPT-4o é o mais eficiente. GPT-4o Mini é mais econômico e rápido.</p>
-            </div>
+            <!-- Campo oculto: guarda o provedor selecionado para o restante do app.
+                 Os <select> de versão por provedor vivem dentro do modal (#ai-model-modal). -->
+            <select id="ai-model" style="display:none">
+                <option value="claude">Carregando modelos disponíveis...</option>
+            </select>
 
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                 <button id="config-prompt-btn" class="btn btn-secondary" onclick="PromptConfig.open()"
@@ -347,6 +322,24 @@
                         </p>
                     </div>
                 </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Seleção de Modelo de IA -->
+    <div id="ai-model-modal" class="modal" style="display: none;">
+        <div class="ai-modal-content">
+            <div class="ai-modal-header">
+                <h2>🤖 Modelo de IA</h2>
+                <button onclick="AIModelModal.close()" class="close-btn">×</button>
+            </div>
+            <div class="ai-modal-body">
+                <p class="ai-modal-intro">Escolha o provedor e a versão do modelo usados para analisar as imagens.
+                    Modelos <strong>Premium</strong> exigem uma API key paga; os <strong>Grátis</strong> funcionam com
+                    uma chave gratuita do provedor.</p>
+                <div id="ai-provider-grid" class="ai-provider-grid">
+                    <!-- Preenchido dinamicamente por AIModelModal.render() em app.js -->
+                </div>
             </div>
         </div>
     </div>
