@@ -260,6 +260,19 @@ app.config['DEFAULT_AI'] = os.environ.get('DEFAULT_AI', 'gemini')  # gemini como
 # num restart de qualquer forma, ver analysis_data).
 app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(32)
 
+# BUGFIX URGENTE (parte 2): Firebase Hosting, ao fazer rewrite pra um
+# backend Cloud Run/Functions, DESCARTA todos os cookies da requisição
+# recebida do navegador EXCETO um com esse nome exato ("__session") -
+# limitação documentada e proposital da CDN da Firebase Hosting, pra
+# permitir cache eficiente. Com o nome padrao do Flask ("session"), o
+# cookie era enviado pelo navegador normalmente mas NUNCA chegava no
+# Cloud Run - toda requisicao via hoorizoom.web.app parecia visitante
+# novo, gerando uma sessao (e portanto um analysis_data) diferente a
+# cada chamada, mesmo dentro da mesma aba do mesmo usuario. Confirmado:
+# acessando o Cloud Run diretamente (sem passar pela Hosting) a sessao
+# persistia normalmente - só quebrava atras do proxy da Firebase.
+app.config['SESSION_COOKIE_NAME'] = '__session'
+
 # Criar diretórios necessários
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['EXPORTS_FOLDER'], exist_ok=True)
