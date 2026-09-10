@@ -8,6 +8,7 @@ import io
 import shutil
 import math
 import copy
+import uuid
 
 # BUGFIX: um usuário conseguiu instalar e abrir o .exe, mas ele morria logo
 # na inicialização com "AttributeError: module 'aiohttp' has no attribute
@@ -118,7 +119,8 @@ def handle_global_exception(exc_type, exc_value, exc_traceback):
 sys.excepthook = handle_global_exception
 
 try:
-    from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context
+    from flask import Flask, render_template, request, jsonify, send_file, Response, stream_with_context, session
+    from werkzeug.local import LocalProxy
     from werkzeug.utils import secure_filename
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment
@@ -250,17 +252,84 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
 app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg'}
 app.config['DEFAULT_AI'] = os.environ.get('DEFAULT_AI', 'gemini')  # gemini como padrão
 
+# BUGFIX URGENTE: chave de assinatura do cookie de sessao (ver analysis_data
+# logo abaixo). SECRET_KEY pode ser fixada via variavel de ambiente (assim
+# sessoes sobrevivem a um redeploy/restart do Cloud Run); sem ela, gera uma
+# aleatoria por processo - funciona igual, so invalida sessoes antigas a
+# cada restart (aceitavel: o estado em memoria de cada sessao ja se perde
+# num restart de qualquer forma, ver analysis_data).
+app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(32)
+
 # Criar diretórios necessários
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['EXPORTS_FOLDER'], exist_ok=True)
 os.makedirs(app.config['SAVED_ANALYSES_FOLDER'], exist_ok=True)
 os.makedirs(app.config['CUSTOM_TEMPLATES_FOLDER'], exist_ok=True)
 
-# Armazenamento em memória para dados da análise
-analysis_data = {
-    'parcelas': {},
-    'especies_unificadas': {}
-}
+# ============================================================
+# Armazenamento em memória para dados da análise - ISOLADO POR SESSÃO
+# ============================================================
+# BUGFIX URGENTE (relatado em produção): analysis_data era um único dict
+# GLOBAL compartilhado por TODOS os usuários do servidor - qualquer pessoa
+# abrindo o site via um navegador diferente (ou outro dispositivo) via a
+# ÚLTIMA análise feita por QUALQUER OUTRO usuário, como se fosse dela. Isso
+# só não apareceu nos testes porque sempre foi usado por uma pessoa de cada
+# vez localmente; virou um vazamento de dados real assim que o app foi
+# publicado (Cloud Run/Firebase) pra mais de um usuário.
+#
+# Cada sessão de navegador agora tem seu PRÓPRIO dict isolado, guardado em
+# _SESSIONS_DATA e indexado por um id de sessão gerado no primeiro acesso e
+# guardado num cookie assinado (flask.session - ver SECRET_KEY acima).
+#
+# `analysis_data` continua sendo usado em todo o resto deste arquivo
+# exatamente como antes (analysis_data['parcelas'], .get(), 'x' in
+# analysis_data, etc) - é um werkzeug.local.LocalProxy, que resolve pro
+# dict da sessão ATUAL a cada acesso, então nenhum dos ~230 usos abaixo
+# precisou mudar. A única excecao é reatribuição (`analysis_data = {...}`)
+# em vez de mutação - isso rebindaria o nome global pra um dict comum e
+# quebraria o isolamento pra todo mundo; ver clear_analysis() mais abaixo,
+# o único lugar que fazia isso, corrigido para mutar em vez de reatribuir.
+_SESSIONS_DATA = {}
+_SESSIONS_LAST_SEEN = {}
+_SESSION_TTL_SECONDS = 24 * 3600  # sessões inativas por mais de 24h são descartadas
+
+
+def _get_session_id():
+    """Resolve (criando se necessário) o id de sessão do navegador atual."""
+    sid = session.get('sid')
+    if not sid:
+        sid = uuid.uuid4().hex
+        session['sid'] = sid
+        session.permanent = True
+    return sid
+
+
+def _prune_stale_sessions():
+    """Remove sessões inativas há mais de _SESSION_TTL_SECONDS.
+
+    Chamado só ao criar uma sessão nova (barato e suficiente pra um
+    servidor de instância única - não precisa de thread/cron dedicado)."""
+    now = time.time()
+    stale_ids = [sid for sid, seen in _SESSIONS_LAST_SEEN.items() if now - seen > _SESSION_TTL_SECONDS]
+    for sid in stale_ids:
+        _SESSIONS_DATA.pop(sid, None)
+        _SESSIONS_LAST_SEEN.pop(sid, None)
+
+
+def _get_analysis_data():
+    """Retorna (criando se necessário) o dict de análise da sessão atual."""
+    sid = _get_session_id()
+    _SESSIONS_LAST_SEEN[sid] = time.time()
+    if sid not in _SESSIONS_DATA:
+        _prune_stale_sessions()
+        _SESSIONS_DATA[sid] = {
+            'parcelas': {},
+            'especies_unificadas': {}
+        }
+    return _SESSIONS_DATA[sid]
+
+
+analysis_data = LocalProxy(_get_analysis_data)
 
 # Rota para servir arquivos de upload (dados do usuário)
 @app.route('/static/uploads/<path:filename>')
@@ -5325,15 +5394,17 @@ def get_parcela_images(parcela_nome):
 @app.route('/api/clear-analysis', methods=['POST'])
 def clear_analysis():
     """Limpa todos os dados de análise do backend para iniciar uma nova"""
-    global analysis_data
-    
     try:
-        # Resetar estrutura de dados global
-        analysis_data = {
-            'parcelas': {},
-            'especies_unificadas': {}
-        }
-        
+        # BUGFIX: reatribuir `analysis_data = {...}` aqui (mesmo com
+        # `global`) rebindaria só a referência LOCAL a esse nome dentro do
+        # módulo - MAS analysis_data agora é um LocalProxy (ver declaração
+        # acima) cujo isolamento por sessão depende de nunca ser reatribuído,
+        # só mutado. Limpa em memória (.clear() + repovoa as duas chaves)
+        # em vez de reatribuir, preservando o isolamento por sessão.
+        analysis_data.clear()
+        analysis_data['parcelas'] = {}
+        analysis_data['especies_unificadas'] = {}
+
         print("✓ Dados de análise limpos no backend")
         
         return jsonify({
