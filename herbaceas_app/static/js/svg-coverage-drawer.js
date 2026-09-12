@@ -966,7 +966,7 @@ const SVGCoverageDrawer = {
         this._startVertexEditing({ type: 'species', speciesIndex, polygonIndex });
 
         if (typeof showAlert === 'function') {
-            showAlert('info', `✏️ Editando "${speciesName}" - arraste os pontos (círculos azuis) para ajustar o contorno. Clique fora do polígono para concluir e salvar.`);
+            showAlert('info', `✏️ Editando "${speciesName}" - arraste os pontos cheios para mover, duplo-clique num ponto cheio pra apagá-lo, ou arraste um ponto vazado (meio da aresta) pra criar um novo. Clique fora do polígono para concluir e salvar.`);
         }
     },
 
@@ -985,7 +985,7 @@ const SVGCoverageDrawer = {
         this._startVertexEditing({ type: 'subparcela' });
 
         if (typeof showAlert === 'function') {
-            showAlert('info', '✏️ Editando Área 100% - arraste os pontos (círculos azuis) para ajustar o contorno. Clique fora do polígono para concluir e salvar.');
+            showAlert('info', '✏️ Editando Área 100% - arraste os pontos cheios para mover, duplo-clique num ponto cheio pra apagá-lo, ou arraste um ponto vazado (meio da aresta) pra criar um novo. Clique fora do polígono para concluir e salvar.');
         }
     },
 
@@ -1014,6 +1014,14 @@ const SVGCoverageDrawer = {
         return this.speciesPolygons[speciesIndex]?.[polygonIndex];
     },
 
+    // PEDIDO: usuário precisa poder CRIAR e APAGAR pontos de ancoragem, não
+    // só arrastar os existentes. Duas alças por polígono:
+    //   - Alça REAL (círculo cheio, sobre cada vértice): arrasta pra mover;
+    //     duplo-clique remove o ponto (deleteVertex).
+    //   - Alça de PONTO MÉDIO (círculo vazado menor, no meio de cada aresta):
+    //     ao começar a arrastar, INSERE um ponto novo naquele lugar (vira uma
+    //     alça real) e já continua o arrasto no mesmo gesto - igual à maioria
+    //     dos editores vetoriais.
     renderVertexHandles() {
         this.clearVertexHandles();
         const polyData = this._getEditingPolyData();
@@ -1026,6 +1034,41 @@ const SVGCoverageDrawer = {
         // Área 100% em azul-arroxeado (this.colors.subparcela) para distinguir
         // visualmente das alças de espécie (azul padrão)
         const handleColor = this._editingVertices.type === 'subparcela' ? this.colors.subparcela : '#2196F3';
+        const n = polyData.points.length;
+
+        // Alças de ponto médio PRIMEIRO (ficam por baixo das alças reais na
+        // ordem do DOM, então um vértice real nunca fica encoberto por um
+        // ponto médio bem próximo dele)
+        polyData.points.forEach((pt, ptIdx) => {
+            const next = polyData.points[(ptIdx + 1) % n];
+            const midHandle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            midHandle.setAttribute('cx', (pt.x + next.x) / 2);
+            midHandle.setAttribute('cy', (pt.y + next.y) / 2);
+            midHandle.setAttribute('r', 8);
+            midHandle.setAttribute('fill', 'rgba(255,255,255,0.6)');
+            midHandle.setAttribute('stroke', handleColor);
+            midHandle.setAttribute('stroke-width', 2);
+            midHandle.setAttribute('stroke-dasharray', '3,2');
+            midHandle.style.cursor = 'copy';
+            midHandle.setAttribute('title', 'Arraste para criar um novo ponto aqui');
+
+            midHandle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const insertIndex = ptIdx + 1;
+                const currentPoly = this._getEditingPolyData();
+                if (!currentPoly) return;
+                currentPoly.points.splice(insertIndex, 0, {
+                    x: parseFloat(midHandle.getAttribute('cx')),
+                    y: parseFloat(midHandle.getAttribute('cy')),
+                });
+                this._draggingVertex = { pointIndex: insertIndex };
+                if (this._editingVertices.type === 'subparcela') this.renderSubparcela(); else this.renderSpecies();
+                this.renderVertexHandles();
+            });
+
+            handleGroup.appendChild(midHandle);
+        });
 
         polyData.points.forEach((pt, ptIdx) => {
             const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -1036,11 +1079,18 @@ const SVGCoverageDrawer = {
             handle.setAttribute('stroke', handleColor);
             handle.setAttribute('stroke-width', 4);
             handle.style.cursor = 'move';
+            handle.setAttribute('title', 'Arraste para mover · duplo-clique para remover');
 
             handle.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 e.stopPropagation(); // não deixar o mousedown "vazar" pro fundo (que conclui a edição)
                 this._draggingVertex = { pointIndex: ptIdx };
+            });
+
+            handle.addEventListener('dblclick', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.deleteVertex(ptIdx);
             });
 
             handleGroup.appendChild(handle);
@@ -1052,6 +1102,26 @@ const SVGCoverageDrawer = {
     clearVertexHandles() {
         const old = this.svg?.querySelector('#vertex-handle-group');
         if (old) old.remove();
+    },
+
+    // PEDIDO: apagar um ponto de ancoragem (duplo-clique numa alça real).
+    // Nunca deixa o polígono com menos de 3 pontos (deixaria de ser um
+    // polígono válido).
+    deleteVertex(pointIndex) {
+        const polyData = this._getEditingPolyData();
+        if (!polyData) return;
+
+        if (polyData.points.length <= 3) {
+            if (typeof showAlert === 'function') {
+                showAlert('warning', '⚠️ Um polígono precisa de pelo menos 3 pontos - desenhe de novo se quiser um contorno mais simples.');
+            }
+            return;
+        }
+
+        polyData.points.splice(pointIndex, 1);
+
+        if (this._editingVertices.type === 'subparcela') this.renderSubparcela(); else this.renderSpecies();
+        this.renderVertexHandles();
     },
 
     dragVertexTo(point) {
