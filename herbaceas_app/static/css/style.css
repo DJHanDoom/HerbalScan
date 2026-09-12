@@ -1322,7 +1322,12 @@ tbody tr:hover {
     left: 0;
     width: 100vw;
     height: 100vh;
-    z-index: 9999;
+    /* BUGFIX: z-index era 9999, MENOR que o do editor de polígonos
+       (.image-viewer-modal, 10000) - abrir a subdivisão de espécie de
+       dentro do editor (splitSpeciesInViewer) escondia o modal atrás dele,
+       por isso o código antigo fechava o editor primeiro. Agora fica por
+       cima de qualquer modal do app, então o editor pode continuar aberto. */
+    z-index: 10500;
     display: none;
     align-items: center;
     justify-content: center;

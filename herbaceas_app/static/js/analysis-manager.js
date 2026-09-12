@@ -672,7 +672,22 @@ const AnalysisManager = {
                     
                     // Restaurar estado completo da aplicação
                     appState.parcelaNome = result.parcela;
-                    appState.analysisResults = result.analysis_results || [];
+                    // BUGFIX: "editar polígonos de subparcela importada -> imagem
+                    // não encontrada". result.subparcela vem de uma chave de dict
+                    // JSON (json.loads sempre devolve chaves como STRING, ex.:
+                    // "1"), mas syncWithBackend() (fluxo normal, sem ZIP) sempre
+                    // guarda esse campo como Number via parseInt(). Os botões
+                    // "Editar"/onclick embutem o valor como literal numérico no
+                    // HTML de qualquer forma, então openImageViewer() sempre
+                    // recebia um Number - comparado com "===" contra este
+                    // r.subparcela em formato String, nunca batia, e
+                    // appState.analysisResults.findIndex(...) retornava -1 pra
+                    // TODA subparcela vinda de um ZIP importado. Normaliza aqui,
+                    // na mesma forma que syncWithBackend() usa.
+                    appState.analysisResults = (result.analysis_results || []).map(r => ({
+                        ...r,
+                        subparcela: isNaN(parseInt(r.subparcela)) ? r.subparcela : parseInt(r.subparcela)
+                    }));
                     appState.uploadedFiles = result.subparcelas || [];
                     
                     // Restaurar espécies

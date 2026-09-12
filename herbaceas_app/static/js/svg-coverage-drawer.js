@@ -45,6 +45,14 @@ const SVGCoverageDrawer = {
     fillOpacity: 0.3,
     strokeWidth: 3,
 
+    // BUGFIX: a aba "Configs" já tinha os controles de grid (checkbox +
+    // sliders de tamanho/espessura) desde antes, mas eles só setavam estas
+    // propriedades - este objeto nunca de fato desenhava um grid, então o
+    // toggle "não fazia nada". Ver createSVG() (grid-group) e renderGrid().
+    gridEnabled: false,
+    gridCellSize: 10,   // % da maior dimensão da imagem
+    gridLineWidth: 1,   // px de TELA (non-scaling-stroke), não px da imagem
+
     // Cores
     colors: {
         subparcela: '#667eea',
@@ -140,6 +148,14 @@ const SVGCoverageDrawer = {
         const speciesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         speciesGroup.id = 'species-group';
         this.svg.appendChild(speciesGroup);
+
+        // Grid de referência (Configs > Grid) - fica acima dos polígonos
+        // salvos mas abaixo do desenho em andamento (draw-group), para não
+        // atrapalhar quem está desenhando.
+        const gridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        gridGroup.id = 'grid-group';
+        gridGroup.style.pointerEvents = 'none';
+        this.svg.appendChild(gridGroup);
 
         // Criar grupo para desenho temporário
         const drawGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -1177,6 +1193,63 @@ const SVGCoverageDrawer = {
     render() {
         this.renderSubparcela();
         this.renderSpecies();
+        this.renderGrid();
+
+        // BUGFIX: o SVG só ficava visível (display:block) quando já havia
+        // algum polígono desenhado (ver loadSavedData). Isso deixava o toggle
+        // "Grid" sem efeito nenhum justamente no caso mais útil - referência
+        // para desenhar a área 100% pela primeira vez, quando ainda não há
+        // NENHUM polígono na subparcela.
+        if (!this.svg) return;
+        const hasPolygons = !!this.subparcelaPolygon || Object.keys(this.speciesPolygons).length > 0;
+        if (this.gridEnabled || hasPolygons || this.drawMode) {
+            this.svg.style.display = 'block';
+        } else {
+            this.svg.style.display = 'none';
+        }
+    },
+
+    renderGrid() {
+        if (!this.svg) return;
+        const group = this.svg.querySelector('#grid-group');
+        if (!group) return;
+        group.innerHTML = '';
+
+        if (!this.gridEnabled) return;
+
+        const w = this.image?.naturalWidth;
+        const h = this.image?.naturalHeight;
+        if (!w || !h) return;
+
+        // % da maior dimensão vira o tamanho da célula, em pixels da imagem
+        // (espaço do viewBox) - assim uma foto retrato e uma paisagem usam a
+        // mesma escala percentual de célula.
+        const step = Math.max(1, (Math.max(w, h) * this.gridCellSize) / 100);
+        const svgNS = 'http://www.w3.org/2000/svg';
+
+        const makeLine = (x1, y1, x2, y2) => {
+            const line = document.createElementNS(svgNS, 'line');
+            line.setAttribute('x1', x1);
+            line.setAttribute('y1', y1);
+            line.setAttribute('x2', x2);
+            line.setAttribute('y2', y2);
+            line.setAttribute('stroke', '#ffffff');
+            line.setAttribute('stroke-opacity', '0.6');
+            line.setAttribute('stroke-width', this.gridLineWidth);
+            // non-scaling-stroke: espessura em pixels de TELA, não do
+            // viewBox - sem isso, numa foto de 3000px de largura uma
+            // espessura "5" (o máximo do slider) fica praticamente
+            // invisível, o que também parecia "o grid não funciona".
+            line.setAttribute('vector-effect', 'non-scaling-stroke');
+            return line;
+        };
+
+        for (let x = step; x < w; x += step) {
+            group.appendChild(makeLine(x, 0, x, h));
+        }
+        for (let y = step; y < h; y += step) {
+            group.appendChild(makeLine(0, y, w, y));
+        }
     },
 
     cancelDrawing() {
@@ -1867,6 +1940,19 @@ const SVGCoverageDrawer = {
             notify('success', `✅ Importadas ${areasImportadas} área(s) de ${especiesComAreas} espécie(s) da IA`);
         } else {
             notify('warning', '⚠️ Nenhuma área detectada pela IA foi encontrada. A IA pode não ter retornado polígonos ou os dados não estão no formato esperado.');
+        }
+
+        // PEDIDO: "o gerenciamento de espécies precisa capturar mudanças... por
+        // importação de polígonos (ia ou exportados)". Import EXPLÍCITO (botão
+        // "🤖 Importar Áreas IA", options.silent falso) mudava polígonos que
+        // podem alterar a cobertura calculada, mas cobertura/tabela de
+        // espécies/análises só se atualizavam se o usuário clicasse
+        // "🔄 Recalcular" manualmente depois. A importação silenciosa que
+        // roda sozinha ao abrir o editor (loadSavedData -> onlyMissing:true)
+        // fica de fora de propósito: ali a cobertura já veio certa da análise
+        // original, e recalcular sozinha mudaria números sem o usuário pedir.
+        if (!options.silent && areasImportadas > 0 && typeof recalculateCoverageWrapper === 'function') {
+            recalculateCoverageWrapper();
         }
 
         console.log(`🤖 Importação concluída: ${areasImportadas} áreas de ${especiesComAreas} espécies`);

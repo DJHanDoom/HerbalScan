@@ -2255,8 +2255,17 @@ async function handleEditSubmit(e) {
     }
 }
 
-// Unificar espécies selecionadas
-async function mergeSelectedSpecies() {
+// Unificar espécies selecionadas - modal integrado ao modal de subdivisão
+// BUGFIX: "o sistema de unificação acontece por prompt ao invés de modal" -
+// eram 4 window.prompt() em cascata (nome, gênero, espécie, família), sem
+// como cancelar no meio nem validar antes de mandar pro servidor. Agora
+// reaproveita o mesmo #split-modal/#split-body do modal de "Subdividir
+// Espécie" (mesmo z-index 10500, mesmo overlay), só trocando o título e o
+// conteúdo - fica um único "modal de gerenciamento de espécies" com dois
+// modos, como pedido.
+let mergeModalState = { apelidos: [] };
+
+function mergeSelectedSpecies() {
     const checkboxes = document.querySelectorAll('.species-checkbox:checked');
     const selectedSpecies = Array.from(checkboxes).map(cb => cb.value);
 
@@ -2265,19 +2274,75 @@ async function mergeSelectedSpecies() {
         return;
     }
 
-    const novoApelido = prompt('Digite o nome para a espécie unificada:');
-    if (!novoApelido) return;
+    mergeModalState = { apelidos: selectedSpecies };
 
-    const genero = prompt('Gênero (opcional):') || '';
-    const especie = prompt('Espécie (opcional):') || '';
-    const familia = prompt('Família (opcional):') || '';
+    const modal = document.getElementById('split-modal');
+    const body = document.getElementById('split-body');
+    const title = document.getElementById('split-title');
+    if (title) title.textContent = 'Unificar Espécies';
+
+    body.innerHTML = `
+        <div class="split-section">
+            <h3>Espécies selecionadas (${selectedSpecies.length})</h3>
+            <ul style="margin: 0 0 15px 20px;">
+                ${selectedSpecies.map(ap => `<li><strong>${ap}</strong></li>`).join('')}
+            </ul>
+            <p style="color: #718096; margin-bottom: 15px;">
+                As coberturas serão somadas e a altura calculada como média ponderada pela cobertura, subparcela a subparcela em que essas espécies aparecerem juntas.
+            </p>
+            <div class="form-group">
+                <label>Nome da espécie unificada: <span style="color:#c62828;">*</span></label>
+                <input type="text" id="merge-novo-apelido" placeholder="Ex: Poaceae sp.1" oninput="updateMergeValidation()">
+            </div>
+            <div class="form-group">
+                <label>Gênero (opcional):</label>
+                <input type="text" id="merge-genero">
+            </div>
+            <div class="form-group">
+                <label>Espécie (opcional):</label>
+                <input type="text" id="merge-especie">
+            </div>
+            <div class="form-group">
+                <label>Família (opcional):</label>
+                <input type="text" id="merge-familia">
+            </div>
+            <div id="merge-validation-msg" style="margin-top: 10px; font-size: 0.85rem; color: #c62828;">⚠️ Falta: dê um nome para a espécie unificada.</div>
+        </div>
+        <div class="split-actions">
+            <button class="btn btn-secondary" onclick="closeSplitModal()">Cancelar</button>
+            <button class="btn btn-success" id="confirm-merge-btn" onclick="confirmMerge()" disabled>
+                Confirmar Unificação
+            </button>
+        </div>
+    `;
+
+    modal.classList.add('active');
+}
+
+function updateMergeValidation() {
+    const nome = document.getElementById('merge-novo-apelido')?.value.trim();
+    const btn = document.getElementById('confirm-merge-btn');
+    const msg = document.getElementById('merge-validation-msg');
+    if (!btn) return;
+    btn.disabled = !nome;
+    if (msg) msg.textContent = nome ? '' : '⚠️ Falta: dê um nome para a espécie unificada.';
+}
+
+async function confirmMerge() {
+    const novoApelido = document.getElementById('merge-novo-apelido')?.value.trim();
+    if (!novoApelido || mergeModalState.apelidos.length < 2) return;
+
+    const genero = document.getElementById('merge-genero')?.value || '';
+    const especie = document.getElementById('merge-especie')?.value || '';
+    const familia = document.getElementById('merge-familia')?.value || '';
 
     try {
         const response = await fetch('/api/especies/merge', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                especies_origem: selectedSpecies,
+                parcela: appState.parcelaNome,
+                especies_origem: mergeModalState.apelidos,
                 novo_apelido: novoApelido,
                 genero,
                 especie,
@@ -2290,6 +2355,13 @@ async function mergeSelectedSpecies() {
         if (result.success) {
             showAlert('success', result.message);
             await refreshData();
+            // Espécies mudaram em várias subparcelas de uma vez - atualiza
+            // analytics/fitossociologia também (mesmo mecanismo usado por
+            // confirmSplit/edição de polígonos).
+            if (typeof window.notifySubparcelaUpdated === 'function') {
+                window.notifySubparcelaUpdated(null);
+            }
+            closeSplitModal();
         } else {
             showAlert('error', result.error || 'Erro ao unificar espécies');
         }
@@ -2321,13 +2393,17 @@ async function splitSpeciesDialog(subparcela) {
 
     const modal = document.getElementById('split-modal');
     const body = document.getElementById('split-body');
+    const title = document.getElementById('split-title');
+    // O mesmo modal é reaproveitado para "Unificar Espécies" (mergeSelectedSpecies)
+    // - reseta o título aqui sempre que o modo de subdivisão é aberto.
+    if (title) title.textContent = 'Subdividir Espécie';
 
     body.innerHTML = `
         <div class="split-section">
             <h3>1. Selecione a espécie a subdividir</h3>
             <div class="species-select-list">
                 ${especies.map(esp => `
-                    <div class="species-select-item" onclick="selectSpeciesForSplit('${esp.apelido}', ${esp.cobertura}, ${esp.altura}, '${esp.forma_vida}')">
+                    <div class="species-select-item" onclick="selectSpeciesForSplit('${esp.apelido}', ${esp.cobertura}, ${esp.altura}, '${esp.forma_vida}', this)">
                         <div>
                             <strong>${esp.apelido}</strong>
                             <div style="font-size: 0.9rem; color: #718096;">
@@ -2346,16 +2422,24 @@ async function splitSpeciesDialog(subparcela) {
             </p>
             
             <div id="new-species-container"></div>
-            
+
             <button class="btn btn-success" onclick="addNewSpeciesField()" style="width: 100%; margin-top: 10px;">
                 + Adicionar Espécie
             </button>
-            
+
             <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 6px; border-left: 4px solid #ed8936;">
                 <strong>Cobertura atual: <span id="total-coverage">0</span>% / <span id="target-coverage">0</span>%</strong>
             </div>
+
+            <!-- BUGFIX: o botão "Confirmar Subdivisão" ficava desabilitado
+                 sem NENHUMA explicação sempre que faltava o nome de alguma
+                 espécie nova - o campo "Nome da Espécie" não tinha destaque
+                 de obrigatório, então o usuário ajustava só a cobertura (que
+                 podia bater exatamente) e o botão continuava travado sem
+                 pista do porquê. Esta linha mostra exatamente o que falta. -->
+            <div id="split-validation-msg" style="margin-top: 10px; font-size: 0.85rem; color: #c62828;"></div>
         </div>
-        
+
         <div class="split-actions">
             <button class="btn btn-secondary" onclick="closeSplitModal()">Cancelar</button>
             <button class="btn btn-success" id="confirm-split-btn" onclick="confirmSplit()" disabled>
@@ -2367,14 +2451,23 @@ async function splitSpeciesDialog(subparcela) {
     modal.classList.add('active');
 }
 
-function selectSpeciesForSplit(apelido, cobertura, altura, formaVida) {
+function selectSpeciesForSplit(apelido, cobertura, altura, formaVida, sourceEl) {
     // Remover seleção anterior
     document.querySelectorAll('.species-select-item').forEach(item => {
         item.classList.remove('selected');
     });
 
-    // Selecionar novo
-    event.target.closest('.species-select-item').classList.add('selected');
+    // BUGFIX: dependia do global não-padrão `event` (só existe DURANTE um
+    // evento real sendo despachado) - quando chamada programaticamente
+    // (splitSpeciesInViewer, ao abrir a subdivisão de dentro do editor de
+    // polígonos), `event` ficava undefined/desatualizado e isto quebrava com
+    // TypeError antes mesmo de definir splitModalState.selectedSpecies,
+    // deixando o modal travado na etapa 1 sem nenhum aviso. Agora recebe o
+    // elemento de origem explicitamente (passado como `this` no onclick);
+    // chamadas programáticas simplesmente omitem esse argumento.
+    if (sourceEl) {
+        sourceEl.closest('.species-select-item')?.classList.add('selected');
+    }
 
     splitModalState.selectedSpecies = {
         apelido: apelido,
@@ -2397,8 +2490,58 @@ function selectSpeciesForSplit(apelido, cobertura, altura, formaVida) {
     addNewSpeciesField();
 }
 
-function addNewSpeciesField() {
+// BUGFIX: esta função fazia DUAS coisas ao mesmo tempo - criava uma entrada
+// NOVA em splitModalState.newSpecies E desenhava seu card. Isso quebrava
+// renderNewSpeciesFields() (usada ao remover uma espécie): ela chamava esta
+// função uma vez por item RESTANTE só pra redesenhar, mas cada chamada
+// empurrava mais uma entrada em branco no array (o forEach usa o tamanho
+// original do array, então nunca via essas entradas novas) - os cards
+// visíveis ficavam vazios e desconectados dos dados que o usuário já tinha
+// digitado, que continuavam contando na soma escondidos. Separado em duas:
+// renderSpeciesFieldCard() só desenha um índice EXISTENTE (sem mexer no
+// array), addNewSpeciesField() cria a entrada nova e delega o desenho pra ela.
+function renderSpeciesFieldCard(index) {
     const container = document.getElementById('new-species-container');
+    const esp = splitModalState.newSpecies[index];
+    if (!esp) return;
+
+    const item = document.createElement('div');
+    item.className = 'new-species-item';
+    item.innerHTML = `
+        <button class="remove-species-btn" onclick="removeNewSpeciesField(${index})">×</button>
+        <div class="new-species-inputs">
+            <div class="form-input-group">
+                <label>Nome da Espécie: <span style="color:#c62828;">*</span></label>
+                <input type="text" placeholder="Ex: Capim Alto" value="${esp.apelido || ''}"
+                    oninput="updateNewSpecies(${index}, 'apelido', this.value)">
+            </div>
+            <div class="form-input-group">
+                <label>Cobertura (%):</label>
+                <input type="number" min="0" max="100" step="0.1" value="${esp.cobertura || 0}" oninput="updateNewSpecies(${index}, 'cobertura', parseFloat(this.value) || 0)">
+            </div>
+            <div class="form-input-group">
+                <label>Altura (cm):</label>
+                <input type="number" min="0" value="${esp.altura || 0}" oninput="updateNewSpecies(${index}, 'altura', parseFloat(this.value) || 0)">
+            </div>
+            <div class="form-input-group">
+                <label>Forma de Vida:</label>
+                <select onchange="updateNewSpecies(${index}, 'forma_vida', this.value)">
+                    <option value="Erva" ${esp.forma_vida === 'Erva' ? 'selected' : ''}>Erva</option>
+                    <option value="Arbusto" ${esp.forma_vida === 'Arbusto' ? 'selected' : ''}>Arbusto</option>
+                    <option value="Subarbusto" ${esp.forma_vida === 'Subarbusto' ? 'selected' : ''}>Subarbusto</option>
+                    <option value="Plântula" ${esp.forma_vida === 'Plântula' ? 'selected' : ''}>Plântula</option>
+                    <option value="Liana" ${esp.forma_vida === 'Liana' ? 'selected' : ''}>Liana</option>
+                    <option value="Trepadeira" ${esp.forma_vida === 'Trepadeira' ? 'selected' : ''}>Trepadeira</option>
+                    <option value="-" ${esp.forma_vida === '-' ? 'selected' : ''}>-</option>
+                </select>
+            </div>
+        </div>
+    `;
+
+    container.appendChild(item);
+}
+
+function addNewSpeciesField() {
     const index = splitModalState.newSpecies.length;
 
     splitModalState.newSpecies.push({
@@ -2408,39 +2551,7 @@ function addNewSpeciesField() {
         forma_vida: splitModalState.selectedSpecies?.forma_vida || 'Erva'
     });
 
-    const item = document.createElement('div');
-    item.className = 'new-species-item';
-    item.innerHTML = `
-        <button class="remove-species-btn" onclick="removeNewSpeciesField(${index})">×</button>
-        <div class="new-species-inputs">
-            <div class="form-input-group">
-                <label>Nome da Espécie:</label>
-                <input type="text" placeholder="Ex: Capim Alto" oninput="updateNewSpecies(${index}, 'apelido', this.value)">
-            </div>
-            <div class="form-input-group">
-                <label>Cobertura (%):</label>
-                <input type="number" min="0" max="100" step="0.1" value="0" oninput="updateNewSpecies(${index}, 'cobertura', parseFloat(this.value) || 0)">
-            </div>
-            <div class="form-input-group">
-                <label>Altura (cm):</label>
-                <input type="number" min="0" value="${splitModalState.selectedSpecies?.altura || 0}" oninput="updateNewSpecies(${index}, 'altura', parseFloat(this.value) || 0)">
-            </div>
-            <div class="form-input-group">
-                <label>Forma de Vida:</label>
-                <select onchange="updateNewSpecies(${index}, 'forma_vida', this.value)">
-                    <option value="Erva" ${splitModalState.selectedSpecies?.forma_vida === 'Erva' ? 'selected' : ''}>Erva</option>
-                    <option value="Arbusto" ${splitModalState.selectedSpecies?.forma_vida === 'Arbusto' ? 'selected' : ''}>Arbusto</option>
-                    <option value="Subarbusto" ${splitModalState.selectedSpecies?.forma_vida === 'Subarbusto' ? 'selected' : ''}>Subarbusto</option>
-                    <option value="Plântula" ${splitModalState.selectedSpecies?.forma_vida === 'Plântula' ? 'selected' : ''}>Plântula</option>
-                    <option value="Liana" ${splitModalState.selectedSpecies?.forma_vida === 'Liana' ? 'selected' : ''}>Liana</option>
-                    <option value="Trepadeira" ${splitModalState.selectedSpecies?.forma_vida === 'Trepadeira' ? 'selected' : ''}>Trepadeira</option>
-                    <option value="-" ${splitModalState.selectedSpecies?.forma_vida === '-' ? 'selected' : ''}>-</option>
-                </select>
-            </div>
-        </div>
-    `;
-
-    container.appendChild(item);
+    renderSpeciesFieldCard(index);
     updateCoverageTotal();
 }
 
@@ -2449,13 +2560,15 @@ function removeNewSpeciesField(index) {
     renderNewSpeciesFields();
 }
 
+// Redesenha TODOS os cards a partir do estado atual - usada depois de
+// remover uma espécie, pra reindexar os botões/handlers sem perder os
+// valores já digitados nas espécies que permaneceram.
 function renderNewSpeciesFields() {
     const container = document.getElementById('new-species-container');
     container.innerHTML = '';
 
-    splitModalState.newSpecies.forEach((_, index) => {
-        addNewSpeciesField();
-    });
+    splitModalState.newSpecies.forEach((_, index) => renderSpeciesFieldCard(index));
+    updateCoverageTotal();
 }
 
 function updateNewSpecies(index, field, value) {
@@ -2468,19 +2581,46 @@ function updateNewSpecies(index, field, value) {
 function updateCoverageTotal() {
     const total = splitModalState.newSpecies.reduce((sum, esp) => sum + (esp.cobertura || 0), 0);
     const target = splitModalState.selectedSpecies?.cobertura || 0;
+    const totalEl = document.getElementById('total-coverage');
+    if (!totalEl) return; // modal pode já ter sido fechado
 
-    document.getElementById('total-coverage').textContent = total.toFixed(1);
+    totalEl.textContent = total.toFixed(1);
+
+    const coverageMatches = Math.abs(total - target) < 0.1;
+    const hasEnoughSpecies = splitModalState.newSpecies.length >= 2;
+    const missingNames = splitModalState.newSpecies
+        .map((esp, i) => ({ esp, i }))
+        .filter(({ esp }) => !esp.apelido || !esp.apelido.trim());
+    const allNamed = missingNames.length === 0;
 
     const confirmBtn = document.getElementById('confirm-split-btn');
-    const isValid = Math.abs(total - target) < 0.1 &&
-        splitModalState.newSpecies.length >= 2 &&
-        splitModalState.newSpecies.every(esp => esp.apelido.trim() !== '');
+    confirmBtn.disabled = !(coverageMatches && hasEnoughSpecies && allNamed);
 
-    confirmBtn.disabled = !isValid;
+    // BUGFIX: antes o botão só ficava desabilitado, sem dizer por quê - o
+    // usuário podia acertar a cobertura exatamente e continuar sem entender
+    // o que faltava (o nome, nesse caso, sem nenhum destaque de campo
+    // obrigatório). Agora mostra exatamente a(s) pendência(s).
+    const msgEl = document.getElementById('split-validation-msg');
+    if (msgEl) {
+        const pendencias = [];
+        if (!hasEnoughSpecies) pendencias.push('adicione pelo menos 2 espécies novas');
+        if (!allNamed) pendencias.push(`preencha o nome da(s) espécie(s) ${missingNames.map(m => `#${m.i + 1}`).join(', ')}`);
+        if (!coverageMatches) pendencias.push(`a soma das coberturas deve ser ${target.toFixed(2)}% (está em ${total.toFixed(2)}%)`);
+        msgEl.textContent = pendencias.length ? `⚠️ Falta: ${pendencias.join('; ')}.` : '';
+    }
 
-    // Feedback visual
-    const coverageDiv = document.getElementById('total-coverage').parentElement.parentElement;
-    if (Math.abs(total - target) < 0.1) {
+    // Destacar em vermelho os campos de nome vazios, sem esperar o usuário
+    // tentar confirmar pra descobrir qual está faltando
+    document.querySelectorAll('#new-species-container .new-species-item').forEach((item, i) => {
+        const nameInput = item.querySelector('.new-species-inputs input[type="text"]');
+        if (!nameInput) return;
+        const isEmpty = !splitModalState.newSpecies[i]?.apelido?.trim();
+        nameInput.style.borderColor = isEmpty ? '#e53e3e' : '';
+    });
+
+    // Feedback visual da cobertura
+    const coverageDiv = totalEl.parentElement.parentElement;
+    if (coverageMatches) {
         coverageDiv.style.background = '#d4edda';
         coverageDiv.style.borderLeftColor = '#28a745';
     } else if (total > target) {
@@ -2513,6 +2653,20 @@ async function confirmSplit() {
             showAlert('success', result.message);
             await refreshData();
             recalcularEspeciesUnificadas();
+
+            // BUGFIX: quando o modal de subdivisão é aberto de DENTRO do
+            // editor de polígonos (splitSpeciesInViewer), o visualizador
+            // continua aberto por baixo (não fecha mais, ver
+            // splitSpeciesInViewer) - precisa recarregar a lista de espécies
+            // dele aqui, senão o usuário volta pro editor e ainda vê a
+            // espécie antiga (não dividida) até fechar e reabrir manualmente.
+            if (viewerModal?.classList.contains('active') && typeof loadViewerSpecies === 'function') {
+                loadViewerSpecies();
+            }
+            if (typeof window.notifySubparcelaUpdated === 'function') {
+                window.notifySubparcelaUpdated(splitModalState.subparcela);
+            }
+
             closeSplitModal();
         } else {
             showAlert('error', result.error || 'Erro ao subdividir espécie');
@@ -2526,6 +2680,7 @@ function closeSplitModal() {
     const modal = document.getElementById('split-modal');
     modal.classList.remove('active');
     splitModalState = { subparcela: null, selectedSpecies: null, newSpecies: [] };
+    mergeModalState = { apelidos: [] };
 }
 
 // Adicionar espécie a subparcela
@@ -2671,6 +2826,18 @@ async function syncWithBackend() {
 async function refreshData() {
     try {
         await syncWithBackend();
+        // BUGFIX: syncWithBackend() busca appState.especies em
+        // /api/parcela/<parcela>/especies. Se aquele endpoint alguma vez
+        // devolver um formato inesperado (já aconteceu: retornava o dict de
+        // TODAS as parcelas em vez de só a atual, fazendo a tabela mostrar
+        // uma única linha "undefined" logo após unificar espécies), a fonte
+        // de verdade real são as subparcelas em appState.analysisResults -
+        // syncWithBackend() já as atualizou acima. Recalcular aqui garante
+        // que appState.especies fica consistente com elas independentemente
+        // do que aquele endpoint retornou.
+        if (typeof recalcularEspeciesUnificadas === 'function') {
+            recalcularEspeciesUnificadas();
+        }
         // Reexibir
         displayResults();
     } catch (error) {
@@ -3193,7 +3360,13 @@ let viewerDragStart = { x: 0, y: 0 };
 
 function openImageViewer(subparcela, filename) {
     // Encontrar índice da imagem atual
-    currentViewerIndex = appState.analysisResults.findIndex(r => r.subparcela === subparcela);
+    // BUGFIX: comparação estrita (===) falhava sempre que r.subparcela vinha
+    // como String (ex.: projeto restaurado de um ZIP, cuja chave de dict só
+    // pode ser string em JSON) e o argumento `subparcela` como Number (o
+    // onclick sempre embute um literal numérico no HTML) - "1" === 1 é
+    // false. String(...) dos dois lados torna a comparação tolerante ao tipo,
+    // como o resto do app já faz no backend (_find_subparcela_key).
+    currentViewerIndex = appState.analysisResults.findIndex(r => String(r.subparcela) === String(subparcela));
 
     if (currentViewerIndex === -1) {
         showAlert('error', 'Imagem não encontrada');
@@ -3227,7 +3400,7 @@ function createViewerModal() {
                             📤 Exportar ▾
                         </button>
                         <div id="export-dropdown-menu" style="display: none; position: absolute; right: 0; top: 100%; background: #1a202c; border: 1px solid #4a5568; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); z-index: 100; min-width: 180px; margin-top: 5px;">
-                            <button onclick="openImageExportConfig()" style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 16px; background: none; border: none; color: white; text-align: left; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid #2d3748;">
+                            <button onclick="exportViewerImageFromConfig()" title="Usa o formato/qualidade/resolução definidos na aba ⚙️ Configs" style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 16px; background: none; border: none; color: white; text-align: left; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid #2d3748;">
                                 🖼️ Imagem
                             </button>
                             <button onclick="exportViewerPDF()" style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 16px; background: none; border: none; color: white; text-align: left; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid #2d3748;">
@@ -3313,6 +3486,40 @@ function createViewerModal() {
                         <input type="range" id="grid-line-width" min="1" max="5" value="1"
                                oninput="updateGridLineWidth(this.value)"
                                style="width: 80px; cursor: pointer;">
+                    </div>
+                </div>
+
+                <!-- PEDIDO: "incluir nessa aba configs as definições de exportação" -
+                     antes ficavam só num modal separado, aberto ao clicar em
+                     "Exportar > Imagem" (openImageExportConfig, removido). Agora
+                     moram aqui, persistem em localStorage e o botão "Imagem" do
+                     dropdown exporta direto com o que estiver configurado aqui. -->
+                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #4a5568; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: center;">
+                    <div style="grid-column: 1 / -1; color: #a0aec0; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;">
+                        📤 Exportação de Imagem
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label style="color: white; font-size: 0.85rem; font-weight: 600; white-space: nowrap;">Formato:</label>
+                        <select id="cfg-img-format" onchange="updateImageExportConfigFromPanel()" style="flex: 1; min-width: 90px;">
+                            <option value="jpeg">JPEG (menor)</option>
+                            <option value="png">PNG (sem perda)</option>
+                        </select>
+                    </div>
+                    <div id="cfg-img-quality-row" style="display: flex; align-items: center; gap: 8px;">
+                        <label style="color: white; font-size: 0.85rem; font-weight: 600; white-space: nowrap;">
+                            Qualidade: <span id="cfg-img-quality-value">85</span>%
+                        </label>
+                        <input type="range" id="cfg-img-quality" min="50" max="100" step="5"
+                               oninput="updateImageExportConfigFromPanel()" style="width: 80px; cursor: pointer;">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <label style="color: white; font-size: 0.85rem; font-weight: 600; white-space: nowrap;">Resolução:</label>
+                        <select id="cfg-img-maxwidth" onchange="updateImageExportConfigFromPanel()" style="flex: 1; min-width: 90px;">
+                            <option value="0">Original</option>
+                            <option value="3000">Até 3000px</option>
+                            <option value="2000">Até 2000px</option>
+                            <option value="1200">Até 1200px</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -3517,6 +3724,10 @@ function createViewerModal() {
             closeImageViewer();
         }
     });
+
+    // Popular os campos de "Exportação de Imagem" (aba Configs) com o que
+    // ficou salvo da última vez (localStorage) - ver getImageExportConfig().
+    applyImageExportConfigToPanel();
 }
 
 function updateViewerContent() {
@@ -3898,77 +4109,73 @@ async function exportViewerImage(config = {}) {
     }
 }
 
-// Modal de configuração exibido ANTES de gerar a imagem (PEDIDO: "acrescente
-// uma camada de configuração do formato de exportação antes de confirmar e
-// gerar a imagem"). Formato, qualidade (JPEG) e resolução máxima - as 3
-// alavancas que realmente controlam o tamanho final do arquivo.
-function openImageExportConfig() {
+// Configuração de exportação de imagem - PEDIDO: "incluir nessa aba configs
+// as definições de exportação". Antes era um modal separado que só aparecia
+// ao clicar "Exportar > Imagem" (mostrava as opções DEPOIS de já ter clicado
+// em exportar, e não se via/ajustava com antecedência); agora os mesmos 3
+// controles (formato/qualidade/resolução) moram fixos na aba "⚙️ Configs" do
+// visualizador, persistem em localStorage (mesmo padrão de ExportConfig/
+// PromptConfig) e o botão "🖼️ Imagem" do dropdown exporta na hora com o que
+// estiver configurado ali - sem popup extra no meio do caminho.
+const IMAGE_EXPORT_CONFIG_KEY = 'imageExportConfig';
+
+function getImageExportConfig() {
+    const defaults = { format: 'jpeg', quality: 0.85, maxWidth: 2000 };
+    try {
+        const saved = JSON.parse(localStorage.getItem(IMAGE_EXPORT_CONFIG_KEY) || '{}');
+        return { ...defaults, ...saved };
+    } catch (e) {
+        return defaults;
+    }
+}
+
+function saveImageExportConfig(config) {
+    try {
+        localStorage.setItem(IMAGE_EXPORT_CONFIG_KEY, JSON.stringify(config));
+    } catch (e) { /* localStorage indisponível - segue sem persistir */ }
+}
+
+function applyImageExportConfigToPanel() {
+    const config = getImageExportConfig();
+    const formatEl = document.getElementById('cfg-img-format');
+    const qualityEl = document.getElementById('cfg-img-quality');
+    const qualityValueEl = document.getElementById('cfg-img-quality-value');
+    const maxWidthEl = document.getElementById('cfg-img-maxwidth');
+
+    if (formatEl) formatEl.value = config.format;
+    if (qualityEl) qualityEl.value = Math.round(config.quality * 100);
+    if (qualityValueEl) qualityValueEl.textContent = Math.round(config.quality * 100);
+    if (maxWidthEl) maxWidthEl.value = String(config.maxWidth);
+
+    updateImageExportQualityRowVisibility();
+}
+
+function updateImageExportQualityRowVisibility() {
+    const format = document.getElementById('cfg-img-format')?.value;
+    const row = document.getElementById('cfg-img-quality-row');
+    if (row) row.style.display = format === 'png' ? 'none' : 'flex';
+}
+
+function updateImageExportConfigFromPanel() {
+    const format = document.getElementById('cfg-img-format')?.value || 'jpeg';
+    const quality = parseInt(document.getElementById('cfg-img-quality')?.value || '85', 10) / 100;
+    const maxWidth = parseInt(document.getElementById('cfg-img-maxwidth')?.value || '2000', 10) || 0;
+
+    const qualityValueEl = document.getElementById('cfg-img-quality-value');
+    if (qualityValueEl) qualityValueEl.textContent = Math.round(quality * 100);
+
+    updateImageExportQualityRowVisibility();
+    saveImageExportConfig({ format, quality, maxWidth });
+}
+
+// Chamado pelo botão "🖼️ Imagem" do dropdown - exporta direto com a
+// configuração atual (painel Configs ou, se ele nunca foi aberto nesta
+// sessão, o último valor salvo em localStorage / os padrões).
+async function exportViewerImageFromConfig() {
     const dropdown = document.getElementById('export-dropdown-menu');
     if (dropdown) dropdown.style.display = 'none';
 
-    const existing = document.getElementById('image-export-config-modal');
-    if (existing) existing.remove();
-
-    const modal = document.createElement('div');
-    modal.id = 'image-export-config-modal';
-    modal.className = 'modal active';
-    modal.innerHTML = `
-        <div class="modal-content" style="max-width: 440px;">
-            <span class="close" onclick="this.closest('.modal').remove()">&times;</span>
-            <h2>🖼️ Configurar Exportação de Imagem</h2>
-            <p style="color: var(--text-secondary, #5a6a63); font-size: 0.88rem; margin: -8px 0 16px 0; line-height: 1.5;">
-                Fotos em resolução original exportadas em PNG (sem perda) podem passar de 10-15MB.
-                JPEG com resolução reduzida costuma manter a qualidade visual com uma fração do tamanho.
-            </p>
-
-            <div class="form-group">
-                <label for="img-export-format">Formato:</label>
-                <select id="img-export-format" onchange="updateImageExportQualityVisibility()">
-                    <option value="jpeg" selected>JPEG (recomendado - arquivo bem menor)</option>
-                    <option value="png">PNG (sem perda - arquivo grande)</option>
-                </select>
-            </div>
-
-            <div class="form-group" id="img-export-quality-group">
-                <label for="img-export-quality">Qualidade JPEG: <span id="img-export-quality-value">85%</span></label>
-                <input type="range" id="img-export-quality" min="50" max="100" step="5" value="85"
-                    style="width: 100%;"
-                    oninput="document.getElementById('img-export-quality-value').textContent = this.value + '%'">
-            </div>
-
-            <div class="form-group">
-                <label for="img-export-maxwidth">Resolução máxima (lado maior da imagem):</label>
-                <select id="img-export-maxwidth">
-                    <option value="0">Original (sem redução)</option>
-                    <option value="3000">Alta - até 3000px</option>
-                    <option value="2000" selected>Média - até 2000px (recomendado)</option>
-                    <option value="1200">Baixa - até 1200px</option>
-                </select>
-            </div>
-
-            <div class="form-actions">
-                <button class="btn btn-success" onclick="confirmImageExport()">📤 Confirmar e Exportar</button>
-                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">Cancelar</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(modal);
-}
-
-function updateImageExportQualityVisibility() {
-    const format = document.getElementById('img-export-format')?.value;
-    const group = document.getElementById('img-export-quality-group');
-    if (group) group.style.display = format === 'png' ? 'none' : 'block';
-}
-
-async function confirmImageExport() {
-    const format = document.getElementById('img-export-format')?.value || 'jpeg';
-    const quality = parseInt(document.getElementById('img-export-quality')?.value || '85', 10) / 100;
-    const maxWidth = parseInt(document.getElementById('img-export-maxwidth')?.value || '2000', 10) || 0;
-
-    document.getElementById('image-export-config-modal')?.remove();
-
-    await exportViewerImage({ format, quality, maxWidth });
+    await exportViewerImage(getImageExportConfig());
 }
 
 async function exportViewerPDF() {
@@ -5137,18 +5344,16 @@ function splitSpeciesInViewer(especieIndex) {
     const result = appState.analysisResults[currentViewerIndex];
     const especie = result.especies[especieIndex];
 
-    // Fechar o viewer e abrir o modal de split
-    closeImageViewer();
-
-    // Pequeno delay para suavizar a transição
-    setTimeout(() => {
-        splitSpeciesDialog(result.subparcela);
-
-        // Auto-selecionar a espécie
-        setTimeout(() => {
-            selectSpeciesForSplit(especie.apelido, especie.cobertura, especie.altura, especie.forma_vida);
-        }, 100);
-    }, 200);
+    // BUGFIX: antes fechava o editor de polígonos (closeImageViewer()) só
+    // pra poder mostrar o modal de subdivisão por cima, porque o modal de
+    // split tinha z-index MENOR que o do editor (9999 vs 10000 do
+    // .image-viewer-modal) - com os dois abertos ao mesmo tempo, o de split
+    // ficava escondido atrás. Corrigido subindo o z-index do modal de split
+    // (ver .split-modal em style.css), então agora ele sobrepõe o editor sem
+    // precisar fechá-lo - o usuário volta pra exatamente onde estava
+    // (mesmos polígonos abertos) ao confirmar ou cancelar a subdivisão.
+    splitSpeciesDialog(result.subparcela);
+    selectSpeciesForSplit(especie.apelido, especie.cobertura, especie.altura, especie.forma_vida);
 }
 
 // Atualizar botão nas subparcelas para usar o novo modal

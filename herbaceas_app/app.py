@@ -3118,10 +3118,22 @@ def update_especie(apelido_original):
 
 @app.route('/api/especies/merge', methods=['POST'])
 def merge_especies():
-    """Unifica múltiplas espécies em uma única espécie"""
+    """Unifica múltiplas espécies (morfotipos) em uma única, dentro de UMA parcela"""
     data = request.json
+    parcela_nome = data.get('parcela')
     especies_origem = data.get('especies_origem', [])  # Lista de apelidos a unificar
     novo_apelido = data.get('novo_apelido', '')
+
+    # BUGFIX: a rota não recebia/usava `parcela` e iterava TODAS as parcelas
+    # do projeto (analysis_data['parcelas'].items()) procurando apelidos
+    # batendo. Em projetos com mais de uma parcela isso unificava espécies de
+    # parcelas diferentes que só coincidiam de nome, e a espécie nova era
+    # gravada em "primeira parcela por ordem do dict" (arbitrário) em vez da
+    # parcela que o usuário estava editando - deixando a parcela atual sem a
+    # espécie nova em especies_unificadas. Agora, igual às demais rotas de
+    # espécie, tudo fica restrito à parcela informada.
+    if not parcela_nome or parcela_nome not in analysis_data['parcelas']:
+        return jsonify({'error': 'Parcela não encontrada'}), 404
 
     if len(especies_origem) < 2:
         return jsonify({'error': 'Selecione pelo menos 2 espécies para unificar'}), 400
@@ -3139,54 +3151,53 @@ def merge_especies():
         'ocorrencias': 0
     }
 
-    # Atualizar todas as ocorrências nas subparcelas
-    for parcela_nome, parcela in analysis_data['parcelas'].items():
-        for subparcela_num, subparcela in parcela.get('subparcelas', {}).items():
-            especies_atualizadas = []
-            especies_a_mesclar = []
+    parcela = analysis_data['parcelas'][parcela_nome]
 
-            for esp in subparcela['especies']:
-                if esp['apelido'] in especies_origem:
-                    especies_a_mesclar.append(esp)
-                else:
-                    especies_atualizadas.append(esp)
+    # Atualizar todas as ocorrências nas subparcelas DESTA parcela
+    for subparcela_num, subparcela in parcela.get('subparcelas', {}).items():
+        especies_atualizadas = []
+        especies_a_mesclar = []
 
-            # Se houver espécies a mesclar nesta subparcela
-            if especies_a_mesclar:
-                # Somar coberturas e calcular média de alturas
-                cobertura_total = sum(e['cobertura'] for e in especies_a_mesclar)
-                altura_media = sum(e['altura'] * e['cobertura'] for e in especies_a_mesclar) / cobertura_total if cobertura_total > 0 else 0
+        for esp in subparcela.get('especies', []):
+            if esp['apelido'] in especies_origem:
+                especies_a_mesclar.append(esp)
+            else:
+                especies_atualizadas.append(esp)
 
-                # Pegar forma de vida da primeira espécie (ou a mais comum)
-                forma_vida = especies_a_mesclar[0]['forma_vida']
+        # Se houver espécies a mesclar nesta subparcela
+        if especies_a_mesclar:
+            # Somar coberturas e calcular média de alturas
+            cobertura_total = sum(e['cobertura'] for e in especies_a_mesclar)
+            altura_media = sum(e['altura'] * e['cobertura'] for e in especies_a_mesclar) / cobertura_total if cobertura_total > 0 else 0
 
-                # Adicionar espécie mesclada
-                especies_atualizadas.append({
-                    'indice': len(especies_atualizadas) + 1,
-                    'apelido': novo_apelido,
-                    'cobertura': round(cobertura_total, 1),
-                    'altura': round(altura_media, 1),
-                    'forma_vida': forma_vida
-                })
+            # Pegar forma de vida da primeira espécie (ou a mais comum)
+            forma_vida = especies_a_mesclar[0]['forma_vida']
 
-                nova_especie['ocorrencias'] += 1
+            # Adicionar espécie mesclada
+            especies_atualizadas.append({
+                'indice': len(especies_atualizadas) + 1,
+                'apelido': novo_apelido,
+                'cobertura': round(cobertura_total, 1),
+                'altura': round(altura_media, 1),
+                'forma_vida': forma_vida
+            })
 
-            # Reindexar espécies
-            for idx, esp in enumerate(especies_atualizadas, 1):
-                esp['indice'] = idx
+            nova_especie['ocorrencias'] += 1
 
-            subparcela['especies'] = especies_atualizadas
+        # Reindexar espécies
+        for idx, esp in enumerate(especies_atualizadas, 1):
+            esp['indice'] = idx
 
-    # Remover espécies antigas da lista unificada (em todas as parcelas)
-    for parcela_nome, especies_parcela in analysis_data['especies_unificadas'].items():
-        for apelido in especies_origem:
-            if apelido in especies_parcela:
-                del especies_parcela[apelido]
+        subparcela['especies'] = especies_atualizadas
 
-    # Adicionar nova espécie na primeira parcela (compatibilidade)
-    if analysis_data['especies_unificadas']:
-        first_parcela = next(iter(analysis_data['especies_unificadas'].keys()))
-        analysis_data['especies_unificadas'][first_parcela][novo_apelido] = nova_especie
+    if nova_especie['ocorrencias'] == 0:
+        return jsonify({'error': 'Nenhuma das espécies selecionadas foi encontrada nesta parcela'}), 404
+
+    # Remover espécies antigas da lista unificada DESTA parcela e adicionar a nova
+    especies_parcela = analysis_data['especies_unificadas'].setdefault(parcela_nome, {})
+    for apelido in especies_origem:
+        especies_parcela.pop(apelido, None)
+    especies_parcela[novo_apelido] = nova_especie
 
     return jsonify({
         'success': True,
@@ -3210,10 +3221,16 @@ def split_especie():
         return jsonify({'error': 'Parcela não encontrada'}), 404
 
     parcela = analysis_data['parcelas'][parcela_nome]
-    if subparcela_num not in parcela.get('subparcelas', {}):
+    # BUGFIX: subparcela_num vem do JSON (int), mas apos um ciclo de
+    # export/import de ZIP as chaves do dict de subparcelas podem virar str.
+    # As demais rotas do app usam _find_subparcela_key para tolerar isso;
+    # esta rota nao usava, e por isso o botao de "Confirmar Subdivisao"
+    # podia retornar 404 silencioso mesmo com os dados corretos.
+    sub_key = _find_subparcela_key(parcela, subparcela_num)
+    if sub_key is None:
         return jsonify({'error': 'Subparcela não encontrada'}), 404
 
-    subparcela = parcela['subparcelas'][subparcela_num]
+    subparcela = parcela['subparcelas'][sub_key]
 
     # Remover espécie original
     especies_atualizadas = [e for e in subparcela['especies'] if e['apelido'] != apelido_original]
@@ -3279,10 +3296,14 @@ def add_especie():
         return jsonify({'error': 'Parcela não encontrada'}), 404
 
     parcela = analysis_data['parcelas'][parcela_nome]
-    if subparcela_num not in parcela.get('subparcelas', {}):
+    # BUGFIX: mesmo fallback str()/int() de chave usado em split_especie (ver
+    # comentário lá) - faltava aqui e causava 404 falso em subparcelas cuja
+    # chave virou string após round-trip de import/export.
+    sub_key = _find_subparcela_key(parcela, subparcela_num)
+    if sub_key is None:
         return jsonify({'error': 'Subparcela não encontrada'}), 404
 
-    subparcela = parcela['subparcelas'][subparcela_num]
+    subparcela = parcela['subparcelas'][sub_key]
     apelido = nova_especie['apelido']
 
     # Garantir que especies_unificadas está aninhado por parcela
@@ -3336,10 +3357,14 @@ def remove_especie():
         return jsonify({'error': 'Parcela não encontrada'}), 404
 
     parcela = analysis_data['parcelas'][parcela_nome]
-    if subparcela_num not in parcela.get('subparcelas', {}):
+    # BUGFIX: mesmo fallback str()/int() de chave usado em split_especie (ver
+    # comentário lá) - faltava aqui e causava 404 falso em subparcelas cuja
+    # chave virou string após round-trip de import/export.
+    sub_key = _find_subparcela_key(parcela, subparcela_num)
+    if sub_key is None:
         return jsonify({'error': 'Subparcela não encontrada'}), 404
 
-    subparcela = parcela['subparcelas'][subparcela_num]
+    subparcela = parcela['subparcelas'][sub_key]
 
     # Remover espécie
     especies_atualizadas = [e for e in subparcela['especies'] if e['apelido'] != apelido]
@@ -3673,9 +3698,19 @@ def get_especies_unificadas(parcela):
     if parcela not in analysis_data['parcelas']:
         return jsonify({'error': 'Parcela não encontrada'}), 404
 
+    # BUGFIX: retornava analysis_data['especies_unificadas'] INTEIRO (todas as
+    # parcelas do projeto), em vez de só a chave desta parcela. O frontend
+    # (syncWithBackend -> appState.especies) espera um dict {apelido: {...}},
+    # e recebia {nome_parcela: {apelido: {...}}} - Object.values() nisso dá UM
+    # item (o dict da parcela), sem apelido_original/apelido_usuario, exibido
+    # na tabela como uma única linha "undefined". Era mascarado nos fluxos que
+    # chamam recalcularEspeciesUnificadas() logo depois (ela recalcula a
+    # partir das subparcelas e sobrescreve o valor errado), mas em fluxos que
+    # só chamavam refreshData() (ex.: unificar espécies) o dado corrompido
+    # ficava na tela.
     return jsonify({
         'success': True,
-        'especies': analysis_data['especies_unificadas']
+        'especies': analysis_data['especies_unificadas'].get(parcela, {})
     })
 
 def _find_subparcela_key(parcela_data, subparcela_id):
