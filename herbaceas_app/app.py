@@ -4398,6 +4398,15 @@ def update_subparcela_area():
             return jsonify({'error': 'Subparcela não encontrada'}), 404
 
         subparcela_data = parcela_data['subparcelas'][sub_key]
+        # BUGFIX: "Não foi possível salvar a edição: 'str' object does not
+        # support item assignment" - se por qualquer motivo essa subparcela
+        # não é um dict (dado corrompido por alguma importação/formato
+        # antigo), a linha abaixo derrubava com um TypeError críptico. Agora
+        # falha com uma mensagem acionável e loga o valor real pra
+        # diagnosticar a causa, em vez de um 500 opaco.
+        if not isinstance(subparcela_data, dict):
+            print(f"⚠️ subparcela '{sub_key}' corrompida (tipo {type(subparcela_data).__name__}): {repr(subparcela_data)[:200]}")
+            return jsonify({'error': f'Dados da subparcela {sub_key} estão em formato inesperado ({type(subparcela_data).__name__}). Reimporte o projeto ou refaça a análise desta subparcela.'}), 500
         subparcela_data['area_shape'] = {'type': 'polygon', 'points': clean_pts}
         print(f"✓ area_shape da subparcela {sub_key} atualizada ({len(clean_pts)} pts)")
         recalculate_analysis_data_global(analysis_data)
@@ -4435,9 +4444,16 @@ def update_species_area():
             return jsonify({'error': 'Subparcela não encontrada'}), 404
 
         subparcela_data = parcela_data['subparcelas'][sub_key]
+        # Mesmo bugfix de update_subparcela_area(): falhar com mensagem clara
+        # em vez de TypeError críptico se o dado estiver corrompido.
+        if not isinstance(subparcela_data, dict):
+            print(f"⚠️ subparcela '{sub_key}' corrompida (tipo {type(subparcela_data).__name__}): {repr(subparcela_data)[:200]}")
+            return jsonify({'error': f'Dados da subparcela {sub_key} estão em formato inesperado ({type(subparcela_data).__name__}). Reimporte o projeto ou refaça a análise desta subparcela.'}), 500
 
         # Atualizar área da espécie
         for esp in subparcela_data.get('especies', []):
+            if not isinstance(esp, dict):
+                continue
             if esp.get('apelido') == especie_nome or esp.get('especie') == especie_nome:
                 esp['area_shapes'] = clean_shapes
                 print(f"✓ Áreas da espécie {especie_nome} atualizadas: {len(clean_shapes)} polígonos (0..100)")
@@ -5846,29 +5862,34 @@ def get_reference_species():
 
 def recalculate_analysis_data_global(analysis_content):
     """
-    Recalcula as estatísticas unificadas (cobertura, ocorrências) 
+    Recalcula as estatísticas unificadas (cobertura, ocorrências)
     baseado nos dados das subparcelas.
     Helper GLOBAL para ser usado em qualquer endpoint.
     """
     especies_unificadas = analysis_content.get('especies_unificadas', {})
-    subparcelas = analysis_content.get('subparcelas', {})
-    
+    # BUGFIX: lia analysis_content.get('subparcelas', {}) - mas quem chama
+    # esta função sempre passa `analysis_data` (o dict raiz da sessão), cujo
+    # ÚNICO formato real é analysis_data['parcelas'][parcela]['subparcelas']
+    # (ver _get_analysis_data). Não existe 'subparcelas' no nível raiz, então
+    # esse .get() sempre voltava {} e o loop de reagregação abaixo era um
+    # no-op silencioso: TODA chamada (a cada edição de polígono) zerava
+    # cobertura/ocorrencias de especies_unificadas para TODAS as parcelas e
+    # NUNCA restaurava os valores certos.
+    parcelas = analysis_content.get('parcelas', {})
+
     # Se não houver dados, não há o que recalcular
-    if not especies_unificadas and not subparcelas:
+    if not especies_unificadas and not parcelas:
         return False
-        
-    # Resetar contadores nas espécies unificadas
-    # Estrutura unificada: { 'Apelido': { cobertura: 0, ocorrencias: 0, ... } }
-    # Se for aninhada (por parcela), iterar e resetar
-    # Helper para detectar se é dict de espécie ou dict de parcelas
+
+    # Estrutura unificada aninhada por parcela: { 'ParcelaX': { 'Apelido': {...} } }
     is_nested = False
     if especies_unificadas:
         first_val = next(iter(especies_unificadas.values()))
         if isinstance(first_val, dict) and 'apelido_original' not in first_val:
-            is_nested = True # É aninhado por parcela
+            is_nested = True  # É aninhado por parcela
 
     if is_nested:
-        for parcela_key, species_dict in especies_unificadas.items():
+        for species_dict in especies_unificadas.values():
             for sp in species_dict.values():
                 sp['cobertura'] = 0
                 sp['ocorrencias'] = 0
@@ -5876,33 +5897,32 @@ def recalculate_analysis_data_global(analysis_content):
         for sp in especies_unificadas.values():
             sp['cobertura'] = 0
             sp['ocorrencias'] = 0
-    
-    # Re-agregar dados das subparcelas
-    for sub in subparcelas.values():
-        for esp in sub.get('especies', []):
-            apelido = esp.get('apelido')
-            cobertura = float(esp.get('cobertura', 0))
-            
-            if not apelido: continue
-            
-            target_sp = None
-            
-            if is_nested:
-                    # Assumindo apenas uma parcela por arquivo JSON de análise típica, 
-                    # ou tentando encontrar em qual parcela está.
-                    # Simplificação: varrer todas as parcelas unificadas
-                    for parcela_key, species_dict in especies_unificadas.items():
-                        if apelido in species_dict:
-                            target_sp = species_dict[apelido]
-                            break
-                    # Se não achou, talvez precise criar (mas aqui estamos apenas atualizando existentes)
-            else:
-                if apelido in especies_unificadas:
-                    target_sp = especies_unificadas[apelido]
-                    
-            if target_sp:
-                target_sp['cobertura'] += cobertura
-                target_sp['ocorrencias'] += 1
+
+    # Re-agregar dados das subparcelas de cada parcela, na lista de espécies
+    # unificadas DA MESMA parcela (apelidos não são únicos entre parcelas).
+    for parcela_nome, parcela_obj in parcelas.items():
+        if not isinstance(parcela_obj, dict):
+            continue
+        species_dict = especies_unificadas.get(parcela_nome, {}) if is_nested else especies_unificadas
+
+        for sub in parcela_obj.get('subparcelas', {}).values():
+            if not isinstance(sub, dict):
+                continue
+            for esp in sub.get('especies', []):
+                if not isinstance(esp, dict):
+                    continue
+                apelido = esp.get('apelido')
+                if not apelido:
+                    continue
+                try:
+                    cobertura = float(esp.get('cobertura', 0))
+                except (TypeError, ValueError):
+                    cobertura = 0
+
+                target_sp = species_dict.get(apelido) if isinstance(species_dict, dict) else None
+                if target_sp:
+                    target_sp['cobertura'] += cobertura
+                    target_sp['ocorrencias'] += 1
 
     # Calcular médias se necessário (ex: altura) - implementação futura
     return True
