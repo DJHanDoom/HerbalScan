@@ -3227,8 +3227,8 @@ function createViewerModal() {
                             📤 Exportar ▾
                         </button>
                         <div id="export-dropdown-menu" style="display: none; position: absolute; right: 0; top: 100%; background: #1a202c; border: 1px solid #4a5568; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); z-index: 100; min-width: 180px; margin-top: 5px;">
-                            <button onclick="exportViewerImage()" style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 16px; background: none; border: none; color: white; text-align: left; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid #2d3748;">
-                                🖼️ Imagem (PNG)
+                            <button onclick="openImageExportConfig()" style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 16px; background: none; border: none; color: white; text-align: left; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid #2d3748;">
+                                🖼️ Imagem
                             </button>
                             <button onclick="exportViewerPDF()" style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 16px; background: none; border: none; color: white; text-align: left; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid #2d3748;">
                                 📄 Relatório (PDF)
@@ -3857,19 +3857,35 @@ function toggleExportDropdown() {
     }
 }
 
-async function exportViewerImage() {
+// PEDIDO: exportar em PNG na resolução original gerava arquivos de ~14MB
+// (PNG é sem perda; fotos de celular hoje passam de 4000px de largura).
+// Agora aceita a configuração escolhida em openImageExportConfig() -
+// formato (jpeg comprime MUITO melhor fotos reais que png), qualidade e
+// resolução máxima. Chamado sem argumento (compatibilidade) mantém o
+// comportamento antigo (PNG, resolução original).
+async function exportViewerImage(config = {}) {
+    const format = config.format === 'jpeg' ? 'jpeg' : 'png';
+    const quality = typeof config.quality === 'number' ? config.quality : 0.9;
+    const maxWidthPx = config.maxWidth || 0;
+
     try {
         showAlert('info', 'Gerando imagem... Aguarde.');
 
-        const canvas = await generateViewerCanvas();
+        const canvas = await generateViewerCanvas(maxWidthPx);
         if (!canvas) throw new Error('Falha ao gerar canvas');
+
+        const mime = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+        const ext = format === 'jpeg' ? 'jpg' : 'png';
+        // toDataURL ignora o 2º argumento pra PNG (sempre sem perda) - só
+        // faz diferença real pra JPEG, mas não custa nada passar sempre.
+        const dataUrl = canvas.toDataURL(mime, quality);
 
         // Criar link de download
         const link = document.createElement('a');
-        const filename = `${appState.parcelaNome}_subparcela_${appState.analysisResults[currentViewerIndex].subparcela}_analise.png`;
+        const filename = `${appState.parcelaNome}_subparcela_${appState.analysisResults[currentViewerIndex].subparcela}_analise.${ext}`;
 
         link.download = filename;
-        link.href = canvas.toDataURL('image/png');
+        link.href = dataUrl;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -3880,6 +3896,79 @@ async function exportViewerImage() {
         console.error('Erro ao exportar imagem:', error);
         showAlert('error', 'Erro ao exportar imagem: ' + error.message);
     }
+}
+
+// Modal de configuração exibido ANTES de gerar a imagem (PEDIDO: "acrescente
+// uma camada de configuração do formato de exportação antes de confirmar e
+// gerar a imagem"). Formato, qualidade (JPEG) e resolução máxima - as 3
+// alavancas que realmente controlam o tamanho final do arquivo.
+function openImageExportConfig() {
+    const dropdown = document.getElementById('export-dropdown-menu');
+    if (dropdown) dropdown.style.display = 'none';
+
+    const existing = document.getElementById('image-export-config-modal');
+    if (existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'image-export-config-modal';
+    modal.className = 'modal active';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 440px;">
+            <span class="close" onclick="this.closest('.modal').remove()">&times;</span>
+            <h2>🖼️ Configurar Exportação de Imagem</h2>
+            <p style="color: var(--text-secondary, #5a6a63); font-size: 0.88rem; margin: -8px 0 16px 0; line-height: 1.5;">
+                Fotos em resolução original exportadas em PNG (sem perda) podem passar de 10-15MB.
+                JPEG com resolução reduzida costuma manter a qualidade visual com uma fração do tamanho.
+            </p>
+
+            <div class="form-group">
+                <label for="img-export-format">Formato:</label>
+                <select id="img-export-format" onchange="updateImageExportQualityVisibility()">
+                    <option value="jpeg" selected>JPEG (recomendado - arquivo bem menor)</option>
+                    <option value="png">PNG (sem perda - arquivo grande)</option>
+                </select>
+            </div>
+
+            <div class="form-group" id="img-export-quality-group">
+                <label for="img-export-quality">Qualidade JPEG: <span id="img-export-quality-value">85%</span></label>
+                <input type="range" id="img-export-quality" min="50" max="100" step="5" value="85"
+                    style="width: 100%;"
+                    oninput="document.getElementById('img-export-quality-value').textContent = this.value + '%'">
+            </div>
+
+            <div class="form-group">
+                <label for="img-export-maxwidth">Resolução máxima (lado maior da imagem):</label>
+                <select id="img-export-maxwidth">
+                    <option value="0">Original (sem redução)</option>
+                    <option value="3000">Alta - até 3000px</option>
+                    <option value="2000" selected>Média - até 2000px (recomendado)</option>
+                    <option value="1200">Baixa - até 1200px</option>
+                </select>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn btn-success" onclick="confirmImageExport()">📤 Confirmar e Exportar</button>
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">Cancelar</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function updateImageExportQualityVisibility() {
+    const format = document.getElementById('img-export-format')?.value;
+    const group = document.getElementById('img-export-quality-group');
+    if (group) group.style.display = format === 'png' ? 'none' : 'block';
+}
+
+async function confirmImageExport() {
+    const format = document.getElementById('img-export-format')?.value || 'jpeg';
+    const quality = parseInt(document.getElementById('img-export-quality')?.value || '85', 10) / 100;
+    const maxWidth = parseInt(document.getElementById('img-export-maxwidth')?.value || '2000', 10) || 0;
+
+    document.getElementById('image-export-config-modal')?.remove();
+
+    await exportViewerImage({ format, quality, maxWidth });
 }
 
 async function exportViewerPDF() {
@@ -4212,7 +4301,13 @@ async function handleImportFile(input) {
 }
 
 // Helpers Canvas
-function generateViewerCanvas() {
+// PEDIDO: fotos em resolução original (comum vir 4000px+ de largura de
+// celular) geravam PNGs de ~14MB ao exportar. maxWidthPx (0 = tamanho
+// original) limita o LADO MAIOR da imagem exportada - um único ctx.scale()
+// reescala o desenho da foto E dos polígonos por cima juntos, sem precisar
+// recalcular as coordenadas de cada ponto (que continuam em espaço
+// "natural" da imagem, como sempre foram).
+function generateViewerCanvas(maxWidthPx = 0) {
     return new Promise((resolve, reject) => {
         const imgElement = document.getElementById('viewer-image');
         if (!imgElement) return reject(new Error('Imagem não encontrada'));
@@ -4223,12 +4318,23 @@ function generateViewerCanvas() {
         img.src = imgElement.src;
 
         img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.naturalWidth;
-            canvas.height = img.naturalHeight;
-            const ctx = canvas.getContext('2d');
+            const naturalW = img.naturalWidth;
+            const naturalH = img.naturalHeight;
 
-            // 1. Desenhar Imagem
+            let scale = 1;
+            if (maxWidthPx > 0) {
+                const largerSide = Math.max(naturalW, naturalH);
+                if (largerSide > maxWidthPx) scale = maxWidthPx / largerSide;
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(naturalW * scale));
+            canvas.height = Math.max(1, Math.round(naturalH * scale));
+            const ctx = canvas.getContext('2d');
+            ctx.scale(scale, scale);
+
+            // 1. Desenhar Imagem (em coordenadas naturais - o ctx.scale acima
+            // já encolhe o resultado pro tamanho final do canvas)
             ctx.drawImage(img, 0, 0);
 
             // 2. Desenhar Polígonos (se o Drawer tiver dados)
