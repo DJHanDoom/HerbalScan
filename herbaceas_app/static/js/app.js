@@ -3500,7 +3500,7 @@ function createViewerModal() {
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <label style="color: white; font-size: 0.85rem; font-weight: 600; white-space: nowrap;">Formato:</label>
-                        <select id="cfg-img-format" onchange="updateImageExportConfigFromPanel()" style="flex: 1; min-width: 90px;">
+                        <select id="cfg-img-format" onchange="updateImageExportConfigFromPanel()" style="flex: 1; min-width: 90px; padding: 4px; border-radius: 4px; border: 2px solid #4a5568; background: #2d3748; color: white;">
                             <option value="jpeg">JPEG (menor)</option>
                             <option value="png">PNG (sem perda)</option>
                         </select>
@@ -3514,7 +3514,7 @@ function createViewerModal() {
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <label style="color: white; font-size: 0.85rem; font-weight: 600; white-space: nowrap;">Resolução:</label>
-                        <select id="cfg-img-maxwidth" onchange="updateImageExportConfigFromPanel()" style="flex: 1; min-width: 90px;">
+                        <select id="cfg-img-maxwidth" onchange="updateImageExportConfigFromPanel()" style="flex: 1; min-width: 90px; padding: 4px; border-radius: 4px; border: 2px solid #4a5568; background: #2d3748; color: white;">
                             <option value="0">Original</option>
                             <option value="3000">Até 3000px</option>
                             <option value="2000">Até 2000px</option>
