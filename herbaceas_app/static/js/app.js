@@ -4930,8 +4930,18 @@ async function analyzeMoreSpecies() {
             loadViewerSpecies();
 
             // Atualizar visualização principal
+            // BUGFIX: displayEspecies() não existe (nunca existiu nesse
+            // arquivo - a função certa é displaySpeciesTable()); toda vez
+            // que a IA encontrava espécies novas aqui, o ReferenceError
+            // interrompia a execução ANTES do showAlert de sucesso e do
+            // fechamento do formulário, então "adicionar novas espécies com
+            // análise de IA" sempre terminava em erro silencioso no console.
             displaySubparcelas();
-            displayEspecies();
+            displaySpeciesTable();
+            recalcularEspeciesUnificadas();
+            if (typeof window.notifySubparcelaUpdated === 'function') {
+                window.notifySubparcelaUpdated(result.subparcela);
+            }
 
             // Fechar formulário
             toggleAddSpeciesForm();
