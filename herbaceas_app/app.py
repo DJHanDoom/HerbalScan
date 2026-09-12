@@ -533,6 +533,88 @@ def fix_malformed_json(text, json_error):
     return text
 
 
+def _load_reference_species(enabled=True):
+    """Carrega a lista de espécies de referência definida pelo usuário
+    (reference_species.json, gerenciada via /api/reference-species) com
+    TODOS os campos - não só o apelido, mas também gênero/família/espécie e
+    a descrição morfológica (campo 'observacoes'), usada pelo prompt para
+    tentar LOCALIZAR essas espécies especificamente na imagem (ver
+    _build_reference_species_block em prompt_templates.py), não apenas
+    reaproveitar o nome se notar uma semelhança por acaso.
+
+    `enabled=False` pula o carregamento e retorna [] - controlado pelo
+    toggle "Usar espécies de referência" no topo do modal de configuração de
+    prompt (template_config['params']['use_reference_species']). Antes desta
+    função, cada um dos 4 pontos que chamam a IA (análise principal,
+    "adicionar fotos", reanalisar, detectar espécies adicionais) tinha sua
+    própria cópia (parcial ou nenhuma) dessa lógica - reanalisar e detectar
+    espécies adicionais não incluíam a lista de referência de jeito nenhum.
+    """
+    if not enabled:
+        return []
+
+    species = []
+    try:
+        ref_file = os.path.join(os.path.dirname(__file__), 'reference_species.json')
+        if os.path.exists(ref_file):
+            with open(ref_file, 'r', encoding='utf-8') as f:
+                ref_data = json.load(f)
+
+                # Suportar ambos os formatos: {species: [...]} ou [...]
+                if isinstance(ref_data, dict):
+                    raw_list = ref_data.get('species', [])
+                elif isinstance(ref_data, list):
+                    raw_list = ref_data
+                else:
+                    raw_list = []
+
+                for sp in raw_list:
+                    if isinstance(sp, dict) and sp.get('apelido'):
+                        species.append({
+                            'apelido': sp['apelido'],
+                            'genero': sp.get('genero', ''),
+                            'familia': sp.get('familia', ''),
+                            'especie': sp.get('especie', ''),
+                            'observacoes': sp.get('observacoes', ''),
+                        })
+                    elif isinstance(sp, str) and sp:
+                        species.append({'apelido': sp, 'genero': '', 'familia': '', 'especie': '', 'observacoes': ''})
+
+                if species:
+                    print(f"📚 Espécies de referência carregadas: {[s['apelido'] for s in species]}")
+    except Exception as e:
+        print(f"⚠️ Erro ao carregar espécies de referência: {e}")
+
+    return species
+
+
+def _apply_reference_species(template_config, existing_apelidos):
+    """Aplica a lista de espécies de referência (se habilitada) a
+    template_config['params'], somando com os apelidos já existentes desta
+    sessão pra padronização de nomes, e anexando a lista completa (com
+    descrição morfológica) pra busca dirigida no prompt.
+
+    Uso: reference_apelidos = _apply_reference_species(template_config, existing_apelidos)
+    """
+    if template_config.get('params') is None:
+        template_config['params'] = {}
+    params = template_config['params']
+
+    use_reference = params.get('use_reference_species', True)
+    reference_species = _load_reference_species(enabled=use_reference)
+    reference_apelidos = [sp['apelido'] for sp in reference_species]
+
+    all_apelidos = list(set(existing_apelidos + reference_apelidos))
+    if all_apelidos:
+        params['existing_species'] = all_apelidos
+
+    if reference_species:
+        params['reference_species_full'] = reference_species
+        params['reference_species_mode'] = params.get('reference_species_mode', 'include')
+
+    return reference_apelidos
+
+
 def _map_entity_type_to_life_form(entity_type):
     """
     Mapeia tipos de entidade de paisagem para formas de vida equivalentes.
@@ -2417,45 +2499,12 @@ def analyze_parcela(parcela):
             try:
                 # Obter apelidos existentes para padronização (aninhado por parcela)
                 existing_apelidos = list(analysis_data['especies_unificadas'].get(parcela, {}).keys())
-                
-                # Carregar espécies de referência
-                reference_apelidos = []
-                try:
-                    ref_file = os.path.join(os.path.dirname(__file__), 'reference_species.json')
-                    if os.path.exists(ref_file):
-                        with open(ref_file, 'r', encoding='utf-8') as f:
-                            ref_data = json.load(f)
-                            
-                            # Suportar ambos os formatos: {species: [...]} ou [...]
-                            if isinstance(ref_data, dict):
-                                ref_species = ref_data.get('species', [])
-                            elif isinstance(ref_data, list):
-                                ref_species = ref_data
-                            else:
-                                ref_species = []
-                            
-                            # Extrair apelidos
-                            for sp in ref_species:
-                                if isinstance(sp, dict) and sp.get('apelido'):
-                                    reference_apelidos.append(sp['apelido'])
-                                elif isinstance(sp, str):
-                                    reference_apelidos.append(sp)
-                            
-                            if reference_apelidos:
-                                print(f"📚 Espécies de referência carregadas: {reference_apelidos}")
-                except Exception as e:
-                    print(f"⚠️ Erro ao carregar espécies de referência: {e}")
-                
-                # Combinar apelidos existentes + referências (sem duplicatas)
-                all_apelidos = list(set(existing_apelidos + reference_apelidos))
-                
-                if len(all_apelidos) > 0:
-                    print(f"Apelidos para padronização: {all_apelidos}")
-                    # Adicionar aos parâmetros do template
-                    if template_config.get('params') is None:
-                        template_config['params'] = {}
-                    template_config['params']['existing_species'] = all_apelidos
-                
+
+                # Espécies de referência (toggle "Usar espécies de referência"
+                # no modal de config de prompt) + apelidos já vistos nesta
+                # parcela - ver _apply_reference_species().
+                _apply_reference_species(template_config, existing_apelidos)
+
                 # Analisar imagem com IA selecionada (com retry se retornar vazio)
                 max_retries = 2
                 analysis = None
@@ -2785,43 +2834,10 @@ def analyze_additional_images():
     
     # Obter apelidos existentes para padronização (aninhado por parcela)
     existing_apelidos = list(analysis_data['especies_unificadas'].get(parcela_nome, {}).keys())
-    
-    # Carregar espécies de referência
-    reference_apelidos = []
-    try:
-        ref_file = os.path.join(os.path.dirname(__file__), 'reference_species.json')
-        if os.path.exists(ref_file):
-            with open(ref_file, 'r', encoding='utf-8') as f:
-                ref_data = json.load(f)
-                
-                # Suportar ambos os formatos: {species: [...]} ou [...]
-                if isinstance(ref_data, dict):
-                    ref_species = ref_data.get('species', [])
-                elif isinstance(ref_data, list):
-                    ref_species = ref_data
-                else:
-                    ref_species = []
-                
-                # Extrair apelidos
-                for sp in ref_species:
-                    if isinstance(sp, dict) and sp.get('apelido'):
-                        reference_apelidos.append(sp['apelido'])
-                    elif isinstance(sp, str):
-                        reference_apelidos.append(sp)
-                
-                if reference_apelidos:
-                    print(f"📚 Espécies de referência carregadas: {reference_apelidos}")
-    except Exception as e:
-        print(f"⚠️ Erro ao carregar espécies de referência: {e}")
-    
-    # Combinar apelidos existentes + referências (sem duplicatas)
-    all_apelidos = list(set(existing_apelidos + reference_apelidos))
-    
-    if len(all_apelidos) > 0:
-        if prompt_config.get('params') is None:
-            prompt_config['params'] = {}
-        prompt_config['params']['existing_species'] = all_apelidos
-        print(f"Apelidos para padronização: {all_apelidos}")
+
+    # Espécies de referência (toggle "Usar espécies de referência" no modal
+    # de config de prompt) + apelidos já vistos nesta parcela.
+    _apply_reference_species(prompt_config, existing_apelidos)
 
     novas_subparcelas = []
 
@@ -3816,15 +3832,19 @@ def reanalyze_subparcela(parcela, subparcela):
     
     print(f"Modelo: {ai_model}, Template: {template_config.get('template', 'default')}")
     
-    # Obter apelidos existentes para padronização
-    existing_apelidos = list(analysis_data['especies_unificadas'].keys())
-    print(f"Apelidos existentes para referência: {existing_apelidos}")
-    
-    # Adicionar lista de apelidos existentes aos parâmetros customizados
-    if template_config.get('params') is None:
-        template_config['params'] = {}
-    template_config['params']['existing_species'] = existing_apelidos
-    
+    # Obter apelidos existentes para padronização (aninhado por parcela -
+    # BUGFIX: antes lia analysis_data['especies_unificadas'] inteiro, sem
+    # filtrar pela parcela atual, misturando apelidos de OUTRAS parcelas na
+    # padronização desta reanálise)
+    existing_apelidos = list(analysis_data['especies_unificadas'].get(parcela, {}).keys())
+
+    # Espécies de referência (toggle "Usar espécies de referência" no modal
+    # de config de prompt) + apelidos já vistos nesta parcela. BUGFIX: esta
+    # reanálise nunca incluía a lista de referência do usuário - só as
+    # outras 2 chamadas de análise (principal e "adicionar fotos") tinham
+    # essa lógica, cada uma com sua própria cópia.
+    _apply_reference_species(template_config, existing_apelidos)
+
     # Obter versão do Gemini
     gemini_version = request.headers.get('X-Gemini-Version', 'gemini-3.1-flash-lite')
 
@@ -4578,12 +4598,19 @@ def add_species_with_ai(parcela, subparcela):
         template_config = {
             'template': 'default',
             'params': {
-                'existing_species': existing_species,
                 'detect_coordinates': True,
                 'min_species': 1,
                 'max_species': 5  # Limitar a 5 novas espécies
             }
         }
+
+        # Espécies de referência (toggle "Usar espécies de referência" no
+        # modal de config de prompt), somadas às espécies já encontradas
+        # nesta subparcela (existing_species, vindas do frontend). BUGFIX:
+        # esta detecção de espécies adicionais nunca incluía a lista de
+        # referência do usuário, só o que já tinha sido encontrado nesta
+        # própria subparcela.
+        _apply_reference_species(template_config, existing_species)
 
         # Analisar
         if ai_model == 'gemini':

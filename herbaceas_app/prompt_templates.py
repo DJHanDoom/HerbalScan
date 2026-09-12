@@ -375,6 +375,100 @@ PROMPT_TEMPLATES = {
 }
 
 
+def _build_reference_species_block(params):
+    """Monta o bloco de prompt para a lista de espécies de referência
+    definida pelo usuário (reference_species.json via /api/reference-species).
+
+    Diferente de "existing_species" (só nomes, usado pra padronizar apelidos
+    entre subparcelas JÁ analisadas nesta sessão), aqui cada espécie vem com
+    a descrição morfológica completa (params['reference_species_full'], ver
+    app.py) - a IA deve usar essa descrição pra tentar LOCALIZAR ativamente
+    essas espécies específicas na imagem, não só reaproveitar o nome se
+    notar uma semelhança por acaso.
+
+    params['reference_species_mode']:
+      - 'restrict': reportar SOMENTE espécies desta lista (busca direcionada,
+        ignora qualquer outro morfotipo visível)
+      - 'include' (default): procurar por estas primeiro, DEPOIS continuar a
+        análise normal (reporta também qualquer outro morfotipo encontrado)
+
+    Retorna string vazia se não há espécies de referência (toggle desligado
+    ou lista vazia) - nada muda no prompt nesse caso.
+    """
+    ref_species = params.get('reference_species_full') or []
+    if not ref_species:
+        return ""
+
+    ref_lines = []
+    for sp in ref_species:
+        apelido = sp.get('apelido', '').strip()
+        if not apelido:
+            continue
+        taxo_parts = []
+        if sp.get('genero'):
+            taxo_parts.append(f"gênero {sp['genero']}")
+        if sp.get('familia'):
+            taxo_parts.append(f"família {sp['familia']}")
+        if sp.get('especie'):
+            taxo_parts.append(f"espécie {sp['especie']}")
+        taxo = f" ({', '.join(taxo_parts)})" if taxo_parts else ""
+        desc = (sp.get('observacoes') or '').strip()
+        linha = f'   - "{apelido}"{taxo}'
+        if desc:
+            linha += f'\n     Descrição morfológica: {desc}'
+        ref_lines.append(linha)
+
+    if not ref_lines:
+        return ""
+
+    ref_list_txt = "\n".join(ref_lines)
+    mode = params.get('reference_species_mode', 'include')
+
+    if mode == 'restrict':
+        return f"""
+🎯 **ESPÉCIES DE REFERÊNCIA - BUSCA RESTRITA (LEIA COM ATENÇÃO)**
+
+O usuário cadastrou uma lista de espécies conhecidas de interesse. Use a
+descrição morfológica de cada uma para tentar identificá-las especificamente
+nesta imagem:
+
+{ref_list_txt}
+
+⚠️ **MODO RESTRITO ATIVADO - regras obrigatórias:**
+- Reporte SOMENTE morfotipos que correspondam com confiança a uma das
+  espécies listadas acima - compare cor, textura, forma foliar, porte e
+  demais características da descrição morfológica antes de dar como
+  encontrada.
+- NÃO reporte nenhum outro morfotipo/espécie que não esteja nesta lista,
+  mesmo que claramente visível na imagem.
+- Se NENHUMA espécie da lista for encontrada com confiança, retorne a lista
+  de espécies vazia - não force uma correspondência duvidosa nem invente
+  espécies fora da lista.
+- Ao encontrar uma correspondência, use EXATAMENTE o apelido definido acima.
+
+"""
+
+    return f"""
+🎯 **ESPÉCIES DE REFERÊNCIA (busca direcionada + análise completa)**
+
+O usuário cadastrou uma lista de espécies conhecidas de interesse. Antes de
+mais nada, use a descrição morfológica de cada uma para tentar localizá-las
+especificamente nesta imagem:
+
+{ref_list_txt}
+
+- Compare cor, textura, forma foliar, porte e demais características da
+  descrição morfológica antes de dar como encontrada.
+- Ao encontrar uma correspondência confiável, use EXATAMENTE o apelido
+  definido acima.
+- Depois de procurar por essas espécies, continue a análise NORMALMENTE:
+  identifique também QUALQUER OUTRO morfotipo distinto visível na imagem,
+  mesmo que não esteja nesta lista - esta lista é um complemento, não um
+  filtro.
+
+"""
+
+
 def build_prompt(template_name="default", custom_params=None):
     """
     Constrói o prompt baseado em template e parâmetros customizados
@@ -425,6 +519,12 @@ INSTRUÇÕES CRÍTICAS:
 1. **SEJA {'MUITO CONSERVADOR' if params['taxonomic_precision'] == 'conservative' else 'MODERADO' if params['taxonomic_precision'] == 'moderate' else 'DETALHISTA'}** - Identifique {'APENAS o que você vê claramente' if params['taxonomic_precision'] == 'conservative' else 'o máximo de detalhes possível'}
 2. **SEPARE MORFOTIPOS** - Distingua plantas por características visuais {'óbvias' if params['detail_level'] in ['low', 'medium'] else 'detalhadas'}
 """
+
+    # Espécies de referência definidas pelo usuário (busca por descrição
+    # morfológica) - ver _build_reference_species_block(). Vem antes da
+    # padronização por nome (abaixo) porque é uma busca ativa e dirigida,
+    # não uma simples reconciliação de nomenclatura entre subparcelas.
+    prompt += _build_reference_species_block(params)
 
     # Adicionar lista de morfotipos existentes para padronização
     standardization = params.get('standardize_across_subplots', 'moderate')
@@ -1136,7 +1236,12 @@ def build_landscape_prompt(template, params):
 Analise esta imagem aérea/drone de uma área de paisagem para identificar e mapear as seguintes CATEGORIAS DE ENTIDADES:
 
 """
-    
+
+    # Espécies de referência definidas pelo usuário (busca por descrição
+    # morfológica) - mesmo mecanismo do modo herbáceo, ver
+    # _build_reference_species_block().
+    prompt += _build_reference_species_block(params)
+
     # Categorias de entidades ativadas
     if params.get('include_trees', True):
         prompt += """

@@ -55,7 +55,29 @@ const PromptConfig = {
                     <h2>⚙️ Configuração do Prompt de Análise</h2>
                     <button class="prompt-config-close" onclick="PromptConfig.close()">×</button>
                 </div>
-                
+
+                <!-- PEDIDO: controle visível, no topo do modal, se a lista de
+                     espécies de referência (cadastradas em "Espécies de
+                     Referência") deve ser incluída no prompt enviado à IA -
+                     a IA usa a descrição morfológica de cada uma pra tentar
+                     localizá-las especificamente na imagem. -->
+                <div class="prompt-config-refspecies-bar">
+                    <label class="refspecies-toggle">
+                        <input type="checkbox" id="param-use-reference-species" checked>
+                        <span>📚 Usar espécies de referência cadastradas (<span id="refspecies-count">0</span>) no prompt</span>
+                    </label>
+                    <div class="refspecies-mode" id="refspecies-mode-group">
+                        <label>
+                            <input type="radio" name="refspecies-mode" id="refspecies-mode-include" value="include" checked>
+                            Buscar essas + identificar outras espécies também
+                        </label>
+                        <label>
+                            <input type="radio" name="refspecies-mode" id="refspecies-mode-restrict" value="restrict">
+                            Buscar SOMENTE as espécies desta lista
+                        </label>
+                    </div>
+                </div>
+
                 <div class="prompt-config-body">
                     <div class="prompt-config-sidebar">
                         <div class="template-section">
@@ -467,6 +489,13 @@ const PromptConfig = {
             return true;
         };
 
+        // Espécies de referência (toggle no topo do modal)
+        setInputValue('param-use-reference-species', params.use_reference_species !== false, 'checkbox');
+        const refMode = params.reference_species_mode === 'restrict' ? 'restrict' : 'include';
+        setInputValue('refspecies-mode-include', refMode === 'include', 'checkbox');
+        setInputValue('refspecies-mode-restrict', refMode === 'restrict', 'checkbox');
+        this.updateReferenceSpeciesUI();
+
         // Aplicar parâmetros comuns
         setInputValue('param-min-species', params.min_species || 1);
         setInputValue('param-max-species', params.max_species || (analysisMode === 'landscape' ? 30 : 8));
@@ -504,6 +533,26 @@ const PromptConfig = {
         this.updatePreview();
     },
 
+    // Atualiza a contagem de espécies de referência exibida na barra do
+    // topo e habilita/desabilita o seletor de modo conforme o toggle.
+    // Chamado ao abrir o modal e sempre que o toggle muda.
+    updateReferenceSpeciesUI() {
+        const countEl = document.getElementById('refspecies-count');
+        if (countEl) {
+            const count = (typeof ReferenceSpeciesManager !== 'undefined' && Array.isArray(ReferenceSpeciesManager.species))
+                ? ReferenceSpeciesManager.species.length
+                : 0;
+            countEl.textContent = count;
+        }
+
+        const enabled = document.getElementById('param-use-reference-species')?.checked !== false;
+        const modeGroup = document.getElementById('refspecies-mode-group');
+        if (modeGroup) {
+            modeGroup.classList.toggle('disabled', !enabled);
+            modeGroup.querySelectorAll('input').forEach(input => { input.disabled = !enabled; });
+        }
+    },
+
     // Alternar visibilidade dos grupos de modo
     switchModeUI(mode) {
         const herbaceousGroup = document.querySelector('.herbaceous-mode-group');
@@ -521,6 +570,30 @@ const PromptConfig = {
     },
 
     attachEvents() {
+        // Toggle de espécies de referência: além de salvar/atualizar preview
+        // como os demais, precisa habilitar/desabilitar o seletor de modo
+        // (não faz sentido escolher "restrito" vs "incluir" com o toggle
+        // desligado).
+        const useRefEl = document.getElementById('param-use-reference-species');
+        if (useRefEl) {
+            useRefEl.addEventListener('change', () => {
+                this.updateReferenceSpeciesUI();
+                this.manualEdit = false;
+                this.updatePreview();
+                this.saveCurrentConfig();
+            });
+        }
+        ['refspecies-mode-include', 'refspecies-mode-restrict'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('change', () => {
+                    this.manualEdit = false;
+                    this.updatePreview();
+                    this.saveCurrentConfig();
+                });
+            }
+        });
+
         const inputs = [
             'param-min-species', 'param-max-species', 'param-detail-level',
             'param-taxonomic-precision', 'param-include-genus', 'param-include-family',
@@ -565,6 +638,11 @@ const PromptConfig = {
         };
 
         const params = {
+            // Espécies de referência (toggle no topo do modal, ver
+            // createModal()) - se e como a lista cadastrada em "Espécies de
+            // Referência" entra no prompt enviado à IA.
+            use_reference_species: getChecked('param-use-reference-species'),
+            reference_species_mode: document.querySelector('input[name="refspecies-mode"]:checked')?.value || 'include',
             // Common params
             min_species: parseInt(document.getElementById('param-min-species').value),
             max_species: parseInt(document.getElementById('param-max-species').value),
@@ -651,6 +729,11 @@ const PromptConfig = {
 
     open() {
         document.getElementById('prompt-config-modal').classList.add('active');
+
+        // Contagem de espécies de referência pode ter mudado desde a última
+        // vez que o modal foi renderizado (usuário cadastrou/removeu na
+        // tela "Espécies de Referência")
+        this.updateReferenceSpeciesUI();
 
         // Mostrar botão "Aplicar e Reanalisar" se há uma reanálise pendente
         const reanalyzeBtn = document.getElementById('apply-and-reanalyze-btn');
