@@ -1909,3 +1909,63 @@ body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
+
+/* Modal "Configurar Exportação em PDF" (ExportConfig, ver export-config.js) */
+.export-config-content {
+    max-width: 560px;
+}
+
+.export-config-intro {
+    color: var(--text-secondary, #5a6a63);
+    font-size: 0.9rem;
+    margin: -8px 0 18px 0;
+    line-height: 1.5;
+}
+
+.export-config-group {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-color, #DFE6E9);
+}
+
+.export-config-group:last-of-type {
+    border-bottom: none;
+}
+
+.export-config-group h3 {
+    margin: 0 0 12px 0;
+    font-size: 1rem;
+    color: var(--primary-color, #2e5942);
+}
+
+.export-config-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.export-config-row select {
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, #DFE6E9);
+    font-size: 0.9rem;
+}
+
+.export-config-check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.export-config-check input[type="checkbox"] {
+    width: 17px;
+    height: 17px;
+    cursor: pointer;
+    accent-color: var(--primary-color, #2e5942);
+    flex-shrink: 0;
+}

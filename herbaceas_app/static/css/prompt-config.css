@@ -130,6 +130,19 @@
     cursor: not-allowed;
 }
 
+.refspecies-manage-btn {
+    margin-left: auto;
+    padding: 7px 14px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    .refspecies-manage-btn {
+        margin-left: 0;
+    }
+}
+
 @media (max-width: 768px) {
     .prompt-config-refspecies-bar {
         padding: 10px 16px;

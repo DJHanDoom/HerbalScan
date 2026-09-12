@@ -224,7 +224,16 @@ if (elements.exportExcelBtn) {
     elements.exportExcelBtn.addEventListener('click', exportToExcel);
 }
 if (elements.exportPdfBtn) {
-    elements.exportPdfBtn.addEventListener('click', exportToPDF);
+    // PEDIDO: botão agora abre o modal de configuração da exportação
+    // (ExportConfig, ver export-config.js) em vez de gerar o PDF direto -
+    // o próprio modal chama exportToPDF(config) no botão "Gerar PDF".
+    elements.exportPdfBtn.addEventListener('click', () => {
+        if (typeof ExportConfig !== 'undefined') {
+            ExportConfig.open();
+        } else {
+            exportToPDF(); // fallback se o script não carregou por algum motivo
+        }
+    });
 }
 if (elements.exportZipBtn) {
     elements.exportZipBtn.addEventListener('click', exportToZip);
@@ -5624,6 +5633,142 @@ async function buildSubparcelaPhotoWithPolygons(result) {
     }
 }
 
+// PEDIDO: "ficha de detalhes" de cada espécie (a mesma info do modal de
+// detalhes - ver species-details-modal.js) incluída no PDF exportado.
+// Construída fora da tela, com layout próprio pensado pra impressão (não é
+// um screenshot do modal interativo em si - abrir/fechar um modal por
+// espécie seria lento e o modal tem controles/abas que não fazem sentido
+// impressos). Mesma técnica de buildSubparcelaPhotoWithPolygons: monta um
+// bloco invisível fora da tela, tira um "screenshot" dele (html2canvas) e
+// descarta o bloco.
+async function buildSpeciesDetailSheetCanvas(apelido) {
+    const especieUnificada = appState.especies?.[apelido];
+    if (!especieUnificada) return null;
+
+    // Mesma agregação de species-details-modal.js: cobertura/altura média,
+    // mín/máx, e a lista de ocorrências por subparcela.
+    const ocorrencias = [];
+    let totalCobertura = 0;
+    let totalAltura = 0;
+    let totalIndividuos = 0;
+
+    (appState.analysisResults || []).forEach(result => {
+        (result.especies || []).forEach(esp => {
+            if (esp.apelido === apelido || esp.apelido === especieUnificada.apelido_usuario) {
+                ocorrencias.push({
+                    subparcela: result.subparcela,
+                    nomeSubparcela: result.metadata?.nome || `Subparcela ${result.subparcela}`,
+                    cobertura: esp.cobertura || 0,
+                    altura: esp.altura || 0,
+                    forma_vida: esp.forma_vida || '-',
+                    observacoes: esp.observacoes || '',
+                    numero_individuos: esp.numero_individuos || 1,
+                });
+                totalCobertura += (esp.cobertura || 0);
+                totalAltura += (esp.altura || 0);
+                totalIndividuos += (esp.numero_individuos || 1);
+            }
+        });
+    });
+
+    const n = ocorrencias.length;
+    const coberturaMedia = n > 0 ? totalCobertura / n : 0;
+    const alturaMedia = n > 0 ? totalAltura / n : 0;
+    const coberturaMin = n > 0 ? Math.min(...ocorrencias.map(o => o.cobertura)) : 0;
+    const coberturaMax = n > 0 ? Math.max(...ocorrencias.map(o => o.cobertura)) : 0;
+
+    // Fotos de referência salvas pra esta espécie (mesmo endpoint do modal)
+    let photos = [];
+    try {
+        const resp = await fetch(`/api/especies/${encodeURIComponent(apelido)}/photos`);
+        if (resp.ok) {
+            const data = await resp.json();
+            photos = data.photos || [];
+        }
+    } catch (e) { /* sem fotos, segue sem elas */ }
+
+    const taxoParts = [especieUnificada.genero, especieUnificada.especie].filter(Boolean);
+    const taxoLine = [
+        taxoParts.length ? taxoParts.join(' ') : null,
+        especieUnificada.familia ? `(${especieUnificada.familia})` : null,
+    ].filter(Boolean).join(' ');
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed; left:-99999px; top:0; width:1000px; background:#fff; font-family:Arial,Helvetica,sans-serif; padding:24px; box-sizing:border-box; color:#1a202c;';
+    document.body.appendChild(wrap);
+
+    try {
+        const statCard = (label, value) => `
+            <div style="flex:1; min-width:120px; background:#f4f7f2; border-radius:8px; padding:12px 14px; text-align:center;">
+                <div style="font-size:22px; font-weight:700; color:#2e5942;">${value}</div>
+                <div style="font-size:11px; color:#5a6a63; margin-top:2px;">${label}</div>
+            </div>`;
+
+        const ocorrenciasRows = ocorrencias.map(o => `
+            <tr>
+                <td style="padding:6px 8px; border-bottom:1px solid #e2e8f0;">${o.nomeSubparcela}</td>
+                <td style="padding:6px 8px; border-bottom:1px solid #e2e8f0; text-align:center;">${o.cobertura.toFixed(1)}%</td>
+                <td style="padding:6px 8px; border-bottom:1px solid #e2e8f0; text-align:center;">${o.altura > 100 ? (o.altura / 100).toFixed(2) + ' m' : o.altura + ' cm'}</td>
+                <td style="padding:6px 8px; border-bottom:1px solid #e2e8f0; text-align:center;">${o.forma_vida}</td>
+                <td style="padding:6px 8px; border-bottom:1px solid #e2e8f0; text-align:center;">${o.numero_individuos}</td>
+                <td style="padding:6px 8px; border-bottom:1px solid #e2e8f0; font-size:12px; color:#4a5568;">${o.observacoes || '-'}</td>
+            </tr>`).join('');
+
+        const photosHtml = photos.length ? `
+            <div style="margin-top:18px;">
+                <div style="font-weight:700; color:#2e5942; margin-bottom:8px;">📷 Fotos de referência</div>
+                <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                    ${photos.map(p => `<img src="${p.url}" crossorigin="anonymous" style="width:140px; height:140px; object-fit:cover; border-radius:6px; border:1px solid #e2e8f0;">`).join('')}
+                </div>
+            </div>` : '';
+
+        wrap.innerHTML = `
+            <div style="border-bottom:3px solid #2e5942; padding-bottom:10px; margin-bottom:16px;">
+                <div style="font-size:24px; font-weight:700; color:#2e5942;">${especieUnificada.apelido_usuario || apelido}</div>
+                ${taxoLine ? `<div style="font-size:14px; font-style:italic; color:#5a6a63; margin-top:2px;">${taxoLine}</div>` : ''}
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+                ${statCard('Cobertura Média', coberturaMedia.toFixed(1) + '%')}
+                ${statCard('Cobertura Mín / Máx', coberturaMin.toFixed(1) + '% / ' + coberturaMax.toFixed(1) + '%')}
+                ${statCard('Altura Média', alturaMedia > 100 ? (alturaMedia / 100).toFixed(2) + ' m' : alturaMedia.toFixed(0) + ' cm')}
+                ${statCard('Ocorrências', n + ' subparcela(s)')}
+                ${statCard('Total de Indivíduos', totalIndividuos)}
+            </div>
+            ${especieUnificada.observacoes ? `
+                <div style="background:#fffbea; border-left:4px solid #f59e0b; padding:10px 14px; border-radius:4px; margin-bottom:16px; font-size:13px; color:#78530a;">
+                    <strong>Observações / Descrição:</strong> ${especieUnificada.observacoes}
+                </div>` : ''}
+            <div style="font-weight:700; color:#2e5942; margin-bottom:8px;">Ocorrências por Subparcela</div>
+            <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                <thead>
+                    <tr style="background:#eef6f1;">
+                        <th style="padding:6px 8px; text-align:left;">Subparcela</th>
+                        <th style="padding:6px 8px;">Cobertura</th>
+                        <th style="padding:6px 8px;">Altura</th>
+                        <th style="padding:6px 8px;">Forma de Vida</th>
+                        <th style="padding:6px 8px;">Indivíduos</th>
+                        <th style="padding:6px 8px; text-align:left;">Observações</th>
+                    </tr>
+                </thead>
+                <tbody>${ocorrenciasRows || '<tr><td colspan="6" style="padding:10px; text-align:center; color:#999;">Nenhuma ocorrência registrada</td></tr>'}</tbody>
+            </table>
+            ${photosHtml}
+        `;
+
+        // Esperar imagens de referência (se houver) carregarem antes do
+        // screenshot, senão saem em branco no PDF
+        const imgs = Array.from(wrap.querySelectorAll('img'));
+        await Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(res => {
+            img.onload = res;
+            img.onerror = res;
+        })));
+
+        return await html2canvas(wrap, { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false });
+    } finally {
+        wrap.remove();
+    }
+}
+
 // ============================================================
 // Exportação de PDF - REESCRITO 2026-09
 // Versão anterior mandava só números/tabelas para o backend montar um PDF
@@ -5633,7 +5778,18 @@ async function buildSubparcelaPhotoWithPolygons(result) {
 // colando essas imagens em páginas A4 via jsPDF. Fotos, cores, gráficos
 // (canvas do Chart.js) e layout saem idênticos ao que o usuário está vendo.
 // ============================================================
-async function exportToPDF() {
+async function exportToPDF(config) {
+    // PEDIDO: modal de configuração da exportação (ExportConfig, ver
+    // export-config.js) controla quais seções entram no PDF, orientação da
+    // página, etc. Chamado sem argumento (ex: atalho antigo/tecla) usa a
+    // última configuração salva - nunca quebra quem já chamava sem config.
+    config = config || (typeof ExportConfig !== 'undefined' ? ExportConfig.getSavedConfig() : {
+        orientation: 'landscape', include_cover: true, include_summary: true,
+        include_subparcelas: true, include_field_metadata: true,
+        include_species_table: true, include_species_sheets: true,
+        include_analytics: true, include_logo: true
+    });
+
     const btn = elements.exportPdfBtn;
     const originalText = btn.textContent;
 
@@ -5646,11 +5802,11 @@ async function exportToPDF() {
         }
 
         const { jsPDF } = window.jspdf;
-        // PEDIDO: relatório em modo paisagem (A4 297x210mm). Toda a métrica
-        // de layout abaixo é derivada de getWidth()/getHeight(), então
-        // fotos, gráficos e tabelas se ajustam sozinhos à nova proporção -
-        // e os gráficos, que são largos, param de ser espremidos.
-        const pdf = new jsPDF('l', 'mm', 'a4');
+        // PEDIDO: orientação agora é configurável (ExportConfig) - toda a
+        // métrica de layout abaixo é derivada de getWidth()/getHeight(),
+        // então fotos, gráficos e tabelas se ajustam sozinhos à orientação
+        // escolhida.
+        const pdf = new jsPDF(config.orientation === 'portrait' ? 'p' : 'l', 'mm', 'a4');
         const pageWidth = pdf.internal.pageSize.getWidth();
         const pageHeight = pdf.internal.pageSize.getHeight();
         const margin = 10;
@@ -5805,74 +5961,108 @@ async function exportToPDF() {
         const totalSubparcelas = (appState.analysisResults || []).length;
         const totalEspecies = Object.keys(appState.especies || {}).length;
 
-        pdf.setFontSize(22);
-        pdf.setTextColor(46, 89, 66);
-        pdf.setFont(undefined, 'bold');
-        pdf.text('HerbalScan', margin, 22);
-        pdf.setFont(undefined, 'normal');
-        pdf.setFontSize(14);
-        pdf.setTextColor(60, 60, 60);
-        pdf.text('Relatório de Análise de Cobertura Vegetal', margin, 31);
+        if (config.include_cover) {
+            if (config.include_logo !== false) {
+                pdf.setFontSize(22);
+                pdf.setTextColor(46, 89, 66);
+                pdf.setFont(undefined, 'bold');
+                pdf.text('HerbalScan', margin, 22);
+            }
+            pdf.setFont(undefined, 'normal');
+            pdf.setFontSize(14);
+            pdf.setTextColor(60, 60, 60);
+            pdf.text('Relatório de Análise de Cobertura Vegetal', margin, 31);
 
-        pdf.setDrawColor(46, 89, 66);
-        pdf.setLineWidth(0.8);
-        pdf.line(margin, 37, pageWidth - margin, 37);
+            pdf.setDrawColor(46, 89, 66);
+            pdf.setLineWidth(0.8);
+            pdf.line(margin, 37, pageWidth - margin, 37);
 
-        pdf.setFontSize(11);
-        pdf.setTextColor(90, 90, 90);
-        pdf.text(`Parcela: ${appState.parcelaNome}`, margin, 47);
-        pdf.text(`Subparcelas analisadas: ${totalSubparcelas}`, margin, 54);
-        pdf.text(`Espécies/morfotipos identificados: ${totalEspecies}`, margin, 61);
-        pdf.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, margin, 68);
-        cursorY = 78;
-        pageHasContent = true;
+            pdf.setFontSize(11);
+            pdf.setTextColor(90, 90, 90);
+            pdf.text(`Parcela: ${appState.parcelaNome}`, margin, 47);
+            pdf.text(`Subparcelas analisadas: ${totalSubparcelas}`, margin, 54);
+            pdf.text(`Espécies/morfotipos identificados: ${totalEspecies}`, margin, 61);
+            pdf.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, margin, 68);
+            cursorY = 78;
+            pageHasContent = true;
+        }
 
         // 1. Resumo geral (cards de Shannon/Riqueza/Cobertura no topo da tela)
-        btn.textContent = '🔄 Capturando resumo...';
-        addSectionHeading('Resumo Geral');
-        await addElementToPdf(elements.resultsSummary);
+        if (config.include_summary) {
+            btn.textContent = '🔄 Capturando resumo...';
+            // Sem newPage: mantém o comportamento original de ficar na mesma
+            // página da capa quando ela existe (addSectionHeading já quebra
+            // de página sozinho se realmente não couber mais nada).
+            addSectionHeading('Resumo Geral');
+            await addElementToPdf(elements.resultsSummary);
+        }
 
         // 2. Cada subparcela em bloco próprio: foto em resolução PLENA com os
         // polígonos desenhados por cima (não o card recortado da tela, que
         // nunca teve overlay de polígono e cortava fotos em modo retrato
         // numa faixa fina de 220px) + lista de espécies igual à tela.
-        const cards = document.querySelectorAll('#subparcelas-grid .subparcela-card');
-        let cardIdx = 0;
-        for (const card of cards) {
-            cardIdx++;
-            const result = appState.analysisResults[cardIdx - 1];
-            btn.textContent = `🔄 Capturando subparcela ${cardIdx}/${cards.length}...`;
+        if (config.include_subparcelas) {
+            const cards = document.querySelectorAll('#subparcelas-grid .subparcela-card');
+            let cardIdx = 0;
+            for (const card of cards) {
+                cardIdx++;
+                const result = appState.analysisResults[cardIdx - 1];
+                btn.textContent = `🔄 Capturando subparcela ${cardIdx}/${cards.length}...`;
 
-            // BUGFIX: o título usava só o índice do loop ("Subparcela N de M"),
-            // ignorando o nome/código customizado que o usuário definiu para a
-            // subparcela (result.metadata.nome) - por isso nunca aparecia no
-            // PDF. Mesmo formato usado no card da tela (ver displayResults()),
-            // só que em texto puro (addSectionHeading usa pdf.text(), não HTML).
-            const pdfMeta = result?.metadata || {};
-            const pdfSubId = result?.subparcela ?? result?.subparcela_id ?? cardIdx;
-            const pdfTitle = pdfMeta.nome
-                ? `${pdfMeta.nome} (Subparcela ${pdfSubId})`
-                : `Subparcela ${pdfSubId} de ${cards.length}`;
-            addSectionHeading(pdfTitle, { newPage: true });
+                // BUGFIX: o título usava só o índice do loop ("Subparcela N de M"),
+                // ignorando o nome/código customizado que o usuário definiu para a
+                // subparcela (result.metadata.nome) - por isso nunca aparecia no
+                // PDF. Mesmo formato usado no card da tela (ver displayResults()),
+                // só que em texto puro (addSectionHeading usa pdf.text(), não HTML).
+                const pdfMeta = result?.metadata || {};
+                const pdfSubId = result?.subparcela ?? result?.subparcela_id ?? cardIdx;
+                const pdfTitle = pdfMeta.nome
+                    ? `${pdfMeta.nome} (Subparcela ${pdfSubId})`
+                    : `Subparcela ${pdfSubId} de ${cards.length}`;
+                addSectionHeading(pdfTitle, { newPage: true });
 
-            if (result) {
-                const photoCanvas = await buildSubparcelaPhotoWithPolygons(result);
-                addCanvasToPdf(photoCanvas, { fitToOnePage: true });
+                if (result) {
+                    const photoCanvas = await buildSubparcelaPhotoWithPolygons(result);
+                    addCanvasToPdf(photoCanvas, { fitToOnePage: true });
+                }
+
+                // Metadados de campo (se houver, e habilitados) + lista de
+                // espécies - mesmo trecho do card que já funcionava bem, só
+                // pulando a <img> (já coberta acima em resolução melhor)
+                if (config.include_field_metadata) {
+                    const metaEl = card.querySelector('.subparcela-metadata');
+                    if (metaEl) await addElementToPdf(metaEl);
+                }
+                const contentEl = card.querySelector('.subparcela-content');
+                if (contentEl) await addElementToPdf(contentEl);
             }
-
-            // Metadados de campo (se houver) + lista de espécies - mesmo
-            // trecho do card que já funcionava bem, só pulando a <img> (já
-            // coberta acima em resolução melhor)
-            const metaEl = card.querySelector('.subparcela-metadata');
-            if (metaEl) await addElementToPdf(metaEl);
-            const contentEl = card.querySelector('.subparcela-content');
-            if (contentEl) await addElementToPdf(contentEl);
         }
 
-        // 3. Tabela de gerenciamento de espécies (Seção 3), se visível
-        btn.textContent = '🔄 Capturando espécies...';
-        addSectionHeading('Gerenciamento de Espécies', { newPage: true });
-        await addElementToPdf(elements.speciesSection);
+        // 3. Tabela de gerenciamento de espécies (Seção 3)
+        if (config.include_species_table) {
+            btn.textContent = '🔄 Capturando espécies...';
+            addSectionHeading('Gerenciamento de Espécies', { newPage: true });
+            await addElementToPdf(elements.speciesSection);
+        }
+
+        // 3.5 Fichas detalhadas de cada espécie (PEDIDO: a "ficha de
+        // detalhes" de cada espécie - a mesma info do modal de detalhes,
+        // ver species-details-modal.js - agora entra no PDF. Construída
+        // fora da tela (mesmo padrão de buildSubparcelaPhotoWithPolygons),
+        // não é um screenshot do modal em si (que exigiria abrir/fechar um
+        // modal por espécie, lento e visualmente inconsistente) - layout
+        // próprio, pensado pra impressão.
+        if (config.include_species_sheets) {
+            const apelidos = Object.keys(appState.especies || {});
+            let sheetIdx = 0;
+            for (const apelido of apelidos) {
+                sheetIdx++;
+                btn.textContent = `🔄 Gerando ficha de espécie ${sheetIdx}/${apelidos.length}...`;
+                addSectionHeading(`Ficha da Espécie: ${apelido}`, { newPage: true });
+                const sheetCanvas = await buildSpeciesDetailSheetCanvas(apelido);
+                if (sheetCanvas) addCanvasToPdf(sheetCanvas, { fitToOnePage: true });
+            }
+        }
 
         // 4. Análises avançadas (Seção 5): TODAS as abas, não só a ativa no
         // momento do export. #tab-* são apenas mostradas/escondidas via CSS
@@ -5882,7 +6072,7 @@ async function exportToPDF() {
         // meio da animação CSS "fadeIn" (300ms) daquela aba, saindo esmaecida/
         // deslocada no PDF - por isso desligamos a animação (via inline style)
         // só durante a captura de cada aba.
-        if (elements.analyticsSection && elements.analyticsSection.style.display !== 'none') {
+        if (config.include_analytics && elements.analyticsSection && elements.analyticsSection.style.display !== 'none') {
             const tabButtons = Array.from(document.querySelectorAll('.analytics-tab'));
             if (tabButtons.length > 0) {
                 const originalActiveBtn = document.querySelector('.analytics-tab.active');

@@ -76,6 +76,12 @@ const PromptConfig = {
                             Buscar SOMENTE as espécies desta lista
                         </label>
                     </div>
+                    <!-- PEDIDO: botão de gerenciar a lista movido do rodapé do
+                         modal pra cá - fica junto de onde se decide COMO ela é
+                         usada, em vez de longe, só no rodapé. -->
+                    <button class="btn-config btn-config-primary refspecies-manage-btn" onclick="ReferenceSpeciesManager.open()" title="Gerenciar lista de espécies de referência">
+                        📖 Gerenciar Referências
+                    </button>
                 </div>
 
                 <div class="prompt-config-body">
@@ -296,9 +302,6 @@ const PromptConfig = {
                         </button>
                         <button class="btn-config btn-config-info" onclick="PromptConfig.saveTemplate()">
                             💾 Salvar como Novo Template
-                        </button>
-                        <button class="btn-config btn-config-primary" onclick="ReferenceSpeciesManager.open()" title="Gerenciar lista de espécies de referência para padronização">
-                            📚 Gerenciar Referências
                         </button>
                     </div>
                     <div class="config-actions-right">
